@@ -9,6 +9,7 @@ import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.mapper.ConversationClearMapper;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.MessageMapper;
+import com.junesoon.mim.mapper.PreKeyMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.responses.ClearResult;
@@ -25,6 +26,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
@@ -67,6 +69,12 @@ public class MessageServiceImpl implements MessageService {
     private final UserKeyMapper userKeyMapper;
     private final DeviceMapper deviceMapper;
     private final PushService pushService;
+
+    /**
+     * 可选注入：OPK 使用后需要删除预留记录。单元测试直接构造本类时可以为空。
+     */
+    @Autowired(required = false)
+    private PreKeyMapper preKeyMapper;
 
     @Value("${message.max-bytes:262144}")
     private int maxCiphertextBytes;
@@ -166,6 +174,7 @@ public class MessageServiceImpl implements MessageService {
             CipherMessage existing = messageMapper.selectByClientMsgId(authenticatedUser,
                 clientMsgId, target);
             if (existing != null) {
+                consumeOneTimePreKey(message, toUsername, target, authenticatedUser, fromDevice);
                 saved.add(existing);
                 continue;
             }
@@ -202,11 +211,13 @@ public class MessageServiceImpl implements MessageService {
                 CipherMessage duplicate = messageMapper.selectByClientMsgId(authenticatedUser,
                     clientMsgId, target);
                 if (duplicate != null) {
+                    consumeOneTimePreKey(message, toUsername, target, authenticatedUser, fromDevice);
                     saved.add(duplicate);
                     continue;
                 }
                 throw e;
             }
+            consumeOneTimePreKey(message, toUsername, target, authenticatedUser, fromDevice);
             saved.add(record);
         }
 
@@ -635,6 +646,11 @@ public class MessageServiceImpl implements MessageService {
             }
             throw e;
         }
+        if (!Boolean.TRUE.equals(record.getRecalled())) {
+            // 同步副本使用的 OPK 属于目标设备（本账号的另一台设备），
+            // 预留者是本账号当前这台同步发送设备。
+            consumeOneTimePreKey(replica, username, target, username, fromDevice);
+        }
         try {
             pushService.pushToDevice(username, target,
                 BaseNotify.of(CommonConstants.NOTIFY_TYPE_NEW_MESSAGE, record));
@@ -642,6 +658,27 @@ public class MessageServiceImpl implements MessageService {
             log.warn("历史同步推送失败：{}", e.getMessage());
         }
         return record;
+    }
+
+    /**
+     * 消息真正携带并使用了某个 OPK 后，删除它的预留记录。
+     *
+     * <p>只删除「由当前发信设备预留」的那一条：被盗 JWT 不能随便删掉
+     * 其他设备预留的 OPK。删除失败只记日志，不影响消息落库。
+     */
+    private void consumeOneTimePreKey(CipherMessage message, String toUser, String targetDevice,
+        String fromUser, String fromDevice) {
+        if (preKeyMapper == null || message == null
+            || !Boolean.TRUE.equals(message.getSenderUsedOneTimePreKey())
+            || message.getConsumedOneTimePreKeyId() == null) {
+            return;
+        }
+        try {
+            preKeyMapper.deleteClaimedOneTimePreKey(toUser, targetDevice,
+                message.getConsumedOneTimePreKeyId(), fromUser + "@" + fromDevice);
+        } catch (Exception e) {
+            log.warn("删除已使用的 OPK 失败：{}", e.getMessage());
+        }
     }
 
     private String requireOwnDevice(String username, String deviceId) {

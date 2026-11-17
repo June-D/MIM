@@ -93,7 +93,70 @@ class PreKeyServiceTest {
             if (list == null || list.isEmpty()) {
                 return null;
             }
-            return list.get(0);
+            for (OneTimePreKey preKey : list) {
+                if (preKey.getClaimedBy() == null) {
+                    return preKey;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public OneTimePreKey selectClaimedOneTimePreKey(String username, String deviceId,
+            String claimedBy) {
+            List<OneTimePreKey> list = oneTime.get(key(username, deviceId));
+            if (list == null) {
+                return null;
+            }
+            for (OneTimePreKey preKey : list) {
+                if (claimedBy.equals(preKey.getClaimedBy())) {
+                    return preKey;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public int claimOneTimePreKey(Long id, String username, String claimedBy, long claimedAt) {
+            for (List<OneTimePreKey> list : oneTime.values()) {
+                for (OneTimePreKey preKey : list) {
+                    if (preKey.getId().equals(id) && preKey.getClaimedBy() == null) {
+                        preKey.setClaimedBy(claimedBy);
+                        preKey.setClaimedAt(claimedAt);
+                        return 1;
+                    }
+                }
+            }
+            return 0;
+        }
+
+        @Override
+        public int releaseExpiredOneTimePreKeys(String username, String deviceId, long before) {
+            int released = 0;
+            List<OneTimePreKey> list = oneTime.get(key(username, deviceId));
+            if (list == null) {
+                return 0;
+            }
+            for (OneTimePreKey preKey : list) {
+                if (preKey.getClaimedBy() != null && preKey.getClaimedAt() != null
+                    && preKey.getClaimedAt() < before) {
+                    preKey.setClaimedBy(null);
+                    preKey.setClaimedAt(null);
+                    released++;
+                }
+            }
+            return released;
+        }
+
+        @Override
+        public int deleteClaimedOneTimePreKey(String username, String deviceId, int preKeyId,
+            String claimedBy) {
+            List<OneTimePreKey> list = oneTime.get(key(username, deviceId));
+            if (list == null) {
+                return 0;
+            }
+            return list.removeIf(preKey -> preKey.getPreKeyId() == preKeyId
+                && claimedBy.equals(preKey.getClaimedBy())) ? 1 : 0;
         }
 
         @Override
@@ -109,7 +172,16 @@ class PreKeyServiceTest {
         @Override
         public int countOneTimePreKeys(String username, String deviceId) {
             List<OneTimePreKey> list = oneTime.get(key(username, deviceId));
-            return list == null ? 0 : list.size();
+            if (list == null) {
+                return 0;
+            }
+            int count = 0;
+            for (OneTimePreKey preKey : list) {
+                if (preKey.getClaimedBy() == null) {
+                    count++;
+                }
+            }
+            return count;
         }
 
         @Override
@@ -313,20 +385,32 @@ class PreKeyServiceTest {
         publish(BOB, DEVICE_A, 5);
         assertEquals(5, service.countOneTimePreKeys(BOB, DEVICE_A));
 
-        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB);
+        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB, "sender@dev");
         assertEquals(1, bundles.size());
         assertTrue(bundles.get(0).hasOneTimePreKey());
         assertEquals(4, service.countOneTimePreKeys(BOB, DEVICE_A));
     }
 
     @Test
-    @DisplayName("同一个一次性预密钥不会被发放两次")
+    @DisplayName("同一个请求者重试会拿回同一把预留 OPK")
+    void sameRequesterReusesClaimedPreKey() {
+        publish(BOB, DEVICE_A, 3);
+        Integer first = service.fetchBundles(BOB, "sender@dev").get(0).getOneTimePreKeyId();
+        Integer again = service.fetchBundles(BOB, "sender@dev").get(0).getOneTimePreKeyId();
+        assertNotNull(first);
+        assertEquals(first, again, "同一次发送的重试不能重复消耗 OPK");
+        assertEquals(2, service.countOneTimePreKeys(BOB, DEVICE_A),
+            "只有一个 OPK 被预留，仍有两个可用");
+    }
+
+    @Test
+    @DisplayName("不同请求者不会拿到同一个一次性预密钥")
     void oneTimePreKeyNeverReused() {
         publish(BOB, DEVICE_A, 3);
-        Integer first = service.fetchBundles(BOB).get(0).getOneTimePreKeyId();
-        Integer second = service.fetchBundles(BOB).get(0).getOneTimePreKeyId();
-        Integer third = service.fetchBundles(BOB).get(0).getOneTimePreKeyId();
-        Integer fourth = service.fetchBundles(BOB).get(0).getOneTimePreKeyId();
+        Integer first = service.fetchBundles(BOB, "s1@dev").get(0).getOneTimePreKeyId();
+        Integer second = service.fetchBundles(BOB, "s2@dev").get(0).getOneTimePreKeyId();
+        Integer third = service.fetchBundles(BOB, "s3@dev").get(0).getOneTimePreKeyId();
+        Integer fourth = service.fetchBundles(BOB, "s4@dev").get(0).getOneTimePreKeyId();
 
         assertNotNull(first);
         assertNotNull(second);
@@ -341,7 +425,7 @@ class PreKeyServiceTest {
     @DisplayName("一次性预密钥耗尽后仍能拿到签名预密钥（省略 DH4）")
     void bundleStillAvailableWithoutOneTimePreKey() {
         publish(BOB, DEVICE_A, 0);
-        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB);
+        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB, "sender@dev");
         assertEquals(1, bundles.size());
         assertNotNull(bundles.get(0).getSignedPreKeyPublic());
         assertFalse(bundles.get(0).hasOneTimePreKey());
@@ -365,7 +449,7 @@ class PreKeyServiceTest {
         publish(BOB, DEVICE_A, 3);
         publish(BOB, DEVICE_B, 3);
 
-        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB);
+        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB, "sender@dev");
         assertEquals(2, bundles.size(), "两个设备应返回两个包");
 
         java.util.Set<String> devices = new java.util.HashSet<>();
@@ -392,7 +476,7 @@ class PreKeyServiceTest {
         publish(BOB, DEVICE_A, 3);
         // DEVICE_B 只注册设备，不发布预密钥
 
-        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB);
+        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB, "sender@dev");
         assertEquals(1, bundles.size());
         assertEquals(DEVICE_A, bundles.get(0).getDeviceId());
     }
@@ -403,10 +487,10 @@ class PreKeyServiceTest {
         registerDevice(BOB, DEVICE_B);
         publish(BOB, DEVICE_A, 3);
         publish(BOB, DEVICE_B, 3);
-        assertEquals(2, service.fetchBundles(BOB).size());
+        assertEquals(2, service.fetchBundles(BOB, "sender@dev").size());
 
         deviceMapper.revoke(BOB, DEVICE_B);
-        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB);
+        List<PreKeyService.PreKeyBundle> bundles = service.fetchBundles(BOB, "sender@dev");
         assertEquals(1, bundles.size());
         assertEquals(DEVICE_A, bundles.get(0).getDeviceId());
     }
@@ -415,7 +499,7 @@ class PreKeyServiceTest {
     @DisplayName("没有任何设备的用户无法被拉取")
     void noDeviceRejected() {
         UserInvalidException ex = assertThrows(UserInvalidException.class,
-            () -> service.fetchBundles("nobody"));
+            () -> service.fetchBundles("nobody", "sender@dev"));
         assertTrue(ex.getMessage().contains("尚未注册任何设备"));
     }
 

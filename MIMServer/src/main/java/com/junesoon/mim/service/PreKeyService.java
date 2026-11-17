@@ -28,14 +28,17 @@ public interface PreKeyService {
      * 取某用户<b>所有有效设备</b>的预密钥包。
      *
      * <p>多设备下发起方必须为每个设备各建一个会话，因此这里返回列表。
-     * 每个包会各自消耗目标设备的一个一次性预密钥。
+     * 每台设备的一个一次性预密钥会<b>预留</b>给 requester；只有消息真正
+     * 使用后才删除，未使用会在 TTL 后释放。
+     *
+     * @param requester 请求者标识，形如 {@code username@deviceId}
      */
-    List<PreKeyBundle> fetchBundles(String username);
+    List<PreKeyBundle> fetchBundles(String username, String requester);
 
     /**
-     * 只取一台设备的预密钥包，避免为了同步历史把该用户其他设备的一次性预密钥也消耗掉。
+     * 只取一台设备的预密钥包。
      */
-    PreKeyBundle fetchBundle(String username, String deviceId);
+    PreKeyBundle fetchBundle(String username, String deviceId, String requester);
 
     /**
      * 本设备剩余可用的一次性预密钥数量。

@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS `t_signed_prekey` (
   ROW_FORMAT = Dynamic COMMENT = '设备签名预密钥';
 
 -- ------------------------------------------------------------
--- 一次性预密钥（按设备，领取即删除）
+-- 一次性预密钥（按设备）。先按请求者预留，消息真正使用后再删除；
+-- 预留超时会被释放，避免领取后不发送导致密钥永久浪费。
 -- ------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `t_one_time_prekey` (
     `id`          bigint       NOT NULL AUTO_INCREMENT COMMENT '自增主键',
@@ -77,9 +78,12 @@ CREATE TABLE IF NOT EXISTS `t_one_time_prekey` (
     `pre_key_id`  int          NOT NULL COMMENT '预密钥编号',
     `public_key`  text         CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'Base64(X.509) EC P-256 公钥',
     `crt_time`    bigint       NOT NULL COMMENT '创建时间（毫秒）',
+    `claimed_by`  varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '预留该 OPK 的请求者（username@deviceId）',
+    `claimed_at`  bigint       NULL DEFAULT NULL COMMENT '预留时间（毫秒）',
     PRIMARY KEY (`id`) USING BTREE,
     UNIQUE INDEX `uk_device_prekey` (`username`, `device_id`, `pre_key_id`) USING BTREE,
-    INDEX `idx_device` (`username`, `device_id`, `id`) USING BTREE
+    INDEX `idx_device` (`username`, `device_id`, `id`) USING BTREE,
+    INDEX `idx_claim` (`username`, `device_id`, `claimed_by`, `id`) USING BTREE
 ) ENGINE = InnoDB
   CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_general_ci

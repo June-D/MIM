@@ -37,6 +37,12 @@ public class PreKeyServiceImpl implements PreKeyService {
     private static final int MIN_PUBLIC_KEY_BYTES = 32;
     private static final int MIN_SIGNATURE_BYTES = 32;
 
+    /**
+     * 预留 OPK 的超时时间。发送方领取后应在秒级内发送；超时未用则释放，
+     * 避免“领取后不发送”把对方的密钥永久占住。
+     */
+    private static final long CLAIM_TTL_MS = 10L * 60 * 1000;
+
     private final PreKeyMapper preKeyMapper;
     private final UserKeyMapper userKeyMapper;
     private final DeviceMapper deviceMapper;
@@ -125,7 +131,7 @@ public class PreKeyServiceImpl implements PreKeyService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public List<PreKeyBundle> fetchBundles(String username) {
+    public List<PreKeyBundle> fetchBundles(String username, String requester) {
         ValidationUtil.validateUsername(username);
 
         List<Device> devices = deviceMapper.selectActiveDevices(username);
@@ -135,7 +141,7 @@ public class PreKeyServiceImpl implements PreKeyService {
 
         List<PreKeyBundle> bundles = new ArrayList<>(devices.size());
         for (Device device : devices) {
-            PreKeyBundle bundle = buildBundle(username, device.getDeviceId());
+            PreKeyBundle bundle = buildBundle(username, device.getDeviceId(), requester);
             if (bundle == null) {
                 log.debug("用户 {} 设备 {} 尚未发布预密钥，跳过", username, device.getDeviceId());
                 continue;
@@ -151,10 +157,10 @@ public class PreKeyServiceImpl implements PreKeyService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public PreKeyBundle fetchBundle(String username, String deviceId) {
+    public PreKeyBundle fetchBundle(String username, String deviceId, String requester) {
         ValidationUtil.validateUsername(username);
         String device = requireDevice(username, deviceId);
-        PreKeyBundle bundle = buildBundle(username, device);
+        PreKeyBundle bundle = buildBundle(username, device, requester);
         if (bundle == null) {
             throw new UserInvalidException("该设备尚未发布预密钥");
         }
@@ -162,26 +168,45 @@ public class PreKeyServiceImpl implements PreKeyService {
     }
 
     /**
-     * 组装一台设备的预密钥包，并消耗它的一个一次性预密钥。没有签名预密钥时返回 null。
+     * 组装一台设备的预密钥包，并把一个 OPK 预留給请求者。
+     *
+     * <p>不再在领取时删除：消息真正使用 OPK 后由消息服务删除；同一请求者重试
+     * 会拿回同一把，避免重复消耗；超过 TTL 未使用的预留会被释放。
      */
-    private PreKeyBundle buildBundle(String username, String deviceId) {
+    private PreKeyBundle buildBundle(String username, String deviceId, String requester) {
         SignedPreKey signed = preKeyMapper.selectSignedPreKey(username, deviceId);
         UserKey identity = userKeyMapper.selectByDevice(username, deviceId);
         if (signed == null || identity == null) {
             return null;
         }
-        OneTimePreKey oneTime = preKeyMapper.selectOneTimePreKeyForUpdate(username, deviceId);
-        Integer oneTimeId = null;
-        String oneTimePublic = null;
-        if (oneTime != null) {
-            preKeyMapper.deleteOneTimePreKey(oneTime.getId(), username);
-            oneTimeId = oneTime.getPreKeyId();
-            oneTimePublic = oneTime.getPublicKey();
-        } else {
+
+        OneTimePreKey oneTime = null;
+        if (StringUtils.hasText(requester)) {
+            // 同一请求者的重试：复用已经预留的 OPK
+            oneTime = preKeyMapper.selectClaimedOneTimePreKey(username, deviceId, requester);
+        }
+        if (oneTime == null && StringUtils.hasText(requester)) {
+            long now = System.currentTimeMillis();
+            preKeyMapper.releaseExpiredOneTimePreKeys(username, deviceId, now - CLAIM_TTL_MS);
+            // 并发下可能被别人抢走，最多重试几次
+            for (int attempt = 0; attempt < 3 && oneTime == null; attempt++) {
+                OneTimePreKey candidate =
+                    preKeyMapper.selectOneTimePreKeyForUpdate(username, deviceId);
+                if (candidate == null) {
+                    break;
+                }
+                if (preKeyMapper.claimOneTimePreKey(candidate.getId(), username, requester, now) > 0) {
+                    oneTime = candidate;
+                }
+            }
+        }
+        if (oneTime == null) {
             log.debug("用户 {} 设备 {} 一次性预密钥已耗尽，本次会话将省略 DH4", username, deviceId);
         }
         return new PreKeyBundle(username, deviceId, identity.getPublicKey(), identity.getVersion(),
-            signed.getPreKeyId(), signed.getPublicKey(), signed.getSignature(), oneTimeId, oneTimePublic);
+            signed.getPreKeyId(), signed.getPublicKey(), signed.getSignature(),
+            oneTime == null ? null : oneTime.getPreKeyId(),
+            oneTime == null ? null : oneTime.getPublicKey());
     }
 
     @Override

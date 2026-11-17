@@ -85,9 +85,11 @@ public class PreKeyController {
     @GetMapping("/{username}")
     @RateLimit(limit = 60, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
     public ObjectRestResponse<List<PreKeyService.PreKeyBundle>> fetch(
-        @CurrentUser String self, @PathVariable String username,
+        @CurrentUser String self, @CurrentDevice String requesterDevice,
+        @PathVariable String username,
         @RequestParam(value = "deviceId", required = false) String deviceId) {
         List<PreKeyService.PreKeyBundle> bundles;
+        String requester = self + "@" + requesterDevice;
         // 同一个请求者对同一个目标 10 分钟最多 20 次领取。足够覆盖目标有多台设备，
         // 但能显著抬高「用脚本换着账号把对方 OPK 抽干」的成本。
         rateLimiter.tryAcquire("prekey-pair:" + self + ":" + username, "/prekey/pair", 20, 600);
@@ -96,9 +98,9 @@ public class PreKeyController {
         rateLimiter.tryAcquire("prekey-target:" + username, "/prekey/target", 20, 60);
         if (StringUtils.hasText(deviceId)) {
             bundles = java.util.Collections.singletonList(
-                preKeyService.fetchBundle(username, deviceId));
+                preKeyService.fetchBundle(username, deviceId, requester));
         } else {
-            bundles = preKeyService.fetchBundles(username);
+            bundles = preKeyService.fetchBundles(username, requester);
         }
         return new ObjectRestResponse<List<PreKeyService.PreKeyBundle>>()
             .data(bundles)

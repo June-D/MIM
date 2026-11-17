@@ -19,6 +19,8 @@
         <result column="pre_key_id" jdbcType="INTEGER" property="preKeyId"/>
         <result column="public_key" jdbcType="LONGVARCHAR" property="publicKey"/>
         <result column="crt_time" jdbcType="BIGINT" property="crtTime"/>
+        <result column="claimed_by" jdbcType="VARCHAR" property="claimedBy"/>
+        <result column="claimed_at" jdbcType="BIGINT" property="claimedAt"/>
     </resultMap>
 
     <!-- ==================== 签名预密钥 ==================== -->
@@ -65,18 +67,56 @@
     </insert>
 
     <!--
-      领取该设备的一个一次性预密钥。FOR UPDATE 与后续 DELETE 在同一事务内，
-      保证并发请求不会拿到同一个 OPK。
+      领取该设备一个未被预留的一次性预密钥。FOR UPDATE 保证并发请求不会拿到同一个。
     -->
     <select id="selectOneTimePreKeyForUpdate" resultMap="OneTimePreKeyMap">
-        select id, username, device_id, pre_key_id, public_key, crt_time
+        select id, username, device_id, pre_key_id, public_key, crt_time, claimed_by, claimed_at
         from t_one_time_prekey
         where username = #{username,jdbcType=VARCHAR}
           and device_id = #{deviceId,jdbcType=VARCHAR}
+          and claimed_by is null
         order by id asc
         limit 1
         for update
     </select>
+
+    <select id="selectClaimedOneTimePreKey" resultMap="OneTimePreKeyMap">
+        select id, username, device_id, pre_key_id, public_key, crt_time, claimed_by, claimed_at
+        from t_one_time_prekey
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+          and claimed_by = #{claimedBy,jdbcType=VARCHAR}
+        order by id asc
+        limit 1
+    </select>
+
+    <update id="claimOneTimePreKey">
+        update t_one_time_prekey
+        set claimed_by = #{claimedBy,jdbcType=VARCHAR},
+            claimed_at = #{claimedAt,jdbcType=BIGINT}
+        where id = #{id,jdbcType=BIGINT}
+          and username = #{username,jdbcType=VARCHAR}
+          and claimed_by is null
+    </update>
+
+    <update id="releaseExpiredOneTimePreKeys">
+        update t_one_time_prekey
+        set claimed_by = null,
+            claimed_at = null
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+          and claimed_by is not null
+          and claimed_at is not null
+          and claimed_at &lt; #{before,jdbcType=BIGINT}
+    </update>
+
+    <delete id="deleteClaimedOneTimePreKey">
+        delete from t_one_time_prekey
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+          and pre_key_id = #{preKeyId,jdbcType=INTEGER}
+          and claimed_by = #{claimedBy,jdbcType=VARCHAR}
+    </delete>
 
     <delete id="deleteOneTimePreKey">
         delete from t_one_time_prekey
@@ -89,6 +129,7 @@
         from t_one_time_prekey
         where username = #{username,jdbcType=VARCHAR}
           and device_id = #{deviceId,jdbcType=VARCHAR}
+          and claimed_by is null
     </select>
 
     <delete id="deleteAllOneTimePreKeys">

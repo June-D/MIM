@@ -27,10 +27,35 @@ public interface PreKeyMapper {
     int batchInsertOneTimePreKeys(@Param("keys") List<OneTimePreKey> keys);
 
     /**
-     * 领取并删除一个一次性预密钥（事务内配合 FOR UPDATE）。
+     * 领取该设备一个<b>未被预留</b>的一次性预密钥（事务内配合 FOR UPDATE）。
      */
     OneTimePreKey selectOneTimePreKeyForUpdate(@Param("username") String username,
         @Param("deviceId") String deviceId);
+
+    /**
+     * 同一请求者重试时，取回之前预留的 OPK，避免重复消耗。
+     */
+    OneTimePreKey selectClaimedOneTimePreKey(@Param("username") String username,
+        @Param("deviceId") String deviceId, @Param("claimedBy") String claimedBy);
+
+    /**
+     * 把 OPK 预留給请求者。
+     */
+    int claimOneTimePreKey(@Param("id") Long id, @Param("username") String username,
+        @Param("claimedBy") String claimedBy, @Param("claimedAt") long claimedAt);
+
+    /**
+     * 释放超时未使用的预留。
+     */
+    int releaseExpiredOneTimePreKeys(@Param("username") String username,
+        @Param("deviceId") String deviceId, @Param("before") long before);
+
+    /**
+     * 消息真正使用 OPK 后删除；只允许预留者本人删除。
+     */
+    int deleteClaimedOneTimePreKey(@Param("username") String username,
+        @Param("deviceId") String deviceId, @Param("preKeyId") int preKeyId,
+        @Param("claimedBy") String claimedBy);
 
     int deleteOneTimePreKey(@Param("id") Long id, @Param("username") String username);
 

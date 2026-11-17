@@ -27,4 +27,15 @@ public class OneTimePreKey implements Serializable {
     private String publicKey;
 
     private Long crtTime;
+
+    /**
+     * 预留该 OPK 的请求者（形如 {@code username@deviceId}）。
+     * 只有同一个请求者重试时才会再次拿到它；消息真正使用后再删除。
+     */
+    private String claimedBy;
+
+    /**
+     * 预留时间（毫秒）。超过 TTL 未使用会被释放，供其他请求者领取。
+     */
+    private Long claimedAt;
 }
