@@ -10,6 +10,8 @@ import org.aspectj.lang.annotation.Aspect;
 import org.aspectj.lang.reflect.MethodSignature;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.web.servlet.HandlerMapping;
 import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
@@ -26,6 +28,15 @@ public class RateLimitAspect {
 
     private final RateLimiter rateLimiter;
     private final UserAuthUtil userAuthUtil;
+
+    /**
+     * 是否信任 X-Forwarded-For / X-Real-IP。
+     *
+     * <p>默认 false。只有部署在可信反向代理后面、且代理会覆盖客户端自带的
+     * 转发头时才能开启；否则任何人换一个头就能绕过登录/注册的 IP 限流。
+     */
+    @Value("${mim.rate-limit.trust-forwarded-headers:false}")
+    private boolean trustForwardedHeaders;
 
     public RateLimitAspect(RateLimiter rateLimiter, UserAuthUtil userAuthUtil) {
         this.rateLimiter = rateLimiter;
@@ -99,8 +110,16 @@ public class RateLimitAspect {
 
     private String requestPath(ProceedingJoinPoint joinPoint) {
         HttpServletRequest request = currentRequest();
-        if (request != null && request.getRequestURI() != null) {
-            return request.getRequestURI();
+        if (request != null) {
+            // 使用路由模板而不是原始 URI：/message/recall/{id} 必须共用一个计数桶，
+            // 否则攻击者每次换一个 id 就等于换了一份额度。
+            Object pattern = request.getAttribute(HandlerMapping.BEST_MATCHING_PATTERN_ATTRIBUTE);
+            if (pattern instanceof String && StringUtils.hasText((String) pattern)) {
+                return (String) pattern;
+            }
+            if (request.getRequestURI() != null) {
+                return request.getRequestURI();
+            }
         }
         // 无法取得请求时按方法名区分，保证不同接口仍有独立额度
         return joinPoint.getSignature().getName();
@@ -118,6 +137,9 @@ public class RateLimitAspect {
         HttpServletRequest request = currentRequest();
         if (request == null) {
             return "unknown";
+        }
+        if (!trustForwardedHeaders) {
+            return request.getRemoteAddr();
         }
         String forwarded = request.getHeader("X-Forwarded-For");
         if (StringUtils.hasText(forwarded)) {

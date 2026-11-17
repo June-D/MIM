@@ -5,15 +5,18 @@ import com.junesoon.mim.components.Request;
 import com.junesoon.mim.crypto.DhKeyUtil;
 import com.junesoon.mim.crypto.IdentityException;
 import com.junesoon.mim.crypto.IdentityStore;
+import com.junesoon.mim.crypto.PreKeyUnavailableException;
 import com.junesoon.mim.crypto.PreKeyStore;
 import com.junesoon.mim.crypto.TrustChangedException;
 import com.junesoon.mim.crypto.TrustStore;
+import com.junesoon.mim.feign.KeyFeign;
 import com.junesoon.mim.feign.PreKeyFeign;
+import com.junesoon.mim.model.KeyBundle;
 import com.junesoon.mim.model.OneTimePreKeyUpload;
 import com.junesoon.mim.model.PreKeyBundle;
 import com.junesoon.mim.model.SignedPreKeyUpload;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
@@ -142,21 +145,71 @@ public class PreKeyManager {
     }
 
     /**
-     * 拉取对方<b>所有有效设备</b>的预密钥包，逐个验签。
+     * 拉取对方<b>所有有效设备</b>的身份公钥，并完成 TOFU 校验。
      *
-     * @return 每个设备一个包；某个设备验签失败会整体抛异常（不应静默跳过，
-     *         因为那可能正是攻击者想让我们"忽略"的设备）
+     * <p>这个接口<b>不消耗一次性预密钥</b>：先确定对方有哪些设备，
+     * 再只对「本地还没有会话」的设备领取预密钥包。以前每条消息都领取全部设备的包，
+     * 会导致对方的 OPK 被无谓耗尽。
+     *
+     * <p>首次见到该用户时会一次性固定其全部设备；已固定用户新增设备时抛
+     * {@link TrustChangedException}，由用户确认后再继续。
      */
-    public List<PreKeyBundle> fetchVerifiedBundles(String peer) throws IdentityException {
-        return fetchVerifiedBundles(peer, currentPassword());
+    public List<KeyBundle> fetchVerifiedDevices(String peer) throws IdentityException {
+        return fetchVerifiedDevices(peer, currentPassword());
     }
 
-    private List<PreKeyBundle> fetchVerifiedBundles(String peer, String password)
+    private List<KeyBundle> fetchVerifiedDevices(String peer, String password)
         throws IdentityException {
+        List<KeyBundle> keys;
+        try {
+            ObjectRestResponse<List<KeyBundle>> response =
+                Request.connector(KeyFeign.class).getDevices(peer);
+            if (response == null || response.getStatus() != 200) {
+                String error = response == null ? "服务端无响应" : response.getMessage();
+                throw new IdentityException(error == null ? "获取对方设备列表失败" : error);
+            }
+            keys = response.getData();
+        } catch (IdentityException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IdentityException("获取对方设备列表失败：" + e.getMessage());
+        }
+        if (keys == null || keys.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+
+        Map<String, String> deviceKeys = new LinkedHashMap<>();
+        for (KeyBundle key : keys) {
+            if (key == null || key.getDeviceId() == null || key.getDeviceId().isEmpty()
+                || key.getPublicKey() == null || key.getPublicKey().isEmpty()) {
+                throw new IdentityException("服务端返回了不完整的设备公钥");
+            }
+            try {
+                java.util.Base64.getDecoder().decode(key.getPublicKey());
+            } catch (IllegalArgumentException e) {
+                throw new IdentityException("服务端返回了非法的设备公钥");
+            }
+            deviceKeys.put(key.getDeviceId(), key.getPublicKey());
+        }
+
+        List<TrustStore.VerificationResult> results =
+            keyManager.getTrustStore().verifyAll(peer, deviceKeys, password);
+        throwIfUntrusted(peer, results);
+        return keys;
+    }
+
+    /**
+     * 只为指定设备领取预密钥包，并在使用前验证签名与信任状态。
+     *
+     * <p>顺序很重要：<b>先验签，再进入信任库</b>。旧实现先把公钥固定下来再验签，
+     * 攻击者可以用一个签名错误的包污染信任库，让真实公钥此后永远显示 CHANGED。
+     */
+    public PreKeyBundle fetchVerifiedBundle(String peer, String deviceId) throws IdentityException {
+        String password = currentPassword();
         List<PreKeyBundle> bundles;
         try {
             ObjectRestResponse<List<PreKeyBundle>> response =
-                Request.connector(PreKeyFeign.class).fetch(peer);
+                Request.connector(PreKeyFeign.class).fetchDevice(peer, deviceId);
             if (response == null || response.getStatus() != 200) {
                 String error = response == null ? "服务端无响应" : response.getMessage();
                 throw new IdentityException(error == null ? "获取预密钥包失败" : error);
@@ -168,37 +221,42 @@ public class PreKeyManager {
             throw new IdentityException("获取预密钥包失败：" + e.getMessage());
         }
         if (bundles == null || bundles.isEmpty()) {
-            return Collections.emptyList();
+            throw new PreKeyUnavailableException(
+                "对方设备 " + deviceId + " 尚未发布预密钥，已跳过该设备");
+        }
+        PreKeyBundle bundle = bundles.get(0);
+        if (bundle == null || bundle.getIdentityPublicKey() == null) {
+            throw new PreKeyUnavailableException(
+                "对方设备 " + deviceId + " 的预密钥包不完整，已跳过该设备");
         }
 
-        TrustStore trustStore = keyManager.getTrustStore();
-        for (PreKeyBundle bundle : bundles) {
-            // TOFU 校验设备身份公钥
-            TrustStore.VerificationResult trust = trustStore.verify(peer,
-                bundle.getIdentityPublicKey(), password);
-            if (!trust.isSendable()) {
-                // 公钥变更：抛专用异常，让界面提供「核对后接受」的出口。
-                // 若只抛一般错误，用户点掉弹窗后永久发不出消息。
-                throw new TrustChangedException(peer, trust.getPreviousFingerprint(),
-                    trust.getCurrentFingerprint(), bundle.getIdentityPublicKey(),
-                    trust.describe());
-            }
-            // 用已固定的身份公钥验证签名预密钥签名
-            boolean valid = DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
-                bundle.getSignedPreKeyId(), bundle.getSignedPreKeyPublic(),
-                bundle.getSignedPreKeySignature());
-            if (!valid) {
-                throw new IdentityException("对方设备 " + bundle.getDeviceId()
-                    + " 的预密钥签名验证失败，可能遭到中间人攻击，已中止");
-            }
-            log.debug("用户 {} 设备 {} 预密钥包验签通过，OPK={}", peer, bundle.getDeviceId(),
-                bundle.hasOneTimePreKey() ? bundle.getOneTimePreKeyId() : "无");
+        // 1. 先用包里声明的身份公钥验签，确认包本身自洽
+        if (!DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
+            bundle.getSignedPreKeyId(), bundle.getSignedPreKeyPublic(),
+            bundle.getSignedPreKeySignature())) {
+            throw new IdentityException("对方设备 " + deviceId
+                + " 的预密钥签名验证失败，可能遭到中间人攻击，已中止");
         }
-        return bundles;
+
+        // 2. 再与本地固定值比对；首次接触在这里固定
+        TrustStore.VerificationResult trust = keyManager.getTrustStore()
+            .verify(peer, deviceId, bundle.getIdentityPublicKey(), password);
+        if (!trust.isSendable()) {
+            throw toTrustChanged(peer, trust);
+        }
+        if (!trust.getPublicKey().equals(bundle.getIdentityPublicKey())) {
+            throw new IdentityException("对方设备 " + deviceId + " 的身份公钥不一致，已中止");
+        }
+        return bundle;
     }
 
     /**
-     * 领取本账号某一台设备的预密钥包。只验签名，不把这把公钥记到账号名的信任库里。
+     * 领取本账号某一台设备的预密钥包。
+     *
+     * <p>这里只做<b>包内自洽性</b>验签，不代表已经信任这台设备。历史同步必须先
+     * 用 {@link com.junesoon.mim.crypto.OwnDeviceTrust} 判断是否已授权；
+     * 未授权时向用户展示指纹，确认后再调用 {@link #verifyOwnDeviceBundle} 按
+     * 已固定公钥复核，最后才允许转发明文。
      */
     public PreKeyBundle fetchOwnDevice(String deviceId) throws IdentityException {
         if (selfUsername == null) {
@@ -222,13 +280,38 @@ public class PreKeyManager {
             throw new IdentityException("本账号的设备 " + deviceId + " 还没有预密钥");
         }
         PreKeyBundle bundle = bundles.get(0);
-        boolean valid = DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
+        if (bundle == null || bundle.getIdentityPublicKey() == null) {
+            throw new IdentityException("本账号设备 " + deviceId + " 的预密钥包不完整");
+        }
+        if (!DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
             bundle.getSignedPreKeyId(), bundle.getSignedPreKeyPublic(),
-            bundle.getSignedPreKeySignature());
-        if (!valid) {
+            bundle.getSignedPreKeySignature())) {
             throw new IdentityException("本账号设备 " + deviceId + " 的预密钥签名验证失败");
         }
         return bundle;
+    }
+
+    /**
+     * 用本机已授权的设备公钥复核一个预密钥包。历史同步在真正加密前必须调用。
+     */
+    public void verifyOwnDeviceBundle(PreKeyBundle bundle) throws IdentityException {
+        if (bundle == null || bundle.getDeviceId() == null) {
+            throw new IdentityException("目标设备信息不完整");
+        }
+        String pinned = keyManager.getOwnDeviceTrust().getPinned(bundle.getDeviceId());
+        if (pinned == null) {
+            throw new IdentityException("本账号设备 " + bundle.getDeviceId()
+                + " 尚未获得本机授权，拒绝转发历史");
+        }
+        if (!pinned.equals(bundle.getIdentityPublicKey())) {
+            throw new IdentityException("本账号设备 " + bundle.getDeviceId()
+                + " 的身份公钥发生变化，拒绝转发历史");
+        }
+        if (!DhKeyUtil.verifySignedPreKey(pinned, bundle.getSignedPreKeyId(),
+            bundle.getSignedPreKeyPublic(), bundle.getSignedPreKeySignature())) {
+            throw new IdentityException("本账号设备 " + bundle.getDeviceId()
+                + " 的预密钥签名验证失败，拒绝转发历史");
+        }
     }
 
     public PreKeyStore getPreKeyStore() {
@@ -236,15 +319,50 @@ public class PreKeyManager {
     }
 
     /**
-     * 用户在核对指纹后确认接受对方的新身份公钥。
+     * 用户核对指纹后确认接受对方一组设备的新公钥。
      *
      * <p>这是 TOFU 的必要出口：安全机制负责<b>告警</b>，
      * 最终判断「是不是真的换了设备」只能由人通过其他可信渠道完成。
      */
-    public void acceptTrustChange(String peer, String newPublicKey) throws IdentityException {
+    public void acceptTrustChanges(TrustChangedException exception) throws IdentityException {
         String password = currentPassword();
-        keyManager.getTrustStore().acceptChange(peer, newPublicKey, password);
-        log.warn("用户确认接受 {} 的新身份公钥，后续发送将使用该密钥", peer);
+        Map<String, String> updates = new LinkedHashMap<>();
+        for (TrustChangedException.Issue issue : exception.getIssues()) {
+            updates.put(issue.getDeviceId(), issue.getNewPublicKey());
+        }
+        keyManager.getTrustStore().acceptDevices(exception.getPeer(), updates, password);
+        log.warn("用户确认接受 {} 的 {} 台设备", exception.getPeer(), updates.size());
+    }
+
+    private void throwIfUntrusted(String peer, List<TrustStore.VerificationResult> results)
+        throws TrustChangedException {
+        List<TrustChangedException.Issue> issues = new ArrayList<>();
+        for (TrustStore.VerificationResult result : results) {
+            if (!result.isSendable()) {
+                issues.add(new TrustChangedException.Issue(result.getDeviceId(),
+                    result.getStatus() == TrustStore.TrustStatus.NEW_DEVICE
+                        ? TrustChangedException.Reason.NEW_DEVICE
+                        : TrustChangedException.Reason.KEY_CHANGED,
+                    result.getPreviousFingerprint(), result.getCurrentFingerprint(),
+                    result.getPublicKey()));
+            }
+        }
+        if (!issues.isEmpty()) {
+            throw new TrustChangedException(peer, issues,
+                "对方设备身份需要确认：共 " + issues.size() + " 台设备");
+        }
+    }
+
+    private TrustChangedException toTrustChanged(String peer, TrustStore.VerificationResult result) {
+        TrustChangedException.Reason reason =
+            result.getStatus() == TrustStore.TrustStatus.NEW_DEVICE
+                ? TrustChangedException.Reason.NEW_DEVICE
+                : TrustChangedException.Reason.KEY_CHANGED;
+        List<TrustChangedException.Issue> issues = new ArrayList<>(1);
+        issues.add(new TrustChangedException.Issue(result.getDeviceId(), reason,
+            result.getPreviousFingerprint(), result.getCurrentFingerprint(),
+            result.getPublicKey()));
+        return new TrustChangedException(peer, issues, result.describe());
     }
 
     public void reset() {

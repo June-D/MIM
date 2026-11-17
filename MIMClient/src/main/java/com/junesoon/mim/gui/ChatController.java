@@ -187,26 +187,31 @@ public class ChatController {
             return;
         }
         TrustStore trustStore = KeyManager.getInstance().getTrustStore();
-        String pinned = trustStore.getPinned(chatUser.getUsername());
-        if (pinned == null) {
+        java.util.Map<String, String> pinned =
+            trustStore.getPinnedDevices(chatUser.getUsername());
+        if (pinned.isEmpty()) {
             // 还没建立过加密会话：先解释原因，再告诉用户怎么让它出现
             AlertUtil.show("尚无安全码",
                 "还没有与 " + chatUser.displayName() + " 建立过加密会话。\n\n"
                     + "发送第一条消息后，对方公钥会被固定在本机，届时可以核对安全码。");
             return;
         }
-        String fingerprint;
-        try {
-            fingerprint = Hkdf.sha256Hex(java.util.Base64.getDecoder().decode(pinned));
-        } catch (IllegalArgumentException e) {
-            log.warn("已固定公钥格式异常：{}", e.getMessage());
-            AlertUtil.show("无法核对", "本机保存的对方公钥已损坏，请重新建立会话。");
-            return;
+        StringBuilder body = new StringBuilder("请逐台核对以下设备的安全码：\n\n");
+        for (java.util.Map.Entry<String, String> entry : pinned.entrySet()) {
+            String fingerprint;
+            try {
+                fingerprint = Hkdf.sha256Hex(
+                    java.util.Base64.getDecoder().decode(entry.getValue()));
+            } catch (IllegalArgumentException e) {
+                log.warn("已固定公钥格式异常：{}", e.getMessage());
+                continue;
+            }
+            body.append("设备 ").append(entry.getKey()).append('\n')
+                .append(TrustStore.shortFingerprint(fingerprint)).append("\n\n");
         }
-        AlertUtil.show("与 " + chatUser.displayName() + " 的安全码",
-            "安全码：\n\n" + TrustStore.shortFingerprint(fingerprint)
-                + "\n\n请通过面对面或电话等其他渠道与对方核对。\n"
-                + "两边一致说明没有中间人；不一致请立即停止沟通。");
+        body.append("请通过面对面或电话等其他渠道与对方核对。\n")
+            .append("任何一台设备的指纹不一致，都应立即停止沟通。");
+        AlertUtil.show("与 " + chatUser.displayName() + " 的安全码", body.toString());
     }
 
     // ==================== 初始化 ====================
@@ -634,14 +639,27 @@ public class ChatController {
     private void confirmTrustChange(TrustChangedException e, String pendingContent) {
         javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
             javafx.scene.control.Alert.AlertType.WARNING);
-        alert.setTitle("对方公钥已变更");
-        alert.setHeaderText("⚠ " + e.getPeer() + " 的身份公钥与本机记录不一致");
-        alert.setContentText(
-            "原指纹：" + TrustStore.shortFingerprint(e.getPreviousFingerprint())
-                + "\n新指纹：" + TrustStore.shortFingerprint(e.getCurrentFingerprint())
-                + "\n\n这可能是对方换了设备，也可能是中间人攻击。"
-                + "\n请通过面对面或电话等其他渠道与对方核对上方「新指纹」。"
-                + "\n核对一致再点「确认并发送」，否则请点「取消」。");
+        alert.setTitle("对方设备身份需要确认");
+        alert.setHeaderText("⚠ " + e.getPeer() + " 的设备身份与本机记录不一致");
+
+        StringBuilder details = new StringBuilder();
+        for (TrustChangedException.Issue issue : e.getIssues()) {
+            if (issue.getReason() == TrustChangedException.Reason.NEW_DEVICE) {
+                details.append("新增设备：").append(issue.getDeviceId()).append('\n');
+            } else {
+                details.append("设备换钥：").append(issue.getDeviceId()).append('\n');
+                details.append("原指纹：")
+                    .append(TrustStore.shortFingerprint(issue.getPreviousFingerprint()))
+                    .append('\n');
+            }
+            details.append("新指纹：")
+                .append(TrustStore.shortFingerprint(issue.getCurrentFingerprint()))
+                .append("\n\n");
+        }
+        details.append("这可能是对方换了设备，也可能是中间人攻击。")
+            .append("\n请通过面对面或电话等其他渠道与对方逐台核对上方「新指纹」。")
+            .append("\n核对一致再点「确认并发送」，否则请点「取消」。");
+        alert.setContentText(details.toString());
 
         javafx.scene.control.ButtonType accept = new javafx.scene.control.ButtonType(
             "确认并发送", javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
@@ -656,8 +674,7 @@ public class ChatController {
             setSending(true);
             new Thread(() -> {
                 try {
-                    PreKeyManager.getInstance().acceptTrustChange(e.getPeer(),
-                        e.getNewPublicKey());
+                    PreKeyManager.getInstance().acceptTrustChanges(e);
                     MessageService.DecryptedMessage sent =
                         messageService.send(chatUser.getUsername(), pendingContent);
                     Platform.runLater(() -> {

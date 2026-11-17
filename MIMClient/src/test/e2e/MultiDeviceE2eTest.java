@@ -11,7 +11,9 @@ import java.nio.file.Path;
 import java.security.KeyPair;
 import java.util.ArrayList;
 import java.util.Base64;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 多设备端到端回归：真实 HTTP + 真实密钥。
@@ -94,6 +96,18 @@ public final class MultiDeviceE2eTest {
         RatchetService ratchet = new RatchetService();
         TrustStore aliceTrust = new TrustStore(workDir.resolve("trust-alice"));
         aliceTrust.load(aliceName, PASSWORD);
+        // 首次接触按设备成组固定：同一用户的两台设备不能互相判成「公钥变更」
+        Map<String, String> bobDeviceKeys = new LinkedHashMap<>();
+        for (PreKeyBundleView bundle : bundles) {
+            bobDeviceKeys.put(bundle.deviceId, bundle.identityPublicKey);
+        }
+        List<TrustStore.VerificationResult> trustResults =
+            aliceTrust.verifyAll(bobName, bobDeviceKeys, PASSWORD);
+        boolean allTrusted = true;
+        for (TrustStore.VerificationResult result : trustResults) {
+            allTrusted &= result.isSendable();
+        }
+        check("两台设备的身份公钥可同时固定", allTrusted);
 
         String clientMsgId = java.util.UUID.randomUUID().toString();
         long clientTime = System.currentTimeMillis();
@@ -102,7 +116,6 @@ public final class MultiDeviceE2eTest {
         List<SessionState> aliceSessions = new ArrayList<>();
         List<String> replicas = new ArrayList<>();
         for (PreKeyBundleView bundle : bundles) {
-            aliceTrust.verify(bobName, bundle.identityPublicKey, PASSWORD);
             RatchetService.InitiatorResult init = ratchet.initiatorSession(bobName,
                 alice.identity.getPrivateKey(), alice.identity.getPublicKeyBase64(),
                 bundle.identityPublicKey, bundle.signedPreKeyPublic, bundle.oneTimePreKeyPublic);

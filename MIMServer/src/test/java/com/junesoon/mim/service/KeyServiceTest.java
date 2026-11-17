@@ -114,6 +114,11 @@ class KeyServiceTest {
         }
 
         @Override
+        public int bumpTokenVersion(String username, String deviceId) {
+            return registered.contains(key(username, deviceId)) ? 1 : 0;
+        }
+
+        @Override
         public int countActiveDevices(String username) {
             return 0;
         }

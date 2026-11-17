@@ -23,6 +23,11 @@ public interface DeviceService {
     void revoke(String username, String deviceId);
 
     /**
+     * 使该设备已签发的 JWT 全部失效（登出时调用）。
+     */
+    void invalidateTokens(String username, String deviceId);
+
+    /**
      * 刷新活跃时间，用于设备列表排序与「陈旧设备」识别。
      */
     void touch(String username, String deviceId);

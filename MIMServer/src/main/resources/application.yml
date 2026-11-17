@@ -27,6 +27,11 @@ mim:
   # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
   # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
   instance-id: ${HOSTNAME:local}
+  rate-limit:
+    # 默认不信任 X-Forwarded-For / X-Real-IP。
+    # 只有部署在可信反向代理后面（且代理会覆盖客户端自带的转发头）时才设为 true，
+    # 否则客户端只要每次换一个头就能绕过登录/注册的 IP 限流。
+    trust-forwarded-headers: ${MIM_TRUST_FORWARDED_HEADERS:false}
   # 传输层安全。默认关闭便于本地开发；生产环境必须开启，
   # 否则 JWT 与登录口令会在网络上明文传输，E2EE 也会被中间人冒充绕过。
   tls:
@@ -36,3 +41,10 @@ mim:
     keystore-type: PKCS12
     key-alias: ${MIM_TLS_KEY_ALIAS:mim}
     client-auth: false
+    # 开启 TLS 后默认拒绝明文端口上的业务请求，避免 8080 绕过 TLS。
+    # 仅内网调试且明确理解风险时才设为 false。
+    block-plaintext: ${MIM_TLS_BLOCK_PLAINTEXT:true}
+
+server:
+  # 限制请求头大小，避免超长头占用内存。JSON body 的上限由 RequestSizeLimitFilter 控制。
+  max-http-header-size: 16KB

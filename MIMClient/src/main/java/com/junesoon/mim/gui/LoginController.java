@@ -480,6 +480,11 @@ public class LoginController {
     private void login() {
         final String username = userNameTextField.getText();
         final String rawPassword = passWordTextField.getText();
+        // 令牌要绑定设备，设备标识必须在登录请求之前就确定并放进请求头。
+        if (username != null && !username.trim().isEmpty()) {
+            ApplicatonStore.setDeviceId(
+                new com.junesoon.mim.service.DeviceIdentity().getOrCreate(username.trim()));
+        }
         JwtAuthenticationRequest jwtAuthenticationRequest = new JwtAuthenticationRequest(username,
             EncryptUtil.base64Encode(rawPassword));
         ProcessChain.create().addRunnableInPlatformThread(() -> {
@@ -527,6 +532,45 @@ public class LoginController {
     }
 
     /**
+     * 历史同步的设备授权确认。由后台线程调用，必须切到 JavaFX 线程弹窗并阻塞等待。
+     *
+     * <p>没有用户确认就绝不把明文历史交给另一台设备——这是防止盗号者和
+     * 被攻破的服务端静默拉走聊天记录的最后一道门。
+     */
+    private static boolean askHistorySyncApproval(String deviceId, String fingerprint) {
+        java.util.concurrent.FutureTask<Boolean> task =
+            new java.util.concurrent.FutureTask<>(() -> {
+                javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
+                    javafx.scene.control.Alert.AlertType.WARNING);
+                alert.setTitle("设备请求同步历史");
+                alert.setHeaderText("本账号的另一台设备请求获取聊天历史");
+                alert.setContentText("设备标识：\n" + deviceId
+                    + "\n\n安全码：\n" + fingerprint
+                    + "\n\n只有当你确实刚刚在这台设备上登录时才确认。"
+                    + "\n如果这不是你本人操作，请点「拒绝」。");
+                javafx.scene.control.ButtonType accept =
+                    new javafx.scene.control.ButtonType("确认转发",
+                        javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
+                javafx.scene.control.ButtonType reject =
+                    new javafx.scene.control.ButtonType("拒绝",
+                        javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE);
+                alert.getButtonTypes().setAll(accept, reject);
+                return alert.showAndWait().orElse(reject) == accept;
+            });
+        if (javafx.application.Platform.isFxApplicationThread()) {
+            task.run();
+        } else {
+            javafx.application.Platform.runLater(task);
+        }
+        try {
+            return task.get(10, java.util.concurrent.TimeUnit.MINUTES);
+        } catch (Exception e) {
+            log.warn("等待历史同步授权失败：{}", e.getMessage());
+            return false;
+        }
+    }
+
+    /**
      * 把加密身份初始化失败与网络失败区分开，给出可操作的提示。
      */
     private String describeLoginFailure(Throwable e) {
@@ -566,6 +610,7 @@ public class LoginController {
         }).addRunnableInExecutor(() -> {
             // 凭证就绪后再建立长连接，握手拦截器需要 Authorization 头。
             // 先挂上历史同步监听，避免其他设备的补发在监听注册前到达。
+            HistorySync.setApprover(LoginController::askHistorySyncApproval);
             HistorySync.arm();
             WSClient.getInstance().connectWithToken();
             HistorySync.requestInBackground();

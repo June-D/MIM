@@ -29,7 +29,7 @@ class RegisterErrorTest {
     void setUp() {
         AuthService authService = new AuthService() {
             @Override
-            public String login(JwtAuthenticationRequest authenticationRequest) {
+            public String login(JwtAuthenticationRequest authenticationRequest, String deviceId) {
                 throw new UnsupportedOperationException();
             }
 

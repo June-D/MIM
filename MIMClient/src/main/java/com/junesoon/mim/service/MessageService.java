@@ -11,6 +11,7 @@ import com.junesoon.mim.crypto.PreKeyStore;
 import com.junesoon.mim.crypto.RatchetService;
 import com.junesoon.mim.crypto.SessionState;
 import com.junesoon.mim.crypto.SessionStore;
+import com.junesoon.mim.crypto.TrustChangedException;
 import com.junesoon.mim.crypto.TrustStore;
 import com.junesoon.mim.feign.MessageFeign;
 import com.junesoon.mim.model.CipherMessage;
@@ -69,6 +70,20 @@ public class MessageService {
 
     private static String sessionKey(String peer, String deviceId) {
         return peer + "@" + deviceId;
+    }
+
+    private static String normalizeDevice(String deviceId) {
+        return deviceId == null || deviceId.isEmpty()
+            ? SessionStore.DEFAULT_DEVICE_ID : deviceId;
+    }
+
+    /**
+     * 明文缓存键。必须带上发送者与发送设备，避免不同发送者复用 clientMsgId 时串内容。
+     */
+    private static String cacheKey(String fromUsername, String fromDeviceId, String clientMsgId) {
+        return (fromUsername == null ? "" : fromUsername) + "|"
+            + normalizeDevice(fromDeviceId) + "|"
+            + (clientMsgId == null ? "" : clientMsgId);
     }
 
     /**
@@ -215,16 +230,26 @@ public class MessageService {
         IdentityStore.Identity identity = requireIdentity();
         String password = currentPassword();
 
-        // 先用已固定的身份公钥做 TOFU 校验，再验预密钥签名
-        TrustStore.VerificationResult trust = keyManager.getTrustStore()
-            .verify(bundle.getUsername(), bundle.getIdentityPublicKey(), password);
-        if (!trust.isSendable()) {
-            throw new IdentityException(trust.describe());
-        }
+        // 顺序必须是「先验签，再信任」：签名不通过的包绝不能进入信任库，
+        // 否则攻击者可以用一个坏包把固定值污染成自己的公钥。
         if (!com.junesoon.mim.crypto.DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
             bundle.getSignedPreKeyId(), bundle.getSignedPreKeyPublic(),
             bundle.getSignedPreKeySignature())) {
             throw new IdentityException("对方预密钥签名验证失败，可能遭到中间人攻击，已中止");
+        }
+        TrustStore.VerificationResult trust = keyManager.getTrustStore()
+            .verify(bundle.getUsername(), bundle.getDeviceId(), bundle.getIdentityPublicKey(),
+                password);
+        if (!trust.isSendable()) {
+            // 并发场景下信任库可能刚被另一条线程更新；抛专用异常让界面还能走核对流程
+            java.util.List<TrustChangedException.Issue> issues = new java.util.ArrayList<>(1);
+            issues.add(new TrustChangedException.Issue(trust.getDeviceId(),
+                trust.getStatus() == TrustStore.TrustStatus.NEW_DEVICE
+                    ? TrustChangedException.Reason.NEW_DEVICE
+                    : TrustChangedException.Reason.KEY_CHANGED,
+                trust.getPreviousFingerprint(), trust.getCurrentFingerprint(),
+                trust.getPublicKey()));
+            throw new TrustChangedException(bundle.getUsername(), issues, trust.describe());
         }
 
         RatchetService.InitiatorResult result = ratchet.initiatorSession(bundle.getUsername(),
@@ -300,19 +325,44 @@ public class MessageService {
         IdentityStore.Identity identity = requireIdentity();
         String self = identity.getUsername();
 
-        // 领取对方所有有效设备的预密钥包；每个包会消耗对应设备一个 OPK
-        List<PreKeyBundle> bundles = preKeyManager.fetchVerifiedBundles(peer);
-        if (bundles.isEmpty()) {
+        // 先拿设备列表（不消耗 OPK），再只为「本地还没有会话」的设备领取预密钥包。
+        // 旧实现每条消息都领取全部设备的包，会把对方的 OPK 白白耗尽。
+        List<com.junesoon.mim.model.KeyBundle> devices =
+            preKeyManager.fetchVerifiedDevices(peer);
+        if (devices.isEmpty()) {
             throw new IdentityException("对方没有可用的加密设备");
         }
 
         String clientMsgId = java.util.UUID.randomUUID().toString();
         long clientTime = System.currentTimeMillis();
-        List<CipherMessage> replicas = new ArrayList<>(bundles.size());
+        List<CipherMessage> replicas = new ArrayList<>(devices.size());
 
-        for (PreKeyBundle bundle : bundles) {
-            String key = sessionKey(peer, bundle.getDeviceId());
-            PeerCipher slot = slot(peer, bundle.getDeviceId());
+        // 网络请求放在 cryptoLock 外，避免一次慢请求阻塞所有会话
+        Map<String, PreKeyBundle> pendingBundles = new LinkedHashMap<>();
+        for (com.junesoon.mim.model.KeyBundle device : devices) {
+            if (device.getDeviceId() == null || device.getDeviceId().isEmpty()) {
+                continue;
+            }
+            PeerCipher existing = slot(peer, device.getDeviceId());
+            if (existing.sendingState() == null) {
+                try {
+                    pendingBundles.put(device.getDeviceId(),
+                        preKeyManager.fetchVerifiedBundle(peer, device.getDeviceId()));
+                } catch (com.junesoon.mim.crypto.PreKeyUnavailableException e) {
+                    // 对方可能刚注册、预密钥还没上传完：跳过这台设备，
+                    // 继续发给其它已就绪的设备，而不是让整条消息失败
+                    log.warn("跳过设备 {}：{}", device.getDeviceId(), e.getMessage());
+                }
+            }
+        }
+
+        for (com.junesoon.mim.model.KeyBundle device : devices) {
+            String deviceId = device.getDeviceId();
+            if (deviceId == null || deviceId.isEmpty()) {
+                continue;
+            }
+            String key = sessionKey(peer, deviceId);
+            PeerCipher slot = slot(peer, deviceId);
             SessionState state;
             boolean isNew;
             synchronized (cryptoLock) {
@@ -321,21 +371,26 @@ public class MessageService {
                 log.info("发送前检查 key={} 命中={} 现有键={}", key, !isNew, sessions.keySet());
                 if (isNew) {
                     log.warn("会话未命中，新建：key={} 已有键={}", key, sessions.keySet());
+                    PreKeyBundle bundle = pendingBundles.get(deviceId);
+                    if (bundle == null) {
+                        log.warn("设备 {} 没有可用预密钥，本次跳过", deviceId);
+                        continue;
+                    }
                     state = createSession(bundle);
                     slot.setOutbound(state);
                 }
 
                 RatchetService.Encrypted encrypted = ratchet.encrypt(state, plaintext);
-                persistSlot(peer, bundle.getDeviceId(), slot);
+                persistSlot(peer, deviceId, slot);
                 log.info("发送到 {}/{}：序号={} 发送链长度={}",
-                    peer, bundle.getDeviceId(), encrypted.getHeader().getMessageNumber(),
+                    peer, deviceId, encrypted.getHeader().getMessageNumber(),
                     state.getSendCount());
 
                 CipherMessage replica = new CipherMessage();
                 replica.setClientMsgId(clientMsgId);
                 replica.setFromUsername(self);
                 replica.setToUsername(peer);
-                replica.setTargetDeviceId(bundle.getDeviceId());
+                replica.setTargetDeviceId(deviceId);
                 replica.setAlg(RatchetService.ALGORITHM);
                 replica.setIv(encrypted.getIv());
                 replica.setCiphertext(encrypted.getCiphertext());
@@ -352,10 +407,14 @@ public class MessageService {
                     replica.setSenderUsedOneTimePreKey(state.isHandshakeUsedOneTimePreKey());
                     replica.setConsumedOneTimePreKeyId(state.getHandshakeOneTimePreKeyId());
                 } else {
-                    log.info("发送到 {}/{} 走已建立的应答链，不再附带握手参数", peer, bundle.getDeviceId());
+                    log.info("发送到 {}/{} 走已建立的应答链，不再附带握手参数", peer, deviceId);
                 }
                 replicas.add(replica);
             }
+        }
+
+        if (replicas.isEmpty()) {
+            throw new IdentityException("对方设备尚未准备好接收加密消息（预密钥未发布）");
         }
 
         ObjectRestResponse<List<CipherMessage>> response;
@@ -375,16 +434,18 @@ public class MessageService {
             first.setClientMsgId(clientMsgId);
         }
         synchronized (cryptoLock) {
-            plaintextStore.put(clientMsgId, plaintext);
+            plaintextStore.put(cacheKey(self, keyManager.deviceId(), clientMsgId), plaintext);
         }
         return new DecryptedMessage(first, plaintext, false);
     }
 
     /**
      * 把一条已有原文重新加密给自己的另一台设备。不经过普通发送接口，避免被记成一条新消息。
+     *
+     * @param bundle 目标设备的预密钥包；已有会话时可为 null
      */
     public CipherMessage wrapForOwnDevice(String targetDeviceId, String plaintext,
-        String clientMsgId, long clientTime) throws IdentityException {
+        String clientMsgId, long clientTime, PreKeyBundle bundle) throws IdentityException {
         if (targetDeviceId == null || targetDeviceId.isEmpty()) {
             throw new IdentityException("目标设备不能为空");
         }
@@ -396,7 +457,9 @@ public class MessageService {
             PeerCipher cipher = slot(slotPeer, targetDeviceId);
             SessionState state = cipher.sendingState();
             if (state == null) {
-                PreKeyBundle bundle = preKeyManager.fetchOwnDevice(targetDeviceId);
+                if (bundle == null) {
+                    throw new IdentityException("缺少目标设备的预密钥包");
+                }
                 state = createSyncSession(bundle, slotPeer);
                 cipher.setOutbound(state);
             }
@@ -424,22 +487,34 @@ public class MessageService {
     }
 
     /**
-     * 和自己另一台设备建会话。信任记在 sync-设备号上，不占用账号名的 TOFU 记录。
+     * 丢弃与某台本账号设备的同步会话。
+     *
+     * <p>用户刚刚确认一台新设备、或设备公钥发生变化时必须重建会话，
+     * 不能复用旧版本未经确认时建立的链。
+     */
+    public void invalidateSyncSession(String targetDeviceId) {
+        if (targetDeviceId == null || targetDeviceId.isEmpty()) {
+            return;
+        }
+        String slotPeer = syncSlot(targetDeviceId);
+        synchronized (cryptoLock) {
+            sessions.remove(sessionKey(slotPeer, targetDeviceId));
+            IdentityStore.Identity identity = keyManager.getIdentity();
+            if (identity != null) {
+                sessionStore.delete(identity.getUsername(), slotPeer, targetDeviceId);
+                sessionStore.deleteInbound(identity.getUsername(), slotPeer, targetDeviceId);
+            }
+        }
+    }
+
+    /**
+     * 和自己另一台设备建会话。身份公钥必须来自本机已授权的设备清单，
+     * 不能使用服务端随包返回的公钥。
      */
     private SessionState createSyncSession(PreKeyBundle bundle, String slotPeer)
         throws IdentityException {
         IdentityStore.Identity identity = requireIdentity();
-        String password = currentPassword();
-        TrustStore.VerificationResult trust = keyManager.getTrustStore()
-            .verify(slotPeer, bundle.getIdentityPublicKey(), password);
-        if (!trust.isSendable()) {
-            throw new IdentityException(trust.describe());
-        }
-        if (!com.junesoon.mim.crypto.DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
-            bundle.getSignedPreKeyId(), bundle.getSignedPreKeyPublic(),
-            bundle.getSignedPreKeySignature())) {
-            throw new IdentityException("设备预密钥签名验证失败，已中止同步");
-        }
+        preKeyManager.verifyOwnDeviceBundle(bundle);
         RatchetService.InitiatorResult result = ratchet.initiatorSession(slotPeer,
             identity.getPrivateKey(), identity.getPublicKeyBase64(), bundle.getIdentityPublicKey(),
             bundle.getSignedPreKeyPublic(), bundle.getOneTimePreKeyPublic());
@@ -469,14 +544,24 @@ public class MessageService {
         if (identity == null) {
             return new DecryptedMessage(message, "[未解锁本地密钥，无法解密]", true);
         }
-        String cached = plaintextStore.get(message.getClientMsgId());
-        if (cached != null) {
-            return new DecryptedMessage(message, cached, false);
-        }
         String self = identity.getUsername();
         final boolean deviceSync = message.getSyncFromDevice() != null
             && !message.getSyncFromDevice().isEmpty();
         boolean isSelf = self.equals(message.getFromUsername());
+
+        // 缓存键必须包含「谁发的、哪台设备发的」。只按 clientMsgId 会让不同发送者
+        // 复用同一个 ID 时命中别人的明文，等于绕过解密直接伪造消息内容。
+        final String fromDevice = normalizeDevice(message.getFromDeviceId());
+        final String cacheKey = cacheKey(message.getFromUsername(), fromDevice,
+            message.getClientMsgId());
+        String cached = plaintextStore.get(cacheKey);
+        if (cached == null && isSelf && !deviceSync) {
+            // 兼容升级前只按 clientMsgId 保存的旧记录，仅用于自己发出的消息
+            cached = plaintextStore.get(message.getClientMsgId());
+        }
+        if (cached != null) {
+            return new DecryptedMessage(message, cached, false);
+        }
         if (isSelf && !deviceSync) {
             // 自己发出的密文是用对方的接收链加密的，本机棘轮解不开。
             // 原文只存在于发送当时写入的本地记录里。另一台设备转来的副本不走这里。
@@ -490,9 +575,7 @@ public class MessageService {
             peerDevice = message.getSyncFromDevice();
         } else {
             peer = message.getFromUsername();
-            String deviceOnMessage = message.getFromDeviceId();
-            peerDevice = (deviceOnMessage == null || deviceOnMessage.isEmpty())
-                ? SessionStore.DEFAULT_DEVICE_ID : deviceOnMessage;
+            peerDevice = normalizeDevice(message.getFromDeviceId());
         }
         boolean hasHandshake = message.getSenderIdentityKey() != null
             && !message.getSenderIdentityKey().isEmpty()
@@ -505,7 +588,10 @@ public class MessageService {
 
         try {
             synchronized (cryptoLock) {
-                cached = plaintextStore.get(message.getClientMsgId());
+                cached = plaintextStore.get(cacheKey);
+                if (cached == null && isSelf && !deviceSync) {
+                    cached = plaintextStore.get(message.getClientMsgId());
+                }
                 if (cached != null) {
                     return new DecryptedMessage(message, cached, false);
                 }
@@ -516,10 +602,12 @@ public class MessageService {
                 String plaintext = slot.open(hasHandshake, message.getSenderEphemeralKey(), header,
                     message.getIv(), message.getCiphertext(), () -> {
                         if (deviceSync) {
+                            // 设备间同步只证明「发送方持有本账号某台设备的身份私钥」。
+                            // 真正的安全边界在发送侧：只有用户批准过的设备才能拿到历史。
                             keyManager.assertDeviceIdentity(message.getSyncFromDevice(),
                                 message.getSenderIdentityKey());
                         }
-                        Integer opkId = prepareResponder(peer, message);
+                        Integer opkId = prepareResponder(peer, message, deviceSync);
                         if (opkId != null) {
                             usedOpk[0] = opkId;
                         }
@@ -540,7 +628,7 @@ public class MessageService {
                 } catch (IdentityException e) {
                     log.warn("会话状态保存失败，可能导致后续消息解密异常：{}", e.getMessage());
                 }
-                plaintextStore.put(message.getClientMsgId(), plaintext);
+                plaintextStore.put(cacheKey, plaintext);
                 return new DecryptedMessage(message, plaintext, false);
             }
         } catch (Exception e) {
@@ -554,15 +642,19 @@ public class MessageService {
      *
      * @return 需要在解密成功后删除的预密钥编号；未使用则返回 null
      */
-    private Integer prepareResponder(String peer, CipherMessage message) throws IdentityException {
+    private Integer prepareResponder(String peer, CipherMessage message, boolean deviceSync)
+        throws IdentityException {
         if (message.getSenderIdentityKey() == null || message.getSenderEphemeralKey() == null) {
             throw new IdentityException("收到未知会话的消息，但缺少 X3DH 握手参数，无法解密");
         }
-        String password = currentPassword();
-        TrustStore.VerificationResult trust = keyManager.getTrustStore()
-            .verify(peer, message.getSenderIdentityKey(), password);
-        if (!trust.isSendable()) {
-            throw new IdentityException(trust.describe());
+        if (!deviceSync) {
+            String password = currentPassword();
+            TrustStore.VerificationResult trust = keyManager.getTrustStore()
+                .verify(peer, normalizeDevice(message.getFromDeviceId()),
+                    message.getSenderIdentityKey(), password);
+            if (!trust.isSendable()) {
+                throw new IdentityException(trust.describe());
+            }
         }
         if (!Boolean.TRUE.equals(message.getSenderUsedOneTimePreKey())) {
             return null;

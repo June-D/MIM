@@ -54,6 +54,9 @@ public class DeviceServiceImpl implements DeviceService {
         device.setCrtTime(existing == null || existing.getCrtTime() == null ? now : existing.getCrtTime());
         device.setLastSeen(now);
         device.setRevoked(false);
+        // 新设备从 0 开始；已有设备保留当前版本（upsert 不会覆盖 token_version）
+        device.setTokenVersion(existing == null || existing.getTokenVersion() == null
+            ? 0 : existing.getTokenVersion());
         deviceMapper.upsert(device);
         if (isNew) {
             log.info("用户 {} 注册新设备 {}", username, id);
@@ -77,6 +80,18 @@ public class DeviceServiceImpl implements DeviceService {
             throw new UserInvalidException("设备不存在");
         }
         log.info("用户 {} 注销设备 {}", username, id);
+    }
+
+    @Override
+    public void invalidateTokens(String username, String deviceId) {
+        if (!StringUtils.hasText(deviceId)) {
+            return;
+        }
+        ValidationUtil.validateUsername(username);
+        int affected = deviceMapper.bumpTokenVersion(username, deviceId.trim());
+        if (affected == 0) {
+            log.debug("设备 {} 不存在，无需失效令牌", deviceId);
+        }
     }
 
     @Override

@@ -5,6 +5,7 @@ import com.junesoon.mim.auth.CurrentUser;
 import com.junesoon.mim.entity.OneTimePreKey;
 import com.junesoon.mim.entity.SignedPreKey;
 import com.junesoon.mim.ratelimit.RateLimit;
+import com.junesoon.mim.ratelimit.RateLimiter;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.PreKeyService;
 import java.util.LinkedHashMap;
@@ -35,9 +36,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PreKeyController {
 
     private final PreKeyService preKeyService;
+    private final RateLimiter rateLimiter;
 
-    public PreKeyController(PreKeyService preKeyService) {
+    public PreKeyController(PreKeyService preKeyService, RateLimiter rateLimiter) {
         this.preKeyService = preKeyService;
+        this.rateLimiter = rateLimiter;
     }
 
     /**
@@ -85,6 +88,9 @@ public class PreKeyController {
         @CurrentUser String self, @PathVariable String username,
         @RequestParam(value = "deviceId", required = false) String deviceId) {
         List<PreKeyService.PreKeyBundle> bundles;
+        // 按「被拉取的用户」再限一层：否则攻击者可以换着账号反复领取同一目标的 OPK，
+        // 把对方的一次性预密钥抽干，让后续首条消息退化为不含 DH4 的 X3DH。
+        rateLimiter.tryAcquire("prekey-target:" + username, "/prekey/target", 20, 60);
         if (StringUtils.hasText(deviceId)) {
             bundles = java.util.Collections.singletonList(
                 preKeyService.fetchBundle(username, deviceId));

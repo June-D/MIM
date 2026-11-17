@@ -204,8 +204,13 @@ public class IdentityStore {
 
             Files.createDirectories(directory);
             Path file = fileOf(username, deviceId);
-            Files.write(file, content.getBytes(StandardCharsets.UTF_8));
-            restrictPermissions(file);
+            // 原子写：先落临时文件、设好 0600，再 rename。
+            // 直接写目标文件时，崩溃可能留下半个密钥文件，且权限收紧前有窗口期。
+            Path temp = Files.createTempFile(directory, "identity-", ".tmp");
+            Files.write(temp, content.getBytes(StandardCharsets.UTF_8));
+            restrictPermissions(temp);
+            Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
 
             return new Identity(username, version, keyPair.getPrivate(), keyPair.getPublic(),
                 publicKeyB64, Hkdf.sha256Hex(Base64.getDecoder().decode(publicKeyB64)));

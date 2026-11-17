@@ -7,22 +7,25 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyPair;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * TOFU 信任库测试。
+ * TOFU 信任库测试（按设备）。
  *
- * <p>这是防中间人的核心组件，必须验证：
+ * <p>锁住三个关键性质：
  * <ul>
- *   <li>首次见到公钥即固定；</li>
- *   <li>公钥变化被识别为 CHANGED 并阻断发送；</li>
- *   <li>用户确认后能更新固定值；</li>
- *   <li>信任库本身加密落盘、错误口令打不开。</li>
+ *   <li>首次接触一次性固定该用户当前所有设备，不会因为多设备互相冲突；</li>
+ *   <li>已固定用户新增设备必须显式确认，不能静默固定；</li>
+ *   <li>旧版本按用户名保存的固定值能迁移到设备维度。</li>
  * </ul>
  */
 class TrustStoreTest {
@@ -32,65 +35,129 @@ class TrustStoreTest {
         return DhKeyUtil.encodePublicKey(pair.getPublic());
     }
 
-    @Test
-    @DisplayName("首次见到公钥即固定，重复使用返回 TRUSTED")
-    void firstUsePinsAndThenTrusts(@TempDir Path dir) throws Exception {
-        TrustStore store = new TrustStore(dir);
-        store.load("alice", "pw");
-        String bobKey = newPublicKey();
-
-        TrustStore.VerificationResult first = store.verify("bob", bobKey, "pw");
-        assertEquals(TrustStore.TrustStatus.NEW, first.getStatus());
-        assertTrue(first.isSendable());
-        assertNotNull(first.getCurrentFingerprint());
-
-        TrustStore.VerificationResult second = store.verify("bob", bobKey, "pw");
-        assertEquals(TrustStore.TrustStatus.TRUSTED, second.getStatus());
-        assertTrue(second.isSendable());
+    private static Map<String, String> devices(String... deviceAndKey) {
+        Map<String, String> map = new LinkedHashMap<>();
+        for (int i = 0; i + 1 < deviceAndKey.length; i += 2) {
+            map.put(deviceAndKey[i], deviceAndKey[i + 1]);
+        }
+        return map;
     }
 
     @Test
-    @DisplayName("公钥变更被识别为 CHANGED 并阻断发送")
+    @DisplayName("首次接触一次性固定该用户的全部设备，多设备不会互相冲突")
+    void firstContactPinsAllDevices(@TempDir Path dir) throws Exception {
+        TrustStore store = new TrustStore(dir);
+        store.load("alice", "pw");
+
+        List<TrustStore.VerificationResult> first = store.verifyAll("bob",
+            devices("bob-desktop", newPublicKey(), "bob-mobile", newPublicKey()), "pw");
+        assertEquals(2, first.size());
+        assertTrue(first.get(0).isSendable());
+        assertTrue(first.get(1).isSendable());
+        assertEquals(TrustStore.TrustStatus.NEW, first.get(0).getStatus());
+        assertEquals(2, store.getPinnedDevices("bob").size());
+    }
+
+    @Test
+    @DisplayName("已固定用户新增设备必须确认，且不会被自动写入信任库")
+    void newDeviceRequiresConfirmation(@TempDir Path dir) throws Exception {
+        TrustStore store = new TrustStore(dir);
+        store.load("alice", "pw");
+        String desktopKey = newPublicKey();
+        store.verifyAll("bob", devices("bob-desktop", desktopKey), "pw");
+
+        String mobileKey = newPublicKey();
+        List<TrustStore.VerificationResult> results = store.verifyAll("bob",
+            devices("bob-desktop", desktopKey, "bob-mobile", mobileKey), "pw");
+        assertEquals(TrustStore.TrustStatus.TRUSTED, results.get(0).getStatus());
+        assertEquals(TrustStore.TrustStatus.NEW_DEVICE, results.get(1).getStatus());
+        assertFalse(results.get(1).isSendable());
+        assertNull(store.getPinned("bob", "bob-mobile"),
+            "未确认的新设备不能被自动固定");
+        assertNotNull(store.getPinned("bob", "bob-desktop"));
+    }
+
+    @Test
+    @DisplayName("已固定设备换钥被判为 CHANGED 并阻断")
     void keyChangeDetected(@TempDir Path dir) throws Exception {
         TrustStore store = new TrustStore(dir);
         store.load("alice", "pw");
         String original = newPublicKey();
-        store.verify("bob", original, "pw");
+        store.verifyAll("bob", devices("bob-desktop", original), "pw");
 
         String attackerKey = newPublicKey();
-        TrustStore.VerificationResult changed = store.verify("bob", attackerKey, "pw");
+        TrustStore.VerificationResult changed =
+            store.verify("bob", "bob-desktop", attackerKey, "pw");
         assertEquals(TrustStore.TrustStatus.CHANGED, changed.getStatus());
-        assertFalse(changed.isSendable(), "公钥变更必须阻断发送，否则中间人可以无感替换");
+        assertFalse(changed.isSendable());
         assertNotNull(changed.getPreviousFingerprint());
         assertTrue(changed.describe().contains("公钥已变更"));
     }
 
     @Test
-    @DisplayName("用户确认后可以更新固定值")
-    void acceptChangeOverwrites(@TempDir Path dir) throws Exception {
+    @DisplayName("用户确认后可以接受新设备与换钥")
+    void acceptDevicesOverwrites(@TempDir Path dir) throws Exception {
         TrustStore store = new TrustStore(dir);
         store.load("alice", "pw");
-        store.verify("bob", newPublicKey(), "pw");
+        store.verifyAll("bob", devices("bob-desktop", newPublicKey()), "pw");
 
-        String newKey = newPublicKey();
-        assertEquals(TrustStore.TrustStatus.CHANGED, store.verify("bob", newKey, "pw").getStatus());
+        String newDesktopKey = newPublicKey();
+        String mobileKey = newPublicKey();
+        Map<String, String> updates =
+            devices("bob-desktop", newDesktopKey, "bob-mobile", mobileKey);
+        store.acceptDevices("bob", updates, "pw");
 
-        store.acceptChange("bob", newKey, "pw");
-        assertEquals(TrustStore.TrustStatus.TRUSTED, store.verify("bob", newKey, "pw").getStatus());
+        assertEquals(TrustStore.TrustStatus.TRUSTED,
+            store.verify("bob", "bob-desktop", newDesktopKey, "pw").getStatus());
+        assertEquals(TrustStore.TrustStatus.TRUSTED,
+            store.verify("bob", "bob-mobile", mobileKey, "pw").getStatus());
     }
 
     @Test
-    @DisplayName("信任库加密落盘：重新加载后固定值仍生效")
+    @DisplayName("信任库加密落盘：重新加载后按设备固定值仍生效")
     void persistedAcrossReload(@TempDir Path dir) throws Exception {
-        String bobKey = newPublicKey();
+        String desktopKey = newPublicKey();
+        String mobileKey = newPublicKey();
         TrustStore first = new TrustStore(dir);
         first.load("alice", "pw");
-        first.verify("bob", bobKey, "pw");
+        first.verifyAll("bob", devices("bob-desktop", desktopKey, "bob-mobile", mobileKey), "pw");
 
         TrustStore second = new TrustStore(dir);
         second.load("alice", "pw");
-        assertEquals(bobKey, second.getPinned("bob"));
-        assertEquals(TrustStore.TrustStatus.TRUSTED, second.verify("bob", bobKey, "pw").getStatus());
+        assertEquals(desktopKey, second.getPinned("bob", "bob-desktop"));
+        assertEquals(mobileKey, second.getPinned("bob", "bob-mobile"));
+        assertEquals(TrustStore.TrustStatus.TRUSTED,
+            second.verify("bob", "bob-mobile", mobileKey, "pw").getStatus());
+    }
+
+    @Test
+    @DisplayName("旧版按用户名保存的固定值会迁移到具体设备")
+    void legacyRecordMigrates(@TempDir Path dir) throws Exception {
+        String bobKey = newPublicKey();
+        SecretBox.Sealed sealed = SecretBox.seal("pw", "alice|trust",
+            ("bob=" + bobKey + "\n").getBytes(StandardCharsets.UTF_8));
+        StringBuilder file = new StringBuilder();
+        file.append("salt=").append(java.util.Base64.getEncoder()
+            .encodeToString(sealed.getSalt())).append('\n');
+        file.append("nonce=").append(java.util.Base64.getEncoder()
+            .encodeToString(sealed.getNonce())).append('\n');
+        file.append("data=").append(java.util.Base64.getEncoder()
+            .encodeToString(sealed.getCiphertext())).append('\n');
+        Files.write(dir.resolve("alice.trust"), file.toString().getBytes(StandardCharsets.UTF_8));
+
+        TrustStore store = new TrustStore(dir);
+        store.load("alice", "pw");
+        TrustStore.VerificationResult migrated =
+            store.verify("bob", "bob-desktop", bobKey, "pw");
+        assertEquals(TrustStore.TrustStatus.TRUSTED, migrated.getStatus(),
+            "与旧固定值一致时应直接迁移，不能重置成 NEW");
+        assertEquals(bobKey, store.getPinned("bob", "bob-desktop"));
+
+        // 旧记录匹配另一台设备时必须要求确认，而不是静默信任
+        TrustStore.VerificationResult other =
+            store.verify("bob", "bob-mobile", newPublicKey(), "pw");
+        assertEquals(TrustStore.TrustStatus.NEW_DEVICE, other.getStatus());
+        assertFalse(other.isSendable());
     }
 
     @Test
@@ -99,7 +166,7 @@ class TrustStoreTest {
         String bobKey = newPublicKey();
         TrustStore store = new TrustStore(dir);
         store.load("alice", "right-pw");
-        store.verify("bob", bobKey, "right-pw");
+        store.verifyAll("bob", devices("bob-desktop", bobKey), "right-pw");
 
         Path file = dir.resolve("alice.trust");
         assertTrue(Files.exists(file));
@@ -115,8 +182,9 @@ class TrustStoreTest {
     void unknownPeerNotPinned(@TempDir Path dir) throws Exception {
         TrustStore store = new TrustStore(dir);
         store.load("alice", "pw");
-        assertNull(store.getPinned("carol"));
-        assertFalse(store.isPinned("carol"));
+        assertNull(store.getPinned("carol", "carol-device"));
+        assertFalse(store.isPinned("carol", "carol-device"));
+        assertFalse(store.hasPins("carol"));
     }
 
     @Test

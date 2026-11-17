@@ -27,5 +27,11 @@ public interface DeviceMapper {
      */
     int revoke(@Param("username") String username, @Param("deviceId") String deviceId);
 
+    /**
+     * 自增设备令牌版本。该设备已签发的 JWT 会立即失效。
+     */
+    int bumpTokenVersion(@Param("username") String username,
+        @Param("deviceId") String deviceId);
+
     int countActiveDevices(@Param("username") String username);
 }

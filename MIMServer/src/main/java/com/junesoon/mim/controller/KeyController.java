@@ -60,6 +60,7 @@ public class KeyController {
      * 多设备下发消息必须为每个设备各加密一份。
      */
     @GetMapping("/{username}")
+    @RateLimit(limit = 300, windowSeconds = 60, dimension = RateLimit.Dimension.IP)
     public ObjectRestResponse<List<KeyBundle>> get(@PathVariable String username,
         @RequestParam(value = "deviceId", required = false) String deviceId) {
         ValidationUtil.validateUsername(username);

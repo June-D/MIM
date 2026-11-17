@@ -19,7 +19,9 @@ public class AppRequestErrorDecoder implements ErrorDecoder {
     public Exception decode(String methodKey, Response response) {
         String friendly = UserVisibleError.fromTransport(response.status(), readBody(response));
         // 用户名检查是离开输入框时的静默查询，占用与否写在输入框下，不再弹窗。
-        boolean quiet = methodKey != null && methodKey.contains("#available");
+        // 登出通知也静默：令牌可能已经失效，弹窗只会干扰用户。
+        boolean quiet = methodKey != null
+            && (methodKey.contains("#available") || methodKey.contains("#logout"));
         if (!quiet && !UserVisibleError.USERNAME_TAKEN.equals(friendly)) {
             ProcessChain.create().addRunnableInPlatformThread(() ->
                 AlertUtil.show("提示", friendly)).run();

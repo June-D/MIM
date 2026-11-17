@@ -33,6 +33,24 @@ public final class SessionManager {
      */
     public static void logout() {
         String username = ApplicatonStore.getUsername();
+        String token = ApplicatonStore.getToken();
+
+        // 0. 通知服务端自增设备令牌版本，让这条 JWT 立即失效。
+        //    用独立线程 + 显式 Authorization，避免网络抖动拖住界面，
+        //    也避免本地 token 先被清掉导致请求没有凭证。
+        if (token != null && !token.trim().isEmpty()) {
+            Thread notifier = new Thread(() -> {
+                try {
+                    com.junesoon.mim.components.Request
+                        .connector(com.junesoon.mim.feign.LoginFeign.class, 2000)
+                        .logout("Bearer " + token);
+                } catch (Exception e) {
+                    log.debug("通知服务端登出失败：{}", e.getMessage());
+                }
+            }, "logout-notify");
+            notifier.setDaemon(true);
+            notifier.start();
+        }
 
         // 1. 先断连接：避免清理过程中还有推送进来写状态
         try {

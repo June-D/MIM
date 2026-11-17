@@ -4,6 +4,8 @@ import com.junesoon.mim.components.ObjectRestResponse;
 import com.junesoon.mim.model.ChatContact;
 import com.junesoon.mim.model.UserInfo;
 import com.junesoon.mim.model.JwtAuthenticationRequest;
+import feign.Headers;
+import feign.Param;
 import feign.RequestLine;
 import java.util.List;
 
@@ -18,6 +20,15 @@ public interface LoginFeign extends FeignAPI {
 
     @RequestLine("POST /login/token")
     ObjectRestResponse<String> login(JwtAuthenticationRequest request);
+
+    /**
+     * 通知服务端登出，使当前设备令牌立即失效。
+     *
+     * <p>显式带 Authorization：登出线程可能在本地 token 清理之后才发出请求。
+     */
+    @Headers("Authorization: {authorization}")
+    @RequestLine("POST /login/logout")
+    ObjectRestResponse<Boolean> logout(@Param("authorization") String authorization);
 
     @RequestLine("GET /user/info")
     ObjectRestResponse<UserInfo> getInfo();

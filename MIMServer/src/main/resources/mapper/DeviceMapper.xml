@@ -9,21 +9,25 @@
         <result column="crt_time" jdbcType="BIGINT" property="crtTime"/>
         <result column="last_seen" jdbcType="BIGINT" property="lastSeen"/>
         <result column="revoked" jdbcType="TINYINT" property="revoked"/>
+        <result column="token_version" jdbcType="INTEGER" property="tokenVersion"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        username, device_id, device_name, crt_time, last_seen, revoked
+        username, device_id, device_name, crt_time, last_seen, revoked, token_version
     </sql>
 
     <insert id="upsert" parameterType="com.junesoon.mim.entity.Device">
-        insert into t_device (username, device_id, device_name, crt_time, last_seen, revoked)
+        insert into t_device (username, device_id, device_name, crt_time, last_seen, revoked,
+                              token_version)
         values (#{username,jdbcType=VARCHAR}, #{deviceId,jdbcType=VARCHAR},
                 #{deviceName,jdbcType=VARCHAR}, #{crtTime,jdbcType=BIGINT},
-                #{lastSeen,jdbcType=BIGINT}, 0)
+                #{lastSeen,jdbcType=BIGINT}, 0,
+                ifnull(#{tokenVersion,jdbcType=INTEGER}, 0))
         on duplicate key update
             device_name = values(device_name),
             last_seen = values(last_seen),
-            -- 重新注册视为解除注销
+            -- 重新注册视为解除注销。token_version 故意不更新：
+            -- 注销时已经自增过，旧令牌仍然无效；重新登录签发的令牌才带新版本。
             revoked = 0
     </insert>
 
@@ -53,7 +57,15 @@
 
     <update id="revoke">
         update t_device
-        set revoked = 1
+        set revoked = 1,
+            token_version = token_version + 1
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </update>
+
+    <update id="bumpTokenVersion">
+        update t_device
+        set token_version = token_version + 1
         where username = #{username,jdbcType=VARCHAR}
           and device_id = #{deviceId,jdbcType=VARCHAR}
     </update>

@@ -87,6 +87,11 @@ class MessageSyncTest {
             }
 
             @Override
+            public int bumpTokenVersion(String username, String deviceId) {
+                return 0;
+            }
+
+            @Override
             public int countActiveDevices(String username) {
                 return 0;
             }

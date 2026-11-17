@@ -6,6 +6,7 @@ import com.junesoon.mim.components.Request;
 import com.junesoon.mim.crypto.Hkdf;
 import com.junesoon.mim.crypto.IdentityException;
 import com.junesoon.mim.crypto.IdentityStore;
+import com.junesoon.mim.crypto.OwnDeviceTrust;
 import com.junesoon.mim.crypto.TrustStore;
 import com.junesoon.mim.feign.DeviceFeign;
 import com.junesoon.mim.feign.KeyFeign;
@@ -38,6 +39,7 @@ public class KeyManager {
 
     private final IdentityStore identityStore = new IdentityStore();
     private final TrustStore trustStore = new TrustStore();
+    private final OwnDeviceTrust ownDeviceTrust = new OwnDeviceTrust();
     private final DeviceIdentity deviceIdentity = new DeviceIdentity();
 
     private volatile IdentityStore.Identity identity;
@@ -48,6 +50,13 @@ public class KeyManager {
 
     public TrustStore getTrustStore() {
         return trustStore;
+    }
+
+    /**
+     * 本账号自己的设备清单（只由用户显式批准）。历史同步只允许发给其中的设备。
+     */
+    public OwnDeviceTrust getOwnDeviceTrust() {
+        return ownDeviceTrust;
     }
 
     /**
@@ -91,7 +100,12 @@ public class KeyManager {
         // 3. 加载 TOFU 信任库（之后每次使用对方身份公钥都要比对）
         trustStore.load(username, password);
 
-        // 4. 同步本设备公钥到服务端
+        // 4. 加载本账号设备信任清单，并信任当前设备自己。
+        //    其它设备必须由用户确认后才会进入清单——历史同步只发给清单内的设备。
+        ownDeviceTrust.load(username, password);
+        ownDeviceTrust.trustCurrent(device, loaded.getPublicKeyBase64(), password);
+
+        // 5. 同步本设备公钥到服务端
         return uploadPublicKey(loaded);
     }
 
@@ -179,6 +193,7 @@ public class KeyManager {
     public void reset() {
         identity = null;
         trustStore.reset();
+        ownDeviceTrust.reset();
         // 设备标识按账号隔离，切换账号必须清缓存，
         // 否则新账号会沿用旧账号的 device_id，两个账号共用一份密钥记录
         deviceIdentity.reset();

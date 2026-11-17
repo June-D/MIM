@@ -1,9 +1,9 @@
 package com.junesoon.mim.interceptor;
 
+import com.junesoon.mim.auth.TokenService;
 import com.junesoon.mim.constant.CommonConstants;
 import com.junesoon.mim.entity.UserKey;
 import com.junesoon.mim.jwt.JWTInfo;
-import com.junesoon.mim.utils.JwtTokenUtil;
 import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.server.ServerHttpRequest;
@@ -30,10 +30,10 @@ public class WebcocketInterceptor implements HandshakeInterceptor {
     private static final String DEVICE_HEADER = "X-Device-Id";
     private static final String BEARER_PREFIX = "Bearer ";
 
-    private final JwtTokenUtil jwtTokenUtil;
+    private final TokenService tokenService;
 
-    public WebcocketInterceptor(JwtTokenUtil jwtTokenUtil) {
-        this.jwtTokenUtil = jwtTokenUtil;
+    public WebcocketInterceptor(TokenService tokenService) {
+        this.tokenService = tokenService;
     }
 
     @Override
@@ -45,13 +45,16 @@ public class WebcocketInterceptor implements HandshakeInterceptor {
             return false;
         }
         try {
-            JWTInfo info = jwtTokenUtil.getInfoFromToken(token);
+            JWTInfo info = tokenService.resolve(token);
             if (info == null || !StringUtils.hasText(info.getUsername())) {
                 return false;
             }
             attributes.put(CommonConstants.WEB_SOCKET_USER_ID, info.getUsername());
+            // 令牌绑定的设备优先；旧版未绑定设备时才看握手头
             attributes.put(CommonConstants.WEB_SOCKET_DEVICE_ID,
-                normalizeDevice(request.getHeaders().getFirst(DEVICE_HEADER)));
+                StringUtils.hasText(info.getDeviceId())
+                    ? info.getDeviceId()
+                    : normalizeDevice(request.getHeaders().getFirst(DEVICE_HEADER)));
             return true;
         } catch (Exception e) {
             log.debug("WebSocket 握手被拒绝：凭证无效 {}", e.getMessage());

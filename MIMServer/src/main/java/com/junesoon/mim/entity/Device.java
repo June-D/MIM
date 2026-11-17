@@ -34,4 +34,9 @@ public class Device implements Serializable {
      * 是否已注销。注销后不再接收新消息，也不再出现在预密钥分发里。
      */
     private Boolean revoked;
+
+    /**
+     * 设备令牌版本。登出或注销时自增，所有旧 JWT 立即失效。
+     */
+    private Integer tokenVersion;
 }

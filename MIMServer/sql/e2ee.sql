@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS `t_device` (
     `crt_time`      bigint       NOT NULL COMMENT '注册时间（毫秒）',
     `last_seen`     bigint       NOT NULL COMMENT '最近活跃时间（毫秒）',
     `revoked`       tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否已注销（注销后不再接收消息）',
+    `token_version` int          NOT NULL DEFAULT 0 COMMENT '令牌版本，登出/注销时自增使旧 JWT 失效',
     PRIMARY KEY (`username`, `device_id`) USING BTREE,
     INDEX `idx_username` (`username`, `revoked`) USING BTREE
 ) ENGINE = InnoDB
@@ -165,3 +166,10 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
   CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_general_ci
   ROW_FORMAT = Dynamic COMMENT = '会话清除点，只增不减';
+
+-- ------------------------------------------------------------
+-- 从旧版本升级（取消注释后执行）：
+-- 设备令牌版本。登出/注销时自增，使该设备已签发的 JWT 立即失效。
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_device`
+--     ADD COLUMN `token_version` int NOT NULL DEFAULT 0 COMMENT '令牌版本' AFTER `revoked`;

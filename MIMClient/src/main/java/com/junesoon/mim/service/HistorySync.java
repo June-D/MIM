@@ -3,7 +3,10 @@ package com.junesoon.mim.service;
 import com.junesoon.mim.components.ApplicatonStore;
 import com.junesoon.mim.components.ObjectRestResponse;
 import com.junesoon.mim.components.Request;
+import com.junesoon.mim.crypto.Hkdf;
 import com.junesoon.mim.crypto.IdentityException;
+import com.junesoon.mim.crypto.OwnDeviceTrust;
+import com.junesoon.mim.crypto.TrustStore;
 import com.junesoon.mim.feign.ChatFeign;
 import com.junesoon.mim.feign.DeviceFeign;
 import com.junesoon.mim.feign.MessageFeign;
@@ -11,6 +14,7 @@ import com.junesoon.mim.model.BaseNotify;
 import com.junesoon.mim.model.ChatContact;
 import com.junesoon.mim.model.ChatUser;
 import com.junesoon.mim.model.CipherMessage;
+import com.junesoon.mim.model.PreKeyBundle;
 import com.junesoon.mim.service.MessageService.DecryptedMessage;
 import com.junesoon.mim.websocket.WSClient;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +33,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * 把本机已经解开的历史，重新加密给自己的另一台设备。
  *
+ * <p>这是攻击面最大的一处：转发的是<b>明文</b>。因此绝不能相信服务端给出的
+ * 设备列表——必须只发给本机用户显式批准过的设备（{@link OwnDeviceTrust}）。
+ * 第一次向一台设备转发时，界面会展示它的身份指纹，由用户确认。
+ *
  * <p>每个会话只带最近 50 条。本机没有原文的消息补不了，这是端到端加密的边界。
  */
 @Slf4j
@@ -39,9 +47,28 @@ public final class HistorySync {
 
     private static final ConcurrentHashMap<String, Object> LOCKS = new ConcurrentHashMap<>();
 
+    /**
+     * 用户拒绝过的「设备 + 指纹」，本次会话内不再重复弹窗。
+     */
+    private static final Set<String> DENIED = ConcurrentHashMap.newKeySet();
+
     private static volatile WSClient bound;
 
+    /**
+     * 需要用户确认一台新设备时回调。必须在 JavaFX 线程弹窗，
+     * 并由实现方阻塞等待用户选择。未设置时默认拒绝。
+     */
+    public interface DeviceApprover {
+        boolean approve(String deviceId, String fingerprint);
+    }
+
+    private static volatile DeviceApprover approver;
+
     private HistorySync() {
+    }
+
+    public static void setApprover(DeviceApprover value) {
+        approver = value;
     }
 
     /**
@@ -57,7 +84,7 @@ public final class HistorySync {
     }
 
     /**
-     * 登录后：请其他设备补给我，同时把我有的原文补给它们。
+     * 登录后：请其他设备补给我，同时把我有的原文补给我已经信任的设备。
      */
     public static void requestInBackground() {
         Thread worker = new Thread(() -> {
@@ -85,7 +112,8 @@ public final class HistorySync {
         if (target.equals(self)) {
             return;
         }
-        Thread worker = new Thread(() -> forward(target), "history-sync");
+        // 对方明确请求了历史：允许向用户申请一次设备授权
+        Thread worker = new Thread(() -> forward(target, true), "history-sync");
         worker.setDaemon(true);
         worker.start();
     }
@@ -102,19 +130,93 @@ public final class HistorySync {
         }
     }
 
+    /**
+     * 登录时主动补发给其它设备。这里<b>只发给自己已经信任的设备</b>，
+     * 不弹窗：新设备会自己请求历史，届时再走交互式确认。
+     */
     private static void forwardToSiblings() {
         String self = KeyManager.getInstance().deviceId();
+        OwnDeviceTrust trust = KeyManager.getInstance().getOwnDeviceTrust();
         for (String deviceId : siblingDevices()) {
             if (deviceId == null || deviceId.equals(self)) {
                 continue;
             }
-            forward(deviceId);
+            if (trust.getPinned(deviceId) == null) {
+                log.info("跳过未授权的本账号设备 {}，等待其主动请求历史", deviceId);
+                continue;
+            }
+            forward(deviceId, false);
         }
     }
 
-    private static void forward(String targetDeviceId) {
+    private static void forward(String targetDeviceId, boolean interactive) {
         Object lock = LOCKS.computeIfAbsent(targetDeviceId, key -> new Object());
         synchronized (lock) {
+            OwnDeviceTrust trust = KeyManager.getInstance().getOwnDeviceTrust();
+            String password;
+            try {
+                password = currentPassword();
+            } catch (IdentityException e) {
+                log.warn("会话已锁定，跳过历史转发：{}", e.getMessage());
+                return;
+            }
+
+            PreKeyBundle bundle;
+            try {
+                bundle = PreKeyManager.getInstance().fetchOwnDevice(targetDeviceId);
+            } catch (IdentityException e) {
+                log.warn("获取设备 {} 的预密钥失败，跳过历史转发：{}", targetDeviceId,
+                    e.getMessage());
+                return;
+            }
+
+            boolean trusted = trust.isTrusted(targetDeviceId, bundle.getIdentityPublicKey());
+            if (!trusted) {
+                if (!interactive) {
+                    log.info("设备 {} 未获本机授权，忽略非交互式历史同步", targetDeviceId);
+                    return;
+                }
+                String fingerprint;
+                try {
+                    fingerprint = fingerprintOf(bundle.getIdentityPublicKey());
+                } catch (IdentityException e) {
+                    log.warn("设备 {} 的身份公钥格式错误，拒绝转发：{}", targetDeviceId,
+                        e.getMessage());
+                    return;
+                }
+                String denyKey = targetDeviceId + "|" + fingerprint;
+                if (DENIED.contains(denyKey)) {
+                    return;
+                }
+                DeviceApprover current = approver;
+                if (current == null) {
+                    log.warn("设备 {} 请求历史，但没有可用的确认界面，已拒绝", targetDeviceId);
+                    DENIED.add(denyKey);
+                    return;
+                }
+                if (!current.approve(targetDeviceId, fingerprint)) {
+                    log.warn("用户拒绝向设备 {} 转发历史", targetDeviceId);
+                    DENIED.add(denyKey);
+                    return;
+                }
+                try {
+                    trust.trustDevice(targetDeviceId, bundle.getIdentityPublicKey(), password);
+                    // 旧版本可能在未授权时建立过会话，必须重建
+                    MessageService.getInstance().invalidateSyncSession(targetDeviceId);
+                } catch (IdentityException e) {
+                    log.warn("保存设备授权失败：{}", e.getMessage());
+                    return;
+                }
+            }
+
+            // 无论新老授权，都按已固定公钥重新验一遍预密钥签名
+            try {
+                PreKeyManager.getInstance().verifyOwnDeviceBundle(bundle);
+            } catch (IdentityException e) {
+                log.warn("设备 {} 预密钥校验失败，拒绝转发：{}", targetDeviceId, e.getMessage());
+                return;
+            }
+
             Set<String> done = loadDone(targetDeviceId);
             List<CipherMessage> batch = new ArrayList<>();
             int forwarded = 0;
@@ -125,7 +227,7 @@ public final class HistorySync {
                     if (clientMsgId == null || done.contains(clientMsgId)) {
                         continue;
                     }
-                    CipherMessage replica = toReplica(targetDeviceId, message);
+                    CipherMessage replica = toReplica(targetDeviceId, message, bundle);
                     if (replica == null) {
                         continue;
                     }
@@ -142,7 +244,8 @@ public final class HistorySync {
         }
     }
 
-    private static CipherMessage toReplica(String targetDeviceId, DecryptedMessage message) {
+    private static CipherMessage toReplica(String targetDeviceId, DecryptedMessage message,
+        PreKeyBundle bundle) {
         if (message.isRecalled()) {
             CipherMessage tombstone = new CipherMessage();
             tombstone.setClientMsgId(message.getClientMsgId());
@@ -158,7 +261,7 @@ public final class HistorySync {
         }
         try {
             return MessageService.getInstance().wrapForOwnDevice(targetDeviceId, text,
-                message.getClientMsgId(), message.getTimestamp());
+                message.getClientMsgId(), message.getTimestamp(), bundle);
         } catch (IdentityException e) {
             log.warn("转发消息 {} 失败：{}", message.getClientMsgId(), e.getMessage());
             return null;
@@ -243,6 +346,23 @@ public final class HistorySync {
         return devices;
     }
 
+    private static String currentPassword() throws IdentityException {
+        char[] password = ApplicatonStore.getSessionPassword();
+        if (password == null || password.length == 0) {
+            throw new IdentityException("会话已锁定，请重新登录");
+        }
+        return new String(password);
+    }
+
+    private static String fingerprintOf(String identityPublicKey) throws IdentityException {
+        try {
+            return TrustStore.shortFingerprint(
+                Hkdf.sha256Hex(java.util.Base64.getDecoder().decode(identityPublicKey)));
+        } catch (IllegalArgumentException e) {
+            throw new IdentityException("设备身份公钥格式错误");
+        }
+    }
+
     private static Set<String> loadDone(String targetDeviceId) {
         Path file = stamp(targetDeviceId);
         if (!Files.isRegularFile(file)) {
@@ -277,6 +397,7 @@ public final class HistorySync {
         if (value == null) {
             return "none";
         }
-        return value.replaceAll("[^A-Za-z0-9_.\\-]", "_");
+        // 旧实现只保留 ASCII，中文用户名会碰撞。这里用哈希，既避免碰撞又没有非法字符。
+        return Hkdf.sha256Hex(value.getBytes(StandardCharsets.UTF_8)).toLowerCase();
     }
 }

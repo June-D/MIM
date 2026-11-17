@@ -204,6 +204,17 @@ class PreKeyServiceTest {
         }
 
         @Override
+        public int bumpTokenVersion(String username, String deviceId) {
+            Device device = devices.get(key(username, deviceId));
+            if (device == null) {
+                return 0;
+            }
+            device.setTokenVersion(
+                (device.getTokenVersion() == null ? 0 : device.getTokenVersion()) + 1);
+            return 1;
+        }
+
+        @Override
         public int countActiveDevices(String username) {
             int count = 0;
             for (Device d : devices.values()) {

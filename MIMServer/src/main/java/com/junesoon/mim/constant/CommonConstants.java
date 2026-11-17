@@ -26,6 +26,10 @@ public class CommonConstants {
 
     public static final String JWT_KEY_USER_ID = "userId";
     public static final String JWT_KEY_NICKNAME = "nickname";
+    /** 令牌绑定的设备标识。缺省为空表示旧版未绑定设备。 */
+    public static final String JWT_KEY_DEVICE_ID = "deviceId";
+    /** 设备的令牌版本。登出/注销时自增，旧令牌立即失效。 */
+    public static final String JWT_KEY_TOKEN_VERSION = "tv";
 
     public static final String USER_STATUS_NORMAL = "1";
     public static final String USER_STATUS_LOGOFF = "2";

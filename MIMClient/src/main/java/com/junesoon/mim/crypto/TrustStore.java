@@ -4,28 +4,33 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * TOFU（Trust On First Use）信任库。
+ * TOFU（Trust On First Use）信任库，按<b>设备</b>固定身份公钥。
  *
- * <p>解决的问题：身份公钥由服务端目录分发，服务端若被攻破或本身就是恶意的，
- * 可以把 alice 的公钥换成攻击者的公钥，从而中间人解密所有消息。
- * 端到端加密里服务端本就不该是可信的。
+ * <p>多设备下身份密钥是按设备独立的：同一个用户的两台设备有两把不同的身份公钥。
+ * 如果只按用户名固定，第二台设备必然被判成「公钥变更」，既发不出消息，
+ * 也会把用户训练成无脑点击「确认」。因此这里的键是
+ * {@code (username, deviceId)}。
  *
- * <p>做法：第一次见到某用户的身份公钥时把它「固定」下来（首次使用即信任），
- * 此后每次使用都对比。一旦发现变化：
+ * <p>规则：
  * <ul>
- *   <li><b>不静默接受</b> —— 那等于没有防护；</li>
- *   <li>标记为 {@link TrustStatus#CHANGED}，阻断发送，要求用户线下核对指纹后
- *       显式确认，才更新固定值。</li>
+ *   <li>第一次见到某个用户：把它当前<b>所有</b>设备的公钥一次性固定（首次使用即信任）；</li>
+ *   <li>已固定用户新增设备：返回 {@link TrustStatus#NEW_DEVICE}，<b>不自动固定</b>，
+ *       必须由用户核对指纹后显式确认；</li>
+ *   <li>已固定设备的公钥变化：返回 {@link TrustStatus#CHANGED}，阻断发送；</li>
+ *   <li>旧版本按用户名保存的固定值会在首次使用时迁移到对应设备，
+ *       不会因为升级而把所有联系人重置成 NEW。</li>
  * </ul>
  *
- * <p>这跟 SSH 的 known_hosts 是同一个思路。局限是「首次」本身仍可能被中间人劫持，
- * 所以要配合界面上展示的指纹让用户线下核对（安全码比对）。
+ * <p>局限与 SSH 的 known_hosts 相同：首次使用本身仍可能被中间人劫持，
+ * 所以需要配合界面展示的指纹让用户线下核对。
  */
 @Slf4j
 public class TrustStore {
@@ -34,10 +39,12 @@ public class TrustStore {
      * 信任状态。
      */
     public enum TrustStatus {
-        /** 首次见到，已固定 */
+        /** 首次见到该用户，已固定其当前所有设备 */
         NEW,
         /** 与固定值一致 */
         TRUSTED,
+        /** 已固定用户新增了一台设备，需要用户确认 */
+        NEW_DEVICE,
         /** 与固定值不一致，必须人工确认 */
         CHANGED
     }
@@ -47,17 +54,32 @@ public class TrustStore {
      */
     public static final class VerificationResult {
         private final TrustStatus status;
+        private final String peer;
+        private final String deviceId;
         private final String previousFingerprint;
         private final String currentFingerprint;
+        private final String publicKey;
 
-        VerificationResult(TrustStatus status, String previousFingerprint, String currentFingerprint) {
+        VerificationResult(TrustStatus status, String peer, String deviceId,
+            String previousFingerprint, String currentFingerprint, String publicKey) {
             this.status = status;
+            this.peer = peer;
+            this.deviceId = deviceId;
             this.previousFingerprint = previousFingerprint;
             this.currentFingerprint = currentFingerprint;
+            this.publicKey = publicKey;
         }
 
         public TrustStatus getStatus() {
             return status;
+        }
+
+        public String getPeer() {
+            return peer;
+        }
+
+        public String getDeviceId() {
+            return deviceId;
         }
 
         public String getPreviousFingerprint() {
@@ -68,8 +90,12 @@ public class TrustStore {
             return currentFingerprint;
         }
 
+        public String getPublicKey() {
+            return publicKey;
+        }
+
         public boolean isSendable() {
-            return status != TrustStatus.CHANGED;
+            return status == TrustStatus.NEW || status == TrustStatus.TRUSTED;
         }
 
         /**
@@ -78,11 +104,17 @@ public class TrustStore {
         public String describe() {
             switch (status) {
                 case NEW:
-                    return "首次与对方建立加密身份，已固定其公钥指纹 " + shortFingerprint(currentFingerprint);
+                    return "首次与对方设备 " + deviceId + " 建立加密身份，已固定其公钥指纹 "
+                        + shortFingerprint(currentFingerprint);
                 case TRUSTED:
-                    return "对方公钥指纹与本地记录一致";
+                    return "对方设备 " + deviceId + " 的公钥指纹与本地记录一致";
+                case NEW_DEVICE:
+                    return "⚠ 对方新增了设备 " + deviceId + "。\n指纹："
+                        + shortFingerprint(currentFingerprint)
+                        + "\n请通过其他可信渠道与对方核对；确认不是中间人后再继续。";
                 default:
-                    return "⚠ 对方公钥已变更！\n原指纹：" + shortFingerprint(previousFingerprint)
+                    return "⚠ 对方设备 " + deviceId + " 的公钥已变更！\n原指纹："
+                        + shortFingerprint(previousFingerprint)
                         + "\n新指纹：" + shortFingerprint(currentFingerprint)
                         + "\n这可能是对方换了设备，也可能是中间人攻击。"
                         + "请通过其他可信渠道与对方核对指纹后再确认。";
@@ -90,12 +122,22 @@ public class TrustStore {
         }
     }
 
+    private static final char FIELD_SEP = '\t';
+    private static final String RECORD_DEVICE = "d";
+    private static final String RECORD_LEGACY = "l";
+    private static final String DEFAULT_DEVICE = "default";
+
     private final Path directory;
 
     /**
-     * 内存缓存：username -> 已固定的身份公钥 Base64。
+     * 已固定的设备公钥：{@code peer + '\t' + deviceId -> Base64(publicKey)}。
      */
     private final Map<String, String> pinned = new ConcurrentHashMap<>();
+
+    /**
+     * 旧版本按用户名固定的公钥。升级后首次使用时迁移到具体设备。
+     */
+    private final Map<String, String> legacy = new ConcurrentHashMap<>();
 
     private volatile String selfUsername;
 
@@ -107,12 +149,15 @@ public class TrustStore {
         this.directory = directory;
     }
 
+    // ==================== 加载与保存 ====================
+
     /**
      * 加载某个用户的信任库。
      */
     public void load(String selfUsername, String password) throws IdentityException {
         this.selfUsername = selfUsername;
         pinned.clear();
+        legacy.clear();
         Path file = fileOf(selfUsername);
         if (!Files.exists(file)) {
             return;
@@ -148,13 +193,8 @@ public class TrustStore {
             }
             byte[] plain = SecretBox.open(password, selfUsername + "|trust", salt, nonce, data);
             String body = new String(plain, StandardCharsets.UTF_8);
-            for (String line : body.split("\n")) {
-                int idx = line.indexOf('=');
-                if (idx > 0) {
-                    pinned.put(line.substring(0, idx), line.substring(idx + 1).trim());
-                }
-            }
-            log.info("已加载 {} 条信任记录", pinned.size());
+            parseBody(body);
+            log.info("已加载 {} 条设备信任记录、{} 条旧版记录", pinned.size(), legacy.size());
         } catch (IdentityException e) {
             throw e;
         } catch (Exception e) {
@@ -162,49 +202,197 @@ public class TrustStore {
         }
     }
 
+    private void parseBody(String body) {
+        for (String line : body.split("\n")) {
+            if (line.isEmpty()) {
+                continue;
+            }
+            String[] parts = line.split(String.valueOf(FIELD_SEP), -1);
+            if (parts.length >= 4 && RECORD_DEVICE.equals(parts[0])) {
+                pinned.put(key(parts[1], parts[2]), parts[3]);
+            } else if (parts.length >= 3 && RECORD_LEGACY.equals(parts[0])) {
+                legacy.put(parts[1], parts[2]);
+            } else if (line.indexOf(FIELD_SEP) < 0) {
+                // 旧版本格式：username=publicKey
+                int idx = line.indexOf('=');
+                if (idx > 0) {
+                    legacy.put(line.substring(0, idx), line.substring(idx + 1).trim());
+                }
+            }
+        }
+    }
+
+    // ==================== 校验 ====================
+
     /**
-     * 校验对方公钥。
-     *
-     * <p>首次见到会立即固定并持久化；与已固定的不一致则返回 {@link TrustStatus#CHANGED}。
+     * 校验一台设备的身份公钥。首次见到该用户时会固定其公钥；
+     * 已固定用户新增设备时返回 {@link TrustStatus#NEW_DEVICE}，不会自动固定。
      */
-    public VerificationResult verify(String peer, String identityPublicKey, String password)
-        throws IdentityException {
-        String fingerprint = Hkdf.sha256Hex(java.util.Base64.getDecoder().decode(identityPublicKey));
-        String existing = pinned.get(peer);
-        if (existing == null) {
-            pinned.put(peer, identityPublicKey);
+    public VerificationResult verify(String peer, String deviceId, String identityPublicKey,
+        String password) throws IdentityException {
+        String device = normalizeDevice(deviceId);
+        String fingerprint = fingerprint(identityPublicKey);
+        String existing = pinned.get(key(peer, device));
+        if (existing != null) {
+            return compare(peer, device, existing, identityPublicKey, fingerprint);
+        }
+        String legacyKey = legacy.get(peer);
+        if (legacyKey != null) {
+            VerificationResult result = compare(peer, device, legacyKey, identityPublicKey, fingerprint);
+            if (result.isSendable()) {
+                // 旧版只能确认「这个用户的某一台设备」，迁移到当前设备并移除旧记录
+                pinned.put(key(peer, device), identityPublicKey);
+                legacy.remove(peer);
+                persist(password);
+            }
+            return result;
+        }
+        if (!hasPins(peer)) {
+            pinned.put(key(peer, device), identityPublicKey);
             persist(password);
-            log.info("首次固定用户 {} 的身份公钥，指纹 {}", peer, fingerprint);
-            return new VerificationResult(TrustStatus.NEW, null, fingerprint);
+            log.info("首次固定用户 {} 设备 {} 的身份公钥，指纹 {}", peer, device, fingerprint);
+            return new VerificationResult(TrustStatus.NEW, peer, device, null, fingerprint,
+                identityPublicKey);
         }
-        String existingFingerprint = Hkdf.sha256Hex(java.util.Base64.getDecoder().decode(existing));
+        log.warn("用户 {} 出现未固定设备 {}，指纹 {}", peer, device, fingerprint);
+        return new VerificationResult(TrustStatus.NEW_DEVICE, peer, device, null, fingerprint,
+            identityPublicKey);
+    }
+
+    /**
+     * 一次性校验某用户当前所有设备。
+     *
+     * <p>首次见到该用户时把整组设备一起固定；否则逐台判断，新增设备返回
+     * {@link TrustStatus#NEW_DEVICE} 且不会被写入。调用方必须先验证所有设备的
+     * 预密钥签名，再调用本方法，避免把伪造公钥固定下来。
+     */
+    public List<VerificationResult> verifyAll(String peer, Map<String, String> deviceKeys,
+        String password) throws IdentityException {
+        List<VerificationResult> results = new ArrayList<>();
+        if (deviceKeys == null || deviceKeys.isEmpty()) {
+            return results;
+        }
+        boolean firstContact = !hasPins(peer);
+        boolean migrated = false;
+
+        if (firstContact) {
+            for (Map.Entry<String, String> entry : deviceKeys.entrySet()) {
+                String device = normalizeDevice(entry.getKey());
+                pinned.put(key(peer, device), entry.getValue());
+                results.add(new VerificationResult(TrustStatus.NEW, peer, device, null,
+                    fingerprint(entry.getValue()), entry.getValue()));
+            }
+            persist(password);
+            log.info("首次固定用户 {} 的 {} 台设备", peer, results.size());
+            return results;
+        }
+
+        for (Map.Entry<String, String> entry : deviceKeys.entrySet()) {
+            String device = normalizeDevice(entry.getKey());
+            String key = entry.getValue();
+            String fp = fingerprint(key);
+            String existing = pinned.get(key(peer, device));
+            if (existing != null) {
+                results.add(compare(peer, device, existing, key, fp));
+                continue;
+            }
+            String legacyKey = legacy.get(peer);
+            if (legacyKey != null && legacyKey.equals(key)) {
+                pinned.put(key(peer, device), key);
+                legacy.remove(peer);
+                migrated = true;
+                results.add(new VerificationResult(TrustStatus.TRUSTED, peer, device, fp, fp, key));
+                continue;
+            }
+            if (legacyKey != null && !legacyKey.equals(key)) {
+                results.add(new VerificationResult(TrustStatus.CHANGED, peer, device,
+                    fingerprint(legacyKey), fp, key));
+                continue;
+            }
+            results.add(new VerificationResult(TrustStatus.NEW_DEVICE, peer, device, null, fp, key));
+        }
+        if (migrated) {
+            persist(password);
+        }
+        return results;
+    }
+
+    private VerificationResult compare(String peer, String device, String existing,
+        String identityPublicKey, String fingerprint) {
         if (existing.equals(identityPublicKey)) {
-            return new VerificationResult(TrustStatus.TRUSTED, existingFingerprint, fingerprint);
+            return new VerificationResult(TrustStatus.TRUSTED, peer, device,
+                fingerprint(existing), fingerprint, identityPublicKey);
         }
-        log.warn("用户 {} 的身份公钥发生变化！原指纹 {} 新指纹 {}", peer, existingFingerprint,
-            fingerprint);
-        return new VerificationResult(TrustStatus.CHANGED, existingFingerprint, fingerprint);
+        log.warn("用户 {} 设备 {} 的身份公钥发生变化！原指纹 {} 新指纹 {}", peer, device,
+            fingerprint(existing), fingerprint);
+        return new VerificationResult(TrustStatus.CHANGED, peer, device,
+            fingerprint(existing), fingerprint, identityPublicKey);
     }
 
     /**
-     * 用户线下核对指纹后显式确认变更，覆盖固定值。
+     * 用户核对指纹后显式接受一台设备的新公钥。
      */
-    public void acceptChange(String peer, String identityPublicKey, String password)
+    public void acceptDevice(String peer, String deviceId, String identityPublicKey, String password)
         throws IdentityException {
-        pinned.put(peer, identityPublicKey);
-        persist(password);
-        log.warn("用户确认接受 {} 的新身份公钥", peer);
+        acceptDevices(peer, java.util.Collections.singletonMap(deviceId, identityPublicKey), password);
     }
 
     /**
-     * 取得已固定的公钥，未固定返回 null。
+     * 用户核对指纹后显式接受一组设备的新公钥。
      */
-    public String getPinned(String peer) {
-        return pinned.get(peer);
+    public void acceptDevices(String peer, Map<String, String> deviceKeys, String password)
+        throws IdentityException {
+        if (deviceKeys == null) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : deviceKeys.entrySet()) {
+            pinned.put(key(peer, normalizeDevice(entry.getKey())), entry.getValue());
+        }
+        legacy.remove(peer);
+        persist(password);
+        log.warn("用户确认接受 {} 的 {} 台设备", peer, deviceKeys.size());
     }
 
-    public boolean isPinned(String peer) {
-        return pinned.containsKey(peer);
+    // ==================== 查询 ====================
+
+    /**
+     * 取得某台设备已固定的公钥，未固定返回 null。
+     */
+    public String getPinned(String peer, String deviceId) {
+        return pinned.get(key(peer, normalizeDevice(deviceId)));
+    }
+
+    /**
+     * 取得某个用户的全部已固定设备。
+     */
+    public Map<String, String> getPinnedDevices(String peer) {
+        Map<String, String> result = new LinkedHashMap<>();
+        String prefix = peer + String.valueOf(FIELD_SEP);
+        for (Map.Entry<String, String> entry : pinned.entrySet()) {
+            if (entry.getKey().startsWith(prefix)) {
+                result.put(entry.getKey().substring(prefix.length()), entry.getValue());
+            }
+        }
+        // 兼容尚未迁移的旧记录：旧客户端默认设备是 default
+        String legacyKey = legacy.get(peer);
+        if (legacyKey != null && !result.containsKey(DEFAULT_DEVICE)) {
+            result.put(DEFAULT_DEVICE, legacyKey);
+        }
+        return result;
+    }
+
+    public boolean isPinned(String peer, String deviceId) {
+        return pinned.containsKey(key(peer, normalizeDevice(deviceId)));
+    }
+
+    public boolean hasPins(String peer) {
+        String prefix = peer + String.valueOf(FIELD_SEP);
+        for (String k : pinned.keySet()) {
+            if (k.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return legacy.containsKey(peer);
     }
 
     public Map<String, String> allPinned() {
@@ -213,8 +401,11 @@ public class TrustStore {
 
     public void reset() {
         pinned.clear();
+        legacy.clear();
         selfUsername = null;
     }
+
+    // ==================== 持久化 ====================
 
     private void persist(String password) throws IdentityException {
         if (selfUsername == null) {
@@ -222,8 +413,20 @@ public class TrustStore {
         }
         try {
             StringBuilder sb = new StringBuilder(1024);
-            for (Map.Entry<String, String> entry : pinned.entrySet()) {
-                sb.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
+            for (Map.Entry<String, String> entry : new java.util.TreeMap<>(pinned).entrySet()) {
+                int idx = entry.getKey().indexOf(FIELD_SEP);
+                if (idx <= 0) {
+                    continue;
+                }
+                sb.append(RECORD_DEVICE).append(FIELD_SEP)
+                    .append(entry.getKey(), 0, idx).append(FIELD_SEP)
+                    .append(entry.getKey().substring(idx + 1)).append(FIELD_SEP)
+                    .append(entry.getValue()).append('\n');
+            }
+            for (Map.Entry<String, String> entry : new java.util.TreeMap<>(legacy).entrySet()) {
+                sb.append(RECORD_LEGACY).append(FIELD_SEP)
+                    .append(entry.getKey()).append(FIELD_SEP)
+                    .append(entry.getValue()).append('\n');
             }
             SecretBox.Sealed sealed = SecretBox.seal(password, selfUsername + "|trust",
                 sb.toString().getBytes(StandardCharsets.UTF_8));
@@ -256,6 +459,20 @@ public class TrustStore {
         String safe = username == null ? "unknown"
             : username.replaceAll("[^A-Za-z0-9_.\\-\\p{L}\\p{N}]", "_");
         return directory.resolve(safe + ".trust");
+    }
+
+    // ==================== 工具 ====================
+
+    private static String key(String peer, String deviceId) {
+        return peer + FIELD_SEP + normalizeDevice(deviceId);
+    }
+
+    private static String normalizeDevice(String deviceId) {
+        return deviceId == null || deviceId.isEmpty() ? DEFAULT_DEVICE : deviceId;
+    }
+
+    private static String fingerprint(String identityPublicKey) {
+        return Hkdf.sha256Hex(java.util.Base64.getDecoder().decode(identityPublicKey));
     }
 
     /**

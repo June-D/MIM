@@ -54,6 +54,7 @@ public class MessageController {
      * 与某人的历史消息，按 id 倒序翻页（返回时已转为时间正序，且已按 clientMsgId 去重）。
      */
     @GetMapping("/history/{peer}")
+    @RateLimit(limit = 120, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
     public ObjectRestResponse<List<CipherMessage>> history(@CurrentUser String username,
         @CurrentDevice String deviceId,
         @PathVariable String peer,
@@ -68,6 +69,7 @@ public class MessageController {
      * 本设备尚未投递的离线消息，客户端上线后调用补齐。
      */
     @GetMapping("/undelivered")
+    @RateLimit(limit = 60, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
     public ObjectRestResponse<List<CipherMessage>> undelivered(@CurrentUser String username,
         @CurrentDevice String deviceId,
         @RequestParam(value = "limit", defaultValue = "200") int limit) {

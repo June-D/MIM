@@ -61,4 +61,13 @@ public class TlsProperties {
      * 启用的 TLS 协议版本。TLS 1.0/1.1 已被主流浏览器与规范弃用。
      */
     private String[] protocols = {"TLSv1.2", "TLSv1.3"};
+
+    /**
+     * 启用 TLS 后是否拒绝明文端口上的业务请求。
+     *
+     * <p>默认 true。Tomcat 在主端口上仍然监听 HTTP；如果不拒绝，攻击者可以绕过
+     * TLS 直接走 8080 抓口令与 JWT，TLS 就形同虚设。确实要在内网保留明文调试时，
+     * 显式设为 false。
+     */
+    private boolean blockPlaintext = true;
 }

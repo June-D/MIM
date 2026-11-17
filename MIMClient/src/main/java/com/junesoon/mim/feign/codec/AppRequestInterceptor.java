@@ -19,11 +19,14 @@ public class AppRequestInterceptor implements RequestInterceptor {
     @Override
     public void apply(RequestTemplate template) {
         String token = ApplicatonStore.getToken();
-        if (token != null && !token.trim().isEmpty()) {
+        // 某些调用（例如登出）会显式带 Authorization，避免重复或覆盖
+        if (token != null && !token.trim().isEmpty()
+            && !template.headers().containsKey("Authorization")) {
             template.header("Authorization", "Bearer " + token);
         }
         String deviceId = ApplicatonStore.getDeviceId();
-        if (deviceId != null && !deviceId.trim().isEmpty()) {
+        if (deviceId != null && !deviceId.trim().isEmpty()
+            && !template.headers().containsKey("X-Device-Id")) {
             template.header("X-Device-Id", deviceId);
         }
     }

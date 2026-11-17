@@ -1,12 +1,13 @@
 package com.junesoon.mim.auth;
 
 import com.junesoon.mim.exception.UserTokenException;
-import com.junesoon.mim.utils.UserAuthUtil;
+import com.junesoon.mim.jwt.JWTInfo;
 import org.springframework.core.MethodParameter;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.support.WebDataBinderFactory;
 import org.springframework.web.context.request.NativeWebRequest;
+import org.springframework.web.context.request.RequestAttributes;
 import org.springframework.web.method.support.HandlerMethodArgumentResolver;
 import org.springframework.web.method.support.ModelAndViewContainer;
 
@@ -19,10 +20,10 @@ public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolve
     private static final String AUTH_HEADER = "Authorization";
     private static final String BEARER_PREFIX = "Bearer ";
 
-    private final UserAuthUtil userAuthUtil;
+    private final TokenService tokenService;
 
-    public CurrentUserArgumentResolver(UserAuthUtil userAuthUtil) {
-        this.userAuthUtil = userAuthUtil;
+    public CurrentUserArgumentResolver(TokenService tokenService) {
+        this.tokenService = tokenService;
     }
 
     @Override
@@ -39,10 +40,13 @@ public class CurrentUserArgumentResolver implements HandlerMethodArgumentResolve
             throw new UserTokenException("缺少登录凭证");
         }
         try {
-            String username = userAuthUtil.getUsername(token);
+            JWTInfo info = tokenService.resolve(token);
+            String username = info.getUsername();
             if (!StringUtils.hasText(username)) {
                 throw new UserTokenException("登录凭证无效");
             }
+            webRequest.setAttribute(TokenService.REQUEST_ATTRIBUTE, info,
+                RequestAttributes.SCOPE_REQUEST);
             return username;
         } catch (UserTokenException e) {
             throw e;

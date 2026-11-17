@@ -98,6 +98,12 @@ public class MessageServiceImpl implements MessageService {
 
         String fromDevice = StringUtils.hasText(fromDeviceId)
             ? fromDeviceId.trim() : UserKey.DEFAULT_DEVICE_ID;
+        // 发信设备必须是调用者自己已注册且未注销的设备。
+        // 否则任何人都能凭空伪造 deviceId，让收信端为每个假设备建立一个新会话
+        //（新 X3DH + 新会话文件 + 消耗 OPK），属于低成本的磁盘/CPU 放大攻击。
+        if (!UserKey.DEFAULT_DEVICE_ID.equals(fromDevice)) {
+            fromDevice = requireOwnDevice(authenticatedUser, fromDevice);
+        }
 
         // 所有副本必须属于同一条逻辑消息、同一个收信人
         String clientMsgId = messages.get(0).getClientMsgId();
@@ -115,6 +121,18 @@ public class MessageServiceImpl implements MessageService {
         }
 
         validateEnvelope(authenticatedUser, toUsername, clientMsgId, messages.get(0));
+
+        // 首条握手消息里的身份公钥必须与发信设备登记的公钥一致。
+        // 接收方虽然也会做 TOFU 校验，但服务端先挡掉明显伪造的声明，
+        // 避免把畸形包扩散给收信端。
+        if (!UserKey.DEFAULT_DEVICE_ID.equals(fromDevice)) {
+            UserKey senderKey = userKeyMapper.selectByDevice(authenticatedUser, fromDevice);
+            String claimed = messages.get(0).getSenderIdentityKey();
+            if (senderKey != null && StringUtils.hasText(claimed)
+                && !claimed.equals(senderKey.getPublicKey())) {
+                throw new UserInvalidException("发信设备身份公钥与登记值不一致");
+            }
+        }
 
         // 目标设备必须真实属于收信人且未注销
         Set<String> activeDevices = new HashSet<>();

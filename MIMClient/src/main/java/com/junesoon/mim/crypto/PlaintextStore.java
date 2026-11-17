@@ -46,7 +46,13 @@ public final class PlaintextStore {
         texts.clear();
         Path file = fileOf(username);
         if (!Files.exists(file)) {
-            return;
+            // 兼容旧版文件名：旧实现把非 ASCII 字符全替换成下划线，
+            // 中文用户名会互相碰撞。迁移到哈希文件名后互不影响。
+            Path legacy = legacyFileOf(username);
+            if (!Files.exists(legacy)) {
+                return;
+            }
+            file = legacy;
         }
         try {
             String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
@@ -67,6 +73,10 @@ public final class PlaintextStore {
                 String text = new String(Base64.getDecoder().decode(line.substring(idx + 1)),
                     StandardCharsets.UTF_8);
                 texts.put(id, text);
+            }
+            if (!file.equals(fileOf(username))) {
+                // 迁移到新文件名；旧文件保留，避免多账号共用时误删
+                save();
             }
         } catch (Exception e) {
             log.warn("读取本地明文记录失败，已发出的历史消息可能无法显示：{}", e.getMessage());
@@ -131,6 +141,14 @@ public final class PlaintextStore {
     }
 
     private Path fileOf(String name) {
+        // 用 SHA-256 而不是「保留 ASCII」：中文用户名在旧方案里会全部变成下划线，
+        // 同一台机器上的两个中文账号会共用同一个文件。
+        String digest = Hkdf.sha256Hex(
+            (name == null ? "unknown" : name).getBytes(StandardCharsets.UTF_8));
+        return directory.resolve(digest.toLowerCase() + ".box");
+    }
+
+    private Path legacyFileOf(String name) {
         String safe = name == null ? "unknown" : name.replaceAll("[^A-Za-z0-9_.\\-]", "_");
         return directory.resolve(safe + ".box");
     }

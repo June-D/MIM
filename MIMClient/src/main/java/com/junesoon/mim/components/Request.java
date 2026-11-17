@@ -45,7 +45,9 @@ public class Request {
                 .errorDecoder(getRequestErrorDecoder())
                 .requestInterceptor(getRequestInterceptor())
                 .logger(getSlf4jLogger())
-                .logLevel(Logger.Level.FULL)
+                // 绝不使用 FULL：Feign 的 FULL 会打印 Authorization 头和登录请求体，
+                // 等于把 JWT 与口令 Base64 写进本地日志文件。
+                .logLevel(Logger.Level.NONE)
                 .retryer(Retryer.NEVER_RETRY)
                 .options(new feign.Request.Options(CONNECT_TIME_OUT_MILLIS, readTimeOut))
                 .target(connectorClass, API_URL);

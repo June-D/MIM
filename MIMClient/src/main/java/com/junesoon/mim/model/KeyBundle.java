@@ -11,6 +11,11 @@ public class KeyBundle {
     private String username;
 
     /**
+     * 设备标识。一个用户有多个设备时，每个设备一把独立身份公钥。
+     */
+    private String deviceId;
+
+    /**
      * Base64(X.509 SubjectPublicKeyInfo)，EC P-256。
      */
     private String publicKey;

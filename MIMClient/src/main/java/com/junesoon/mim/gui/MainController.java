@@ -13,6 +13,9 @@ import com.junesoon.mim.model.UserSummary;
 import com.junesoon.mim.service.MessageService;
 import com.junesoon.mim.service.SessionManager;
 import com.junesoon.mim.utils.AlertUtil;
+import com.junesoon.mim.crypto.Hkdf;
+import com.junesoon.mim.crypto.TrustStore;
+import com.junesoon.mim.service.KeyManager;
 import com.junesoon.mim.websocket.WSClient;
 import io.datafx.controller.ViewController;
 import io.datafx.controller.flow.Flow;
@@ -347,12 +350,41 @@ public class MainController {
             new javafx.scene.control.MenuItem("切换账号");
         switchAccount.setOnAction(e -> confirmLogout("切换账号", true));
 
+        javafx.scene.control.MenuItem deviceCode =
+            new javafx.scene.control.MenuItem("本机设备安全码");
+        deviceCode.setOnAction(e -> showOwnDeviceCode());
+
         javafx.scene.control.MenuItem logout =
             new javafx.scene.control.MenuItem("退出登录");
         logout.setOnAction(e -> confirmLogout("退出登录", false));
 
-        menu.getItems().addAll(switchAccount, logout);
+        menu.getItems().addAll(deviceCode, switchAccount, logout);
         menu.show(accountMenuButton, event.getScreenX(), event.getScreenY());
+    }
+
+    /**
+     * 展示本机设备标识与身份公钥指纹，供另一台设备转发历史前逐字核对。
+     */
+    private void showOwnDeviceCode() {
+        com.junesoon.mim.crypto.IdentityStore.Identity identity =
+            KeyManager.getInstance().getIdentity();
+        if (identity == null) {
+            AlertUtil.show("无法显示", "本地加密身份尚未初始化，请重新登录。");
+            return;
+        }
+        String fingerprint;
+        try {
+            fingerprint = TrustStore.shortFingerprint(Hkdf.sha256Hex(
+                java.util.Base64.getDecoder().decode(identity.getPublicKeyBase64())));
+        } catch (IllegalArgumentException e) {
+            AlertUtil.show("无法显示", "本机身份公钥格式异常，请重新生成设备密钥。");
+            return;
+        }
+        AlertUtil.show("本机设备安全码",
+            "设备标识：\n" + KeyManager.getInstance().deviceId()
+                + "\n\n安全码：\n" + fingerprint
+                + "\n\n另一台设备向你请求同步历史时，应显示相同安全码。"
+                + "\n不一致请立即拒绝。");
     }
 
     /**

@@ -1,7 +1,9 @@
 package com.junesoon.mim.controller;
 
+import com.junesoon.mim.auth.CurrentDevice;
 import com.junesoon.mim.auth.CurrentUser;
 import com.junesoon.mim.entity.Device;
+import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.ratelimit.RateLimit;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.DeviceService;
@@ -50,7 +52,16 @@ public class DeviceController {
     @PostMapping
     @RateLimit(limit = 30, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
     public ObjectRestResponse<Device> register(@CurrentUser String username,
-        @RequestBody RegisterRequest request) {
+        @CurrentDevice String currentDevice, @RequestBody RegisterRequest request) {
+        // 绑定了设备的令牌只能登记自己这台设备。否则盗号者拿走一个有效 JWT，
+        // 就能悄悄给自己的设备登记公钥/预密钥，随后收到所有新消息。
+        // 新增设备必须在新设备上单独登录，拿到绑定到新设备的令牌。
+        if (request != null && request.getDeviceId() != null
+            && !request.getDeviceId().trim().isEmpty()
+            && currentDevice != null
+            && !request.getDeviceId().trim().equals(currentDevice)) {
+            throw new UserInvalidException("当前登录令牌只能登记绑定的设备，请在新设备上重新登录");
+        }
         Device device = deviceService.register(username, request.getDeviceId(),
             request.getDeviceName());
         return new ObjectRestResponse<Device>().data(device).rel(true);
