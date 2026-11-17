@@ -3,14 +3,17 @@ package com.junesoon.mim.service;
 import com.junesoon.mim.components.ApplicatonStore;
 import com.junesoon.mim.components.ObjectRestResponse;
 import com.junesoon.mim.components.Request;
+import com.junesoon.mim.crypto.Hkdf;
 import com.junesoon.mim.crypto.IdentityException;
 import com.junesoon.mim.crypto.IdentityStore;
+import com.junesoon.mim.crypto.OwnDeviceTrust;
 import com.junesoon.mim.crypto.PeerCipher;
 import com.junesoon.mim.crypto.PlaintextStore;
 import com.junesoon.mim.crypto.PreKeyStore;
 import com.junesoon.mim.crypto.RatchetService;
 import com.junesoon.mim.crypto.SessionState;
 import com.junesoon.mim.crypto.SessionStore;
+import com.junesoon.mim.crypto.SyncPayload;
 import com.junesoon.mim.crypto.TrustChangedException;
 import com.junesoon.mim.crypto.TrustStore;
 import com.junesoon.mim.feign.MessageFeign;
@@ -22,6 +25,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 
@@ -67,6 +71,24 @@ public class MessageService {
      * 发送和历史解密会碰同一条棘轮，必须串行，否则历史解到一半被发送推进，后面的消息就对不上。
      */
     private final Object cryptoLock = new Object();
+
+    /**
+     * 首次收到某台本账号设备的同步消息时，需要用户确认其身份。
+     */
+    public interface SyncApprover {
+        boolean approve(String deviceId, String fingerprint);
+    }
+
+    private static volatile SyncApprover syncApprover;
+
+    /**
+     * 用户拒绝过的「同步设备 + 指纹」，本次会话不再重复弹窗。
+     */
+    private static final Set<String> SYNC_DENIED = ConcurrentHashMap.newKeySet();
+
+    public static void setSyncApprover(SyncApprover approver) {
+        syncApprover = approver;
+    }
 
     private static String sessionKey(String peer, String deviceId) {
         return peer + "@" + deviceId;
@@ -268,6 +290,7 @@ public class MessageService {
         state.setHandshakeSenderEphemeralKey(result.getSenderEphemeralKey());
         state.setHandshakeUsedOneTimePreKey(result.isUsedOneTimePreKey());
         state.setHandshakeOneTimePreKeyId(bundle.getOneTimePreKeyId());
+        state.setHandshakeRecipientSignedPreKeyId(bundle.getSignedPreKeyId());
         // 诊断：确认握手参数确实写入了状态（为空则对端永远建不出会话）
         log.info("createSession 完成：peer={} device={} hasHandshake={} idKeyLen={} ephKeyLen={}",
             bundle.getUsername(), bundle.getDeviceId(), state.hasPendingHandshake(),
@@ -406,6 +429,8 @@ public class MessageService {
                     replica.setSenderEphemeralKey(state.getHandshakeSenderEphemeralKey());
                     replica.setSenderUsedOneTimePreKey(state.isHandshakeUsedOneTimePreKey());
                     replica.setConsumedOneTimePreKeyId(state.getHandshakeOneTimePreKeyId());
+                    replica.setRecipientSignedPreKeyId(
+                        state.getHandshakeRecipientSignedPreKeyId());
                 } else {
                     log.info("发送到 {}/{} 走已建立的应答链，不再附带握手参数", peer, deviceId);
                 }
@@ -481,6 +506,7 @@ public class MessageService {
                 replica.setSenderEphemeralKey(state.getHandshakeSenderEphemeralKey());
                 replica.setSenderUsedOneTimePreKey(state.isHandshakeUsedOneTimePreKey());
                 replica.setConsumedOneTimePreKeyId(state.getHandshakeOneTimePreKeyId());
+                replica.setRecipientSignedPreKeyId(state.getHandshakeRecipientSignedPreKeyId());
             }
             return replica;
         }
@@ -525,6 +551,7 @@ public class MessageService {
         state.setHandshakeSenderEphemeralKey(result.getSenderEphemeralKey());
         state.setHandshakeUsedOneTimePreKey(result.isUsedOneTimePreKey());
         state.setHandshakeOneTimePreKeyId(bundle.getOneTimePreKeyId());
+        state.setHandshakeRecipientSignedPreKeyId(bundle.getSignedPreKeyId());
         return state;
     }
 
@@ -549,16 +576,27 @@ public class MessageService {
             && !message.getSyncFromDevice().isEmpty();
         boolean isSelf = self.equals(message.getFromUsername());
 
+        // 设备间同步先确认发送设备的身份，再用转发设备的签名覆盖服务端给的归属字段。
+        // 这一步可能弹窗，放在 cryptoLock 外，避免用户思考期间阻塞其它会话解密。
+        if (deviceSync) {
+            try {
+                ensureSyncSenderTrusted(message);
+            } catch (Exception e) {
+                log.warn("同步设备确认失败：{}", e.getMessage());
+                return new DecryptedMessage(message, "[此消息无法解密]", true);
+            }
+        }
+
         // 缓存键必须包含「谁发的、哪台设备发的」。只按 clientMsgId 会让不同发送者
         // 复用同一个 ID 时命中别人的明文，等于绕过解密直接伪造消息内容。
-        final String fromDevice = normalizeDevice(message.getFromDeviceId());
-        final String cacheKey = cacheKey(message.getFromUsername(), fromDevice,
-            message.getClientMsgId());
-        String cached = plaintextStore.get(cacheKey);
-        if (cached == null && isSelf && !deviceSync) {
-            // 兼容升级前只按 clientMsgId 保存的旧记录，仅用于自己发出的消息
-            cached = plaintextStore.get(message.getClientMsgId());
+        final String cacheKey;
+        if (deviceSync) {
+            cacheKey = syncCacheKey(message);
+        } else {
+            cacheKey = cacheKey(message.getFromUsername(),
+                normalizeDevice(message.getFromDeviceId()), message.getClientMsgId());
         }
+        String cached = readCache(message, cacheKey, deviceSync, isSelf);
         if (cached != null) {
             return new DecryptedMessage(message, cached, false);
         }
@@ -588,10 +626,7 @@ public class MessageService {
 
         try {
             synchronized (cryptoLock) {
-                cached = plaintextStore.get(cacheKey);
-                if (cached == null && isSelf && !deviceSync) {
-                    cached = plaintextStore.get(message.getClientMsgId());
-                }
+                cached = readCache(message, cacheKey, deviceSync, isSelf);
                 if (cached != null) {
                     return new DecryptedMessage(message, cached, false);
                 }
@@ -613,6 +648,14 @@ public class MessageService {
                         }
                         return buildResponderSession(peer, peerDevice, message);
                     });
+                if (deviceSync) {
+                    // 用转发设备的身份公钥验证「原消息归属 + 内容」的签名，
+                    // 再以签名覆盖服务端给的 from/to/fromDevice。
+                    if (!syncSignatureValid(message, plaintext)) {
+                        throw new IdentityException("同步消息来源签名无效");
+                    }
+                    applySyncSignedFields(message);
+                }
                 if (usedOpk[0] >= 0) {
                     preKeyManager.getPreKeyStore().consumeOneTimePreKey(usedOpk[0]);
                     try {
@@ -634,6 +677,94 @@ public class MessageService {
         } catch (Exception e) {
             log.warn("解密消息 {} 失败：{}", message.getClientMsgId(), e.getMessage());
             return new DecryptedMessage(message, "[此消息无法解密]", true);
+        }
+    }
+
+    /**
+     * 读本地明文缓存。
+     *
+     * <p>同步消息必须先验证转发设备的签名才能使用缓存，否则被攻破的服务端可以
+     * 用同一个 clientMsgId 让设备展示另一条旧消息的内容。普通消息继续按
+     * 「发送者 + 发送设备 + clientMsgId」查缓存。
+     */
+    private String readCache(CipherMessage message, String cacheKey, boolean deviceSync,
+        boolean isSelf) {
+        if (deviceSync) {
+            String cached = plaintextStore.get(cacheKey);
+            if (cached != null && syncSignatureValid(message, cached)) {
+                applySyncSignedFields(message);
+                return cached;
+            }
+            return null;
+        }
+        String cached = plaintextStore.get(cacheKey);
+        if (cached == null && isSelf) {
+            // 兼容升级前只按 clientMsgId 保存的旧记录，仅用于自己发出的消息
+            cached = plaintextStore.get(message.getClientMsgId());
+        }
+        return cached;
+    }
+
+    /**
+     * 同步消息发送设备必须是用户批准过的本账号设备。
+     *
+     * <p>刚登录的新设备第一次收到旧设备同步时会弹窗展示旧设备指纹，
+     * 用户应与旧设备「本机设备安全码」核对后再确认。
+     */
+    private void ensureSyncSenderTrusted(CipherMessage message) throws IdentityException {
+        String deviceId = message.getSyncFromDevice();
+        String identityKey = message.getSenderIdentityKey();
+        if (deviceId == null || identityKey == null) {
+            throw new IdentityException("同步消息缺少发送设备身份");
+        }
+        String fingerprint = fingerprintOf(identityKey);
+        String denyKey = deviceId + "|" + fingerprint;
+        if (SYNC_DENIED.contains(denyKey)) {
+            throw new IdentityException("已拒绝该设备的同步");
+        }
+        OwnDeviceTrust trust = keyManager.getOwnDeviceTrust();
+        if (trust.isTrusted(deviceId, identityKey)) {
+            return;
+        }
+        SyncApprover approver = syncApprover;
+        if (approver == null || !approver.approve(deviceId, fingerprint)) {
+            SYNC_DENIED.add(denyKey);
+            throw new IdentityException("未授权的设备同步，已拒绝");
+        }
+        trust.trustDevice(deviceId, identityKey, currentPassword());
+    }
+
+    private static String syncCacheKey(CipherMessage message) {
+        return "sync|" + normalizeDevice(message.getSyncFromDevice()) + "|"
+            + (message.getClientMsgId() == null ? "" : message.getClientMsgId());
+    }
+
+    private static boolean syncSignatureValid(CipherMessage message, String plaintext) {
+        String signature = message.getSyncSignature();
+        String from = message.getSyncOriginalFrom();
+        String to = message.getSyncOriginalTo();
+        String device = message.getSyncOriginalDevice();
+        if (signature == null || from == null || to == null) {
+            return false;
+        }
+        String canonical = SyncPayload.canonical(from, to, device, message.getClientMsgId(),
+            message.getClientTime() == null ? 0L : message.getClientTime(),
+            message.getTargetDeviceId(), plaintext);
+        return SyncPayload.verify(message.getSenderIdentityKey(), canonical, signature);
+    }
+
+    private static void applySyncSignedFields(CipherMessage message) {
+        message.setFromUsername(message.getSyncOriginalFrom());
+        message.setToUsername(message.getSyncOriginalTo());
+        message.setFromDeviceId(message.getSyncOriginalDevice());
+    }
+
+    private static String fingerprintOf(String identityKey) throws IdentityException {
+        try {
+            return TrustStore.shortFingerprint(Hkdf.sha256Hex(
+                java.util.Base64.getDecoder().decode(identityKey)));
+        } catch (IllegalArgumentException e) {
+            throw new IdentityException("同步设备身份公钥格式错误");
         }
     }
 
@@ -675,7 +806,18 @@ public class MessageService {
         throws IdentityException {
         IdentityStore.Identity identity = requireIdentity();
         PreKeyStore preKeyStore = preKeyManager.getPreKeyStore();
-        PreKeyStore.LocalSignedPreKey signed = preKeyStore.getSignedPreKey();
+        PreKeyStore.LocalSignedPreKey signed;
+        Integer requestedSpk = message.getRecipientSignedPreKeyId();
+        if (requestedSpk != null) {
+            signed = preKeyStore.findSignedPreKey(requestedSpk);
+            if (signed == null) {
+                throw new IdentityException("找不到编号 " + requestedSpk
+                    + " 的签名预密钥，可能已轮换过期");
+            }
+        } else {
+            // 旧客户端不带编号，退回当前签名预密钥
+            signed = preKeyStore.getSignedPreKey();
+        }
         if (signed == null) {
             throw new IdentityException("本地签名预密钥缺失，无法建立会话");
         }

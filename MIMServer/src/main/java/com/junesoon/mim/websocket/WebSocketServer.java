@@ -35,6 +35,21 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 @Component
 public class WebSocketServer extends TextWebSocketHandler {
 
+    /**
+     * 单用户 / 单设备的连接上限。防止一个 token 开大量连接耗内存或刷心跳。
+     */
+    private static final int MAX_CONNECTIONS_PER_USER = 10;
+    private static final int MAX_CONNECTIONS_PER_DEVICE = 2;
+
+    /**
+     * 心跳最小间隔与过快心跳的容忍次数。正常客户端约 20~30 秒一次，
+     * 这里限到 5 秒一次，既能防止刷 Redis/MySQL，又不影响正常重连。
+     */
+    private static final long HEARTBEAT_MIN_INTERVAL_MS = 5_000L;
+    private static final int HEARTBEAT_IGNORED_LIMIT = 20;
+    private static final String ATTR_LAST_HEARTBEAT = "mim_last_heartbeat";
+    private static final String ATTR_IGNORED_HEARTBEATS = "mim_ignored_heartbeats";
+
     private final SessionRegistry sessionRegistry;
     private final PresenceService presenceService;
     private final PushService pushService;
@@ -59,6 +74,13 @@ public class WebSocketServer extends TextWebSocketHandler {
         String deviceId = SessionRegistry.deviceOf(session);
         if (username == null) {
             closeQuietly(session, CloseStatus.NOT_ACCEPTABLE);
+            return;
+        }
+        if (sessionRegistry.countLocalSessions(username) >= MAX_CONNECTIONS_PER_USER
+            || sessionRegistry.countLocalDeviceSessions(username, deviceId)
+                >= MAX_CONNECTIONS_PER_DEVICE) {
+            log.warn("用户[{}] 设备[{}] 连接数超限，拒绝新连接", username, deviceId);
+            closeQuietly(session, CloseStatus.POLICY_VIOLATION);
             return;
         }
         sessionRegistry.register(username, deviceId, session);
@@ -104,6 +126,21 @@ public class WebSocketServer extends TextWebSocketHandler {
         // 心跳：顺带给在线标记与设备活跃时间续期
         String payload = message.getPayload();
         if (payload != null && payload.contains("\"ping\"")) {
+            long now = System.currentTimeMillis();
+            Object last = session.getAttributes().get(ATTR_LAST_HEARTBEAT);
+            if (last instanceof Long && now - (Long) last < HEARTBEAT_MIN_INTERVAL_MS) {
+                int ignored = session.getAttributes().get(ATTR_IGNORED_HEARTBEATS) instanceof Integer
+                    ? (Integer) session.getAttributes().get(ATTR_IGNORED_HEARTBEATS) : 0;
+                ignored++;
+                session.getAttributes().put(ATTR_IGNORED_HEARTBEATS, ignored);
+                if (ignored > HEARTBEAT_IGNORED_LIMIT) {
+                    log.warn("用户[{}] 设备[{}] 心跳过于频繁，断开连接", username, deviceId);
+                    closeQuietly(session, CloseStatus.POLICY_VIOLATION);
+                }
+                return;
+            }
+            session.getAttributes().put(ATTR_LAST_HEARTBEAT, now);
+            session.getAttributes().put(ATTR_IGNORED_HEARTBEATS, 0);
             presenceService.touch(username);
             deviceService.touch(username, deviceId);
             try {

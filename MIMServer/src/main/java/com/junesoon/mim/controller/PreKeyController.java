@@ -88,6 +88,9 @@ public class PreKeyController {
         @CurrentUser String self, @PathVariable String username,
         @RequestParam(value = "deviceId", required = false) String deviceId) {
         List<PreKeyService.PreKeyBundle> bundles;
+        // 同一个请求者对同一个目标 10 分钟最多 20 次领取。足够覆盖目标有多台设备，
+        // 但能显著抬高「用脚本换着账号把对方 OPK 抽干」的成本。
+        rateLimiter.tryAcquire("prekey-pair:" + self + ":" + username, "/prekey/pair", 20, 600);
         // 按「被拉取的用户」再限一层：否则攻击者可以换着账号反复领取同一目标的 OPK，
         // 把对方的一次性预密钥抽干，让后续首条消息退化为不含 DH4 的 X3DH。
         rateLimiter.tryAcquire("prekey-target:" + username, "/prekey/target", 20, 60);

@@ -6,6 +6,8 @@ import com.junesoon.mim.components.Request;
 import com.junesoon.mim.crypto.Hkdf;
 import com.junesoon.mim.crypto.IdentityException;
 import com.junesoon.mim.crypto.OwnDeviceTrust;
+import com.junesoon.mim.crypto.SessionStore;
+import com.junesoon.mim.crypto.SyncPayload;
 import com.junesoon.mim.crypto.TrustStore;
 import com.junesoon.mim.feign.ChatFeign;
 import com.junesoon.mim.feign.DeviceFeign;
@@ -260,8 +262,29 @@ public final class HistorySync {
             return null;
         }
         try {
-            return MessageService.getInstance().wrapForOwnDevice(targetDeviceId, text,
-                message.getClientMsgId(), message.getTimestamp(), bundle);
+            CipherMessage replica = MessageService.getInstance().wrapForOwnDevice(
+                targetDeviceId, text, message.getClientMsgId(), message.getTimestamp(), bundle);
+
+            // 用本机身份私钥签住「原消息归属 + 内容」，接收端验签后以这些字段为准。
+            // 否则被攻破的服务端可以把任意历史内容挂到任意联系人名下。
+            com.junesoon.mim.crypto.IdentityStore.Identity identity =
+                KeyManager.getInstance().getIdentity();
+            CipherMessage raw = message.getRaw();
+            if (identity == null || raw == null) {
+                return null;
+            }
+            String originalFrom = raw.getFromUsername();
+            String originalTo = raw.getToUsername();
+            String originalDevice = raw.getFromDeviceId() == null
+                ? SessionStore.DEFAULT_DEVICE_ID : raw.getFromDeviceId();
+            long clientTime = message.getTimestamp();
+            replica.setSyncOriginalFrom(originalFrom);
+            replica.setSyncOriginalTo(originalTo);
+            replica.setSyncOriginalDevice(originalDevice);
+            String canonical = SyncPayload.canonical(originalFrom, originalTo, originalDevice,
+                message.getClientMsgId(), clientTime, targetDeviceId, text);
+            replica.setSyncSignature(SyncPayload.sign(identity.getPrivateKey(), canonical));
+            return replica;
         } catch (IdentityException e) {
             log.warn("转发消息 {} 失败：{}", message.getClientMsgId(), e.getMessage());
             return null;

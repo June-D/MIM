@@ -55,6 +55,20 @@ class ValidationUtilTest {
     }
 
     @Test
+    @DisplayName("Base64 编码后的短口令仍按原始长度校验")
+    void encodedPasswordLength() {
+        String fourChars = java.util.Base64.getEncoder()
+            .encodeToString("abcd".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        String sixChars = java.util.Base64.getEncoder()
+            .encodeToString("abcdef".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
+        assertThrows(UserInvalidException.class,
+            () -> ValidationUtil.validatePassword(fourChars),
+            "4 位口令 Base64 后是 8 个字符，不能因此绕过最小长度");
+        assertDoesNotThrow(() -> ValidationUtil.validatePassword(sixChars));
+    }
+
+    @Test
     @DisplayName("requireText 校验空值与超长")
     void requireText() {
         assertDoesNotThrow(() -> ValidationUtil.requireText("abc", "字段", 10));

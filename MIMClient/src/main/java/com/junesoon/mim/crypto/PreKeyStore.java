@@ -38,13 +38,20 @@ public class PreKeyStore {
         private final PrivateKey privateKey;
         private final String publicKeyBase64;
         private final String signatureBase64;
+        private final long createdAt;
 
         public LocalSignedPreKey(int preKeyId, PrivateKey privateKey, String publicKeyBase64,
             String signatureBase64) {
+            this(preKeyId, privateKey, publicKeyBase64, signatureBase64, 0L);
+        }
+
+        public LocalSignedPreKey(int preKeyId, PrivateKey privateKey, String publicKeyBase64,
+            String signatureBase64, long createdAt) {
             this.preKeyId = preKeyId;
             this.privateKey = privateKey;
             this.publicKeyBase64 = publicKeyBase64;
             this.signatureBase64 = signatureBase64;
+            this.createdAt = createdAt;
         }
 
         public int getPreKeyId() {
@@ -61,6 +68,10 @@ public class PreKeyStore {
 
         public String getSignatureBase64() {
             return signatureBase64;
+        }
+
+        public long getCreatedAt() {
+            return createdAt;
         }
     }
 
@@ -98,6 +109,17 @@ public class PreKeyStore {
      */
     private final Map<Integer, LocalOneTimePreKey> oneTimeKeys = new ConcurrentHashMap<>();
 
+    /**
+     * 保留最近几把签名预密钥。轮换后旧私钥不能立即删除，
+     * 否则轮换前发出的首条握手消息会永久解不开。
+     */
+    private final Map<Integer, LocalSignedPreKey> signedPreKeys = new ConcurrentHashMap<>();
+
+    /**
+     * 本地最多保留的签名预密钥数量（当前 + 2 把旧钥）。
+     */
+    private static final int MAX_SIGNED_PREKEYS = 3;
+
     private volatile LocalSignedPreKey signedPreKey;
 
     /**
@@ -127,7 +149,8 @@ public class PreKeyStore {
         byte[] payload = DhKeyUtil.signedPreKeyPayload(preKeyId,
             Base64.getDecoder().decode(publicBase64));
         String signature = DhKeyUtil.sign(identityPrivate, payload);
-        return new LocalSignedPreKey(preKeyId, pair.getPrivate(), publicBase64, signature);
+        return new LocalSignedPreKey(preKeyId, pair.getPrivate(), publicBase64, signature,
+            System.currentTimeMillis());
     }
 
     /**
@@ -148,6 +171,33 @@ public class PreKeyStore {
 
     public void setSignedPreKey(LocalSignedPreKey key) {
         this.signedPreKey = key;
+        if (key != null) {
+            signedPreKeys.put(key.getPreKeyId(), key);
+            pruneSignedPreKeys();
+        }
+    }
+
+    /**
+     * 按编号找签名预密钥。用于处理轮换前发出的握手消息。
+     */
+    public LocalSignedPreKey findSignedPreKey(int preKeyId) {
+        LocalSignedPreKey key = signedPreKeys.get(preKeyId);
+        if (key != null) {
+            return key;
+        }
+        LocalSignedPreKey current = signedPreKey;
+        return current != null && current.getPreKeyId() == preKeyId ? current : null;
+    }
+
+    private void pruneSignedPreKeys() {
+        if (signedPreKeys.size() <= MAX_SIGNED_PREKEYS) {
+            return;
+        }
+        java.util.List<Integer> ids = new java.util.ArrayList<>(signedPreKeys.keySet());
+        java.util.Collections.sort(ids);
+        while (ids.size() > MAX_SIGNED_PREKEYS) {
+            signedPreKeys.remove(ids.remove(0));
+        }
     }
 
     public LocalSignedPreKey getSignedPreKey() {
@@ -192,6 +242,7 @@ public class PreKeyStore {
 
     public void clear() {
         signedPreKey = null;
+        signedPreKeys.clear();
         oneTimeKeys.clear();
     }
 
@@ -216,11 +267,23 @@ public class PreKeyStore {
         LocalSignedPreKey signed = signedPreKey;
         if (signed != null) {
             sb.append("spkId=").append(signed.getPreKeyId()).append('\n');
+            sb.append("spkCreatedAt=").append(signed.getCreatedAt()).append('\n');
             sb.append("spkPublic=").append(signed.getPublicKeyBase64()).append('\n');
             sb.append("spkSignature=").append(signed.getSignatureBase64()).append('\n');
             sb.append("spkPrivate=")
                 .append(Base64.getEncoder().encodeToString(signed.getPrivateKey().getEncoded()))
                 .append('\n');
+        }
+        // 旧签名预密钥只用于解开轮换前发出的握手，单独保存
+        for (LocalSignedPreKey old : signedPreKeys.values()) {
+            if (signed != null && old.getPreKeyId() == signed.getPreKeyId()) {
+                continue;
+            }
+            sb.append("oldSpk=").append(old.getPreKeyId()).append(',')
+                .append(old.getCreatedAt()).append(',')
+                .append(Base64.getEncoder().encodeToString(old.getPrivateKey().getEncoded()))
+                .append(',').append(old.getPublicKeyBase64())
+                .append(',').append(old.getSignatureBase64()).append('\n');
         }
         for (LocalOneTimePreKey key : oneTimeKeys.values()) {
             sb.append("opk=").append(key.getPreKeyId()).append(',')
@@ -248,11 +311,14 @@ public class PreKeyStore {
         }
         String content = readSealed(selfUsername, deviceId, password, file);
         oneTimeKeys.clear();
+        signedPreKeys.clear();
         signedPreKey = null;
         int spkId = 0;
+        long spkCreatedAt = 0L;
         String spkPublic = null;
         String spkSignature = null;
         byte[] spkPrivate = null;
+        Map<Integer, LocalSignedPreKey> loadedOld = new LinkedHashMap<>();
         for (String line : content.split("\n")) {
             int idx = line.indexOf('=');
             if (idx <= 0) {
@@ -267,6 +333,9 @@ public class PreKeyStore {
                 case "spkId":
                     spkId = parseInt(value, 0);
                     break;
+                case "spkCreatedAt":
+                    spkCreatedAt = parseLong(value, 0L);
+                    break;
                 case "spkPublic":
                     spkPublic = value;
                     break;
@@ -275,6 +344,16 @@ public class PreKeyStore {
                     break;
                 case "spkPrivate":
                     spkPrivate = Base64.getDecoder().decode(value);
+                    break;
+                case "oldSpk":
+                    String[] old = value.split(",", 5);
+                    if (old.length == 5) {
+                        int id = parseInt(old[0], 0);
+                        long createdAt = parseLong(old[1], 0L);
+                        byte[] pk = Base64.getDecoder().decode(old[2]);
+                        loadedOld.put(id, new LocalSignedPreKey(id,
+                            DhKeyUtil.decodePrivateKey(pk), old[3], old[4], createdAt));
+                    }
                     break;
                 case "opk":
                     String[] parts = value.split(",");
@@ -291,10 +370,16 @@ public class PreKeyStore {
         }
         if (spkPrivate != null && spkPublic != null && spkSignature != null) {
             signedPreKey = new LocalSignedPreKey(spkId, DhKeyUtil.decodePrivateKey(spkPrivate),
-                spkPublic, spkSignature);
+                spkPublic, spkSignature, spkCreatedAt);
+            signedPreKeys.put(signedPreKey.getPreKeyId(), signedPreKey);
         }
-        log.info("已加载本地预密钥：签名预密钥={} 一次性预密钥={}",
-            signedPreKey == null ? "无" : signedPreKey.getPreKeyId(), oneTimeKeys.size());
+        for (LocalSignedPreKey old : loadedOld.values()) {
+            signedPreKeys.put(old.getPreKeyId(), old);
+        }
+        pruneSignedPreKeys();
+        log.info("已加载本地预密钥：签名预密钥={}（保留 {} 把） 一次性预密钥={}",
+            signedPreKey == null ? "无" : signedPreKey.getPreKeyId(),
+            signedPreKeys.size(), oneTimeKeys.size());
         return true;
     }
 
@@ -392,6 +477,14 @@ public class PreKeyStore {
     private int parseInt(String value, int fallback) {
         try {
             return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    private long parseLong(String value, long fallback) {
+        try {
+            return Long.parseLong(value);
         } catch (NumberFormatException e) {
             return fallback;
         }

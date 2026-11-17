@@ -283,6 +283,10 @@ public class SessionStore {
             if (state.getHandshakeOneTimePreKeyId() != null) {
                 sb.append("hsOpkId=").append(state.getHandshakeOneTimePreKeyId()).append('\n');
             }
+            if (state.getHandshakeRecipientSignedPreKeyId() != null) {
+                sb.append("hsRecipientSpkId=")
+                    .append(state.getHandshakeRecipientSignedPreKeyId()).append('\n');
+            }
         }
         for (Map.Entry<String, String> entry : state.getSkippedKeys().entrySet()) {
             sb.append("skipped=").append(entry.getKey()).append(',').append(entry.getValue()).append('\n');
@@ -346,6 +350,9 @@ public class SessionStore {
                     break;
                 case "hsOpkId":
                     state.setHandshakeOneTimePreKeyId((int) parseLong(value));
+                    break;
+                case "hsRecipientSpkId":
+                    state.setHandshakeRecipientSignedPreKeyId((int) parseLong(value));
                     break;
                 case "skipped":
                     int comma = value.indexOf(',');

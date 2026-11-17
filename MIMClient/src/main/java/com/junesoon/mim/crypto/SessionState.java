@@ -93,6 +93,12 @@ public class SessionState {
     private Integer handshakeOneTimePreKeyId;
 
     /**
+     * 发起方握手使用的是接收方哪一把签名预密钥。接收方轮换 SPK 后，
+     * 靠它找回旧私钥，避免在途首条消息永久解不开。
+     */
+    private Integer handshakeRecipientSignedPreKeyId;
+
+    /**
      * 是否有未确认的握手参数。
      */
     public boolean hasPendingHandshake() {
@@ -153,6 +159,7 @@ public class SessionState {
         handshakeSenderEphemeralKey = trial.handshakeSenderEphemeralKey;
         handshakeUsedOneTimePreKey = trial.handshakeUsedOneTimePreKey;
         handshakeOneTimePreKeyId = trial.handshakeOneTimePreKeyId;
+        handshakeRecipientSignedPreKeyId = trial.handshakeRecipientSignedPreKeyId;
         initiator = trial.initiator;
         skippedKeys.clear();
         if (trial.skippedKeys != null) {
@@ -182,6 +189,7 @@ public class SessionState {
         copy.handshakeSenderEphemeralKey = handshakeSenderEphemeralKey;
         copy.handshakeUsedOneTimePreKey = handshakeUsedOneTimePreKey;
         copy.handshakeOneTimePreKeyId = handshakeOneTimePreKeyId;
+        copy.handshakeRecipientSignedPreKeyId = handshakeRecipientSignedPreKeyId;
         copy.initiator = initiator;
         return copy;
     }

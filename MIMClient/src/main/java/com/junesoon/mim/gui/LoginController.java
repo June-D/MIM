@@ -543,10 +543,11 @@ public class LoginController {
                 javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
                     javafx.scene.control.Alert.AlertType.WARNING);
                 alert.setTitle("设备请求同步历史");
-                alert.setHeaderText("本账号的另一台设备请求获取聊天历史");
+                alert.setHeaderText("本账号的另一台设备请求与本机同步历史");
                 alert.setContentText("设备标识：\n" + deviceId
                     + "\n\n安全码：\n" + fingerprint
-                    + "\n\n只有当你确实刚刚在这台设备上登录时才确认。"
+                    + "\n\n请与另一台设备的「本机设备安全码」逐字核对。"
+                    + "\n只有当你确实刚在这台设备上登录、并确认是本人操作时才点「确认转发」。"
                     + "\n如果这不是你本人操作，请点「拒绝」。");
                 javafx.scene.control.ButtonType accept =
                     new javafx.scene.control.ButtonType("确认转发",
@@ -611,6 +612,7 @@ public class LoginController {
             // 凭证就绪后再建立长连接，握手拦截器需要 Authorization 头。
             // 先挂上历史同步监听，避免其他设备的补发在监听注册前到达。
             HistorySync.setApprover(LoginController::askHistorySyncApproval);
+            MessageService.setSyncApprover(LoginController::askHistorySyncApproval);
             HistorySync.arm();
             WSClient.getInstance().connectWithToken();
             HistorySync.requestInBackground();

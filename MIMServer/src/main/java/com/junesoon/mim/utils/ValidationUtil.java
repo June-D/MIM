@@ -30,7 +30,21 @@ public final class ValidationUtil {
     }
 
     public static void validatePassword(String password) {
-        if (password == null || password.length() < PASSWORD_MIN) {
+        if (password == null || password.isEmpty()) {
+            throw new UserInvalidException("密码至少 " + PASSWORD_MIN + " 位");
+        }
+        // 客户端把原始口令做 Base64 后传输，服务端 BCrypt 的也是这段 Base64。
+        // 长度校验必须看解码后的原始长度，否则 4 位口令编码成 8 个字符就能绕过
+        // “至少 6 位”。非标准 Base64（例如直接用 curl 发的原始口令）按原长处理。
+        int effectiveLength = password.length();
+        if (password.length() % 4 == 0) {
+            try {
+                effectiveLength = java.util.Base64.getDecoder().decode(password).length;
+            } catch (IllegalArgumentException ignored) {
+                // 不是 Base64，按明文长度校验
+            }
+        }
+        if (effectiveLength < PASSWORD_MIN) {
             throw new UserInvalidException("密码至少 " + PASSWORD_MIN + " 位");
         }
         if (password.getBytes(StandardCharsets.UTF_8).length > PASSWORD_MAX_BYTES) {

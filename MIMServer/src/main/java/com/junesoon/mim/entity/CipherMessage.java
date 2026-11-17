@@ -91,6 +91,11 @@ public class CipherMessage implements Serializable {
      */
     private Integer consumedOneTimePreKeyId;
 
+    /**
+     * 本条握手使用的是接收方哪一把签名预密钥。
+     */
+    private Integer recipientSignedPreKeyId;
+
     // ---------------- 兼容字段 ----------------
 
     /**
@@ -129,4 +134,21 @@ public class CipherMessage implements Serializable {
      * 为空表示这是原始副本；非空时接收方要用与该设备的会话解密，而不是用发信人的会话。
      */
     private String syncFromDevice;
+
+    // ---------------- 设备间同步的来源签名 ----------------
+
+    /**
+     * 原消息的发送者、收信人与发送设备。由转发设备签名，接收方验签后以它们为准，
+     * 避免服务端篡改 from_user 把历史消息挂到别人名下。
+     */
+    private String syncOriginalFrom;
+
+    private String syncOriginalTo;
+
+    private String syncOriginalDevice;
+
+    /**
+     * 转发设备身份私钥对「原消息归属 + 内容」的签名。
+     */
+    private String syncSignature;
 }

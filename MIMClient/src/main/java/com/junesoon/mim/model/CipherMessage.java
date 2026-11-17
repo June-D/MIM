@@ -76,9 +76,15 @@ public class CipherMessage {
     private Boolean senderUsedOneTimePreKey;
 
     /**
-     * 被消耗的一次性预密钥编号，接收方据此找到对应私钥（用完即删）。
+     * 被消耗的一次性预密钥编号。
      */
     private Integer consumedOneTimePreKeyId;
+
+    /**
+     * 本条握手使用的是接收方哪一把签名预密钥。接收方据此找回对应私钥，
+     * 避免签名预密钥轮换后，轮换前发出的首条消息永久解不开。
+     */
+    private Integer recipientSignedPreKeyId;
 
     // ---------------- 兼容字段 ----------------
 
@@ -104,4 +110,20 @@ public class CipherMessage {
      * 哪台自己的设备把原文重新加密过来的。非空时用与该设备的会话解密。
      */
     private String syncFromDevice;
+
+    // ---------------- 设备间同步的来源签名 ----------------
+
+    /**
+     * 原消息的发送者。与下面的字段一起由转发设备签名，不能相信服务端给的 fromUsername。
+     */
+    private String syncOriginalFrom;
+
+    private String syncOriginalTo;
+
+    private String syncOriginalDevice;
+
+    /**
+     * 转发设备身份私钥对「原消息归属 + 内容」的签名。
+     */
+    private String syncSignature;
 }

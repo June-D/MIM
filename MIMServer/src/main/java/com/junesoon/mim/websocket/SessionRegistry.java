@@ -167,6 +167,21 @@ public class SessionRegistry {
         return sessionsByDevice.values().stream().mapToInt(Set::size).sum();
     }
 
+    /**
+     * 本实例上某用户的连接总数（所有设备）。
+     */
+    public int countLocalSessions(String username) {
+        return countUserSessions(username);
+    }
+
+    /**
+     * 本实例上某用户某台设备的连接数。
+     */
+    public int countLocalDeviceSessions(String username, String deviceId) {
+        Set<WebSocketSession> targets = sessionsByDevice.get(key(username, deviceId));
+        return targets == null ? 0 : targets.size();
+    }
+
     private int countUserSessions(String username) {
         String prefix = username + SEPARATOR;
         int count = 0;

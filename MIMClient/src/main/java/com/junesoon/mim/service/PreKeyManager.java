@@ -42,6 +42,12 @@ public class PreKeyManager {
     private static final int REPLENISH_THRESHOLD = 20;
     private static final int REPLENISH_BATCH = 50;
 
+    /**
+     * 签名预密钥最长使用时间。定期轮换可以限制它在泄露后的影响窗口；
+     * 旧私钥会保留在本地，直到在途握手全部完成。
+     */
+    private static final long SPK_MAX_AGE_MS = 7L * 24 * 60 * 60 * 1000;
+
     public static PreKeyManager getInstance() {
         return INSTANCE;
     }
@@ -84,6 +90,11 @@ public class PreKeyManager {
             uploadSignedPreKey(signed);
             preKeyStore.setSignedPreKey(signed);
             log.info("已生成并上传签名预密钥 id={}", signed.getPreKeyId());
+        } else if (signed.getCreatedAt() == 0
+            || System.currentTimeMillis() - signed.getCreatedAt() > SPK_MAX_AGE_MS) {
+            // 旧版本文件没有 createdAt，按过期处理：轮换一次，同时保留旧私钥
+            log.info("签名预密钥 id={} 已超过轮换周期，开始轮换", signed.getPreKeyId());
+            rotateSignedPreKey(password);
         }
 
         replenishIfNeeded(password);

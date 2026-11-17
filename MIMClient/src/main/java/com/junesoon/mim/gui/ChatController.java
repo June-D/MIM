@@ -432,14 +432,16 @@ public class ChatController {
         }
         com.junesoon.mim.model.CipherMessage raw =
             (com.junesoon.mim.model.CipherMessage) notify.getData();
+        // 先解密：同步消息会在验签后用签名里的 from/to 覆盖服务端给的字段，
+        // 再据此判断属于哪个会话，避免服务端把消息挂到错误的联系人下。
+        MessageService.DecryptedMessage decrypted = messageService.decrypt(raw);
+        if (decrypted == null) {
+            return;
+        }
         String self = ApplicatonStore.getUsername();
         String peer = self != null && self.equals(raw.getFromUsername())
             ? raw.getToUsername() : raw.getFromUsername();
         if (chatUser.getUsername() == null || !chatUser.getUsername().equals(peer)) {
-            return;
-        }
-        MessageService.DecryptedMessage decrypted = messageService.decrypt(raw);
-        if (decrypted == null) {
             return;
         }
         Platform.runLater(() -> {

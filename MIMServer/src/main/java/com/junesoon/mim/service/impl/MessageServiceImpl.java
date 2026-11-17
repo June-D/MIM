@@ -186,6 +186,7 @@ public class MessageServiceImpl implements MessageService {
             record.setSenderEphemeralKey(message.getSenderEphemeralKey());
             record.setSenderUsedOneTimePreKey(message.getSenderUsedOneTimePreKey());
             record.setConsumedOneTimePreKeyId(message.getConsumedOneTimePreKeyId());
+            record.setRecipientSignedPreKeyId(message.getRecipientSignedPreKeyId());
             record.setSenderKeyVersion(message.getSenderKeyVersion());
             record.setRecipientKeyVersion(message.getRecipientKeyVersion());
             record.setClientTime(message.getClientTime());
@@ -584,6 +585,22 @@ public class MessageServiceImpl implements MessageService {
             }
             validateRatchetHeader(replica);
             validateCipherFields(replica);
+            // 同步副本必须带转发设备对「原消息归属 + 内容」的签名。
+            // 服务端不参与验签，但拒绝没有签名的旧格式，避免给客户端留下降级空间。
+            if (!StringUtils.hasText(replica.getSyncSignature())) {
+                throw new UserInvalidException("同步消息缺少来源签名");
+            }
+            if (!StringUtils.hasText(replica.getSyncOriginalFrom())
+                || !StringUtils.hasText(replica.getSyncOriginalTo())
+                || !StringUtils.hasText(replica.getSyncOriginalDevice())) {
+                throw new UserInvalidException("同步消息缺少原消息归属");
+            }
+            if (replica.getSyncOriginalFrom().length() > 64
+                || replica.getSyncOriginalTo().length() > 64
+                || replica.getSyncOriginalDevice().length() > 64
+                || replica.getSyncSignature().length() > 1024) {
+                throw new UserInvalidException("同步来源签名字段过长");
+            }
             record.setAlg(replica.getAlg());
             record.setIv(replica.getIv());
             record.setCiphertext(replica.getCiphertext());
@@ -594,6 +611,11 @@ public class MessageServiceImpl implements MessageService {
             record.setSenderEphemeralKey(replica.getSenderEphemeralKey());
             record.setSenderUsedOneTimePreKey(replica.getSenderUsedOneTimePreKey());
             record.setConsumedOneTimePreKeyId(replica.getConsumedOneTimePreKeyId());
+            record.setRecipientSignedPreKeyId(replica.getRecipientSignedPreKeyId());
+            record.setSyncOriginalFrom(replica.getSyncOriginalFrom());
+            record.setSyncOriginalTo(replica.getSyncOriginalTo());
+            record.setSyncOriginalDevice(replica.getSyncOriginalDevice());
+            record.setSyncSignature(replica.getSyncSignature());
             record.setRecalled(false);
         }
         try {

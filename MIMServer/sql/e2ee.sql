@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     `sender_ephemeral_key`  varchar(128) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT 'X3DH 握手：发信人临时公钥，仅首条消息携带',
     `sender_used_opk`       tinyint(1)   NULL DEFAULT NULL COMMENT 'X3DH 握手：是否使用了一次性预密钥',
     `consumed_opk_id`       int          NULL DEFAULT NULL COMMENT 'X3DH 握手：被消耗的一次性预密钥编号',
+    `recipient_spk_id`      int          NULL DEFAULT NULL COMMENT 'X3DH 握手：使用接收方哪一把签名预密钥',
     `sender_key_version`    int          NULL DEFAULT NULL COMMENT '发信人身份公钥版本（兼容旧算法）',
     `recipient_key_version` int          NULL DEFAULT NULL COMMENT '收信人身份公钥版本（兼容旧算法）',
     `client_time`           bigint       NOT NULL COMMENT '客户端时间戳（毫秒），参与 AAD',
@@ -118,6 +119,10 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     `recalled`              tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否已撤回',
     `recalled_at`           bigint       NULL DEFAULT NULL COMMENT '撤回时间（毫秒）',
     `sync_from_device`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '哪台设备把原文重新加密给目标设备；空表示原始副本',
+    `sync_original_from`    varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '同步副本：原消息发送者（由转发设备签名）',
+    `sync_original_to`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '同步副本：原消息收信人（由转发设备签名）',
+    `sync_original_device`  varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '同步副本：原消息发送设备（由转发设备签名）',
+    `sync_signature`        text         CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL COMMENT '同步副本：转发设备对原消息归属与内容的签名',
     PRIMARY KEY (`id`) USING BTREE,
     -- 同一条逻辑消息对同一目标设备只会有一份
     UNIQUE INDEX `uk_client_target` (`from_user`, `from_device_id`, `client_msg_id`, `target_device_id`) USING BTREE,
@@ -173,3 +178,13 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 -- ------------------------------------------------------------
 -- ALTER TABLE `t_device`
 --     ADD COLUMN `token_version` int NOT NULL DEFAULT 0 COMMENT '令牌版本' AFTER `revoked`;
+
+-- ------------------------------------------------------------
+-- 同步副本的来源签名，用于防止服务端把历史内容挂到错误的联系人名下。
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_message`
+--     ADD COLUMN `sync_original_from` varchar(64) NULL COMMENT '同步副本原发送者',
+--     ADD COLUMN `sync_original_to` varchar(64) NULL COMMENT '同步副本原收信人',
+--     ADD COLUMN `sync_original_device` varchar(64) NULL COMMENT '同步副本原发送设备',
+--     ADD COLUMN `sync_signature` text NULL COMMENT '同步副本来源签名',
+--     ADD COLUMN `recipient_spk_id` int NULL COMMENT 'X3DH 使用的接收方签名预密钥编号';

@@ -121,6 +121,10 @@ class MessageSyncTest {
         assertEquals("dev-b", copy.getTargetDeviceId());
         assertEquals("dev-a", copy.getSyncFromDevice());
         assertEquals(Long.valueOf(1_700_000_000_000L), copy.getClientTime());
+        assertEquals("bob", copy.getSyncOriginalFrom());
+        assertEquals("alice", copy.getSyncOriginalTo());
+        assertEquals("bob-1", copy.getSyncOriginalDevice());
+        assertEquals("dummy-signature", copy.getSyncSignature());
         assertEquals(wrap("carol").getCiphertext(), copy.getCiphertext());
     }
 
@@ -201,6 +205,11 @@ class MessageSyncTest {
         message.setRatchetPublic("ratchet-pub");
         message.setPreviousChainLength(0);
         message.setMessageNumber(0);
+        message.setSyncOriginalFrom("bob");
+        message.setSyncOriginalTo("alice");
+        message.setSyncOriginalDevice("bob-1");
+        message.setSyncSignature("dummy-signature");
+        message.setRecipientSignedPreKeyId(1);
         return message;
     }
 
