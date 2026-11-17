@@ -305,7 +305,9 @@ mysql -uroot mim_core < MIMServer/sql/e2ee.sql
   `totp_secret` 必须是 `varchar(255)`，旧库需执行 `MODIFY` 扩容（加密后约 81 字符）；
 - `t_register_users.email_cipher / terms_version / agreed_at`：加密邮箱、
   用户协议版本与同意时间；
-- `t_one_time_prekey.claimed_by / claimed_at`：OPK 预留请求者与预留时间。
+- `t_one_time_prekey.claimed_by / claimed_at`：OPK 预留请求者与预留时间；
+- `t_rsa_key.key_value`：启用 `MIM_MASTER_KEY` 前扩到 `varchar(4096)`，
+  旧库执行 `MODIFY`（加密后的 RSA 私钥约 2.2KB）。
 
 旧库中由早期启动 DDL 创建的 `t_conversation_clear` / `t_friend_request`
 可能继承了 MySQL 8 默认的 `utf8mb4_0900_ai_ci`，与消息表的
@@ -328,8 +330,13 @@ export MIM_REDIS_USERNAME=
 export MIM_REDIS_PASSWORD=
 export MIM_REDIS_SSL=false
 export MIM_REDIS_REQUIRE_SECURE=false
+export MIM_MASTER_KEY=
 mvn spring-boot:run
 ```
+
+> `MIM_MASTER_KEY` 是 JWT RSA 私钥的静态加密密钥（Base64 32 字节）。
+> 配置后请务必备份；丢失或错误会导致服务端拒绝启动，且不会静默换钥。
+> 启用前先把 `t_rsa_key.key_value` 扩到 `varchar(4096)`。
 
 > Redis 必须设置密码并只监听本机或内网。非本机 Redis 还应启用 TLS
 > （`MIM_REDIS_SSL=true`）；设置 `MIM_REDIS_REQUIRE_SECURE=true` 后，
@@ -608,13 +615,17 @@ mvn test
 80. Redis 增加 ACL 用户名、TLS 与强制安全检查：支持 `MIM_REDIS_USERNAME`、
     `MIM_REDIS_SSL`；`MIM_REDIS_REQUIRE_SECURE=true` 时，非本机 Redis
     缺密码或 TLS 会拒绝启动。
+81. JWT RSA 私钥支持 `MIM_MASTER_KEY` 的 **AES-GCM 静态加密**：旧库明文
+    密钥在启动时无感迁移为密文；主密钥缺失或错误时拒绝启动，绝不静默换钥。
+    启用前需把 `t_rsa_key.key_value` 扩到 `varchar(4096)`。
 
 ## 仍需处理
 
 - 新设备首次信任仍依赖人工核对指纹，这是 TOFU 的固有局限。
 - 邮箱找回密码依赖用户填写真实邮箱与可用的 SMTP 服务；未配置 SMTP 时不可用。
 - 邮箱与 TOTP 的加密密钥未显式配置 `MIM_EMAIL_KEY` 时会回退到 JWT 私钥；
-  同时拿到数据库和该私钥仍可解密。生产环境应配置独立密钥或使用 KMS。
+  JWT 私钥本身可用 `MIM_MASTER_KEY` 加密，但仍建议配置独立 `MIM_EMAIL_KEY`
+  或使用 KMS，并备份主密钥。同时拿到数据库与主密钥仍可解密。
 - 旧版未绑定设备的 JWT 默认仍兼容；客户端全部升级后可设
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
 - Boot 2.7.18 已结束 OSS 支持，后续建议整体迁移到 Boot 3 + Java 17；

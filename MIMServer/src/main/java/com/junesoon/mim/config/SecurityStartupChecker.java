@@ -45,6 +45,9 @@ public class SecurityStartupChecker implements CommandLineRunner {
     @Value("${mim.security.email-key:}")
     private String emailKey;
 
+    @Value("${mim.security.master-key:}")
+    private String masterKey;
+
     @Value("${mim.auth.require-device-binding:false}")
     private boolean requireDeviceBinding;
 
@@ -79,6 +82,10 @@ public class SecurityStartupChecker implements CommandLineRunner {
         if (!StringUtils.hasText(emailKey)) {
             log.warn("安全自检：未配置 MIM_EMAIL_KEY，邮箱与 TOTP 密钥的加密密钥"
                 + "将从 JWT 私钥派生。生产环境建议配置独立的 32 字节 Base64 密钥。");
+        }
+        if (!StringUtils.hasText(masterKey)) {
+            log.warn("安全自检：未配置 MIM_MASTER_KEY，新生成的 JWT 私钥将明文存储；"
+                + "若数据库中已有加密密钥则会拒绝启动。请配置并备份 32 字节主密钥。");
         }
         if (!requireDeviceBinding) {
             log.warn("安全自检：仍允许未绑定设备的旧 JWT。客户端全部升级后，"

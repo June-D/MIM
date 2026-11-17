@@ -4,6 +4,7 @@ import com.junesoon.mim.config.KeyConfiguration;
 import com.junesoon.mim.config.UserAuthConfig;
 import com.junesoon.mim.jwt.RsaKeyHelper;
 import com.junesoon.mim.service.RsaKeyService;
+import com.junesoon.mim.utils.MasterKeyCrypto;
 import java.util.Map;
 import javax.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
@@ -27,6 +28,9 @@ public class AuthServerRunner implements CommandLineRunner {
     @Resource
     private UserAuthConfig userAuthConfig;
 
+    @Resource
+    private MasterKeyCrypto masterKeyCrypto;
+
     @Override
     public void run(String... args) throws Exception {
         byte[] pub = null;
@@ -35,6 +39,10 @@ public class AuthServerRunner implements CommandLineRunner {
             try {
                 pub = RsaKeyHelper.decode(rsaKeyService.get(USER_PUB_KEY));
                 pri = RsaKeyHelper.decode(rsaKeyService.get(USER_PRI_KEY));
+            } catch (IllegalStateException e) {
+                // 主密钥缺失/错误不能当成“历史密钥损坏”去换钥，
+                // 否则会连带破坏由 JWT 私钥派生的邮箱/TOTP 密文。
+                throw e;
             } catch (Exception e) {
                 log.warn("历史 JWT 密钥无法解析，将重新生成", e);
             }
@@ -49,6 +57,12 @@ public class AuthServerRunner implements CommandLineRunner {
         }
         keyConfiguration.setUserPubKey(pub);
         keyConfiguration.setUserPriKey(pri);
+        if (masterKeyCrypto.isEnabled() && !rsaKeyService.isEncrypted(USER_PRI_KEY)) {
+            // 旧库明文密钥：启动时无感迁移为密文
+            rsaKeyService.set(USER_PRI_KEY, RsaKeyHelper.encode(pri));
+            rsaKeyService.set(USER_PUB_KEY, RsaKeyHelper.encode(pub));
+            log.info("JWT 密钥已使用 MIM_MASTER_KEY 加密存储");
+        }
         refreshUserPubKey();
     }
 

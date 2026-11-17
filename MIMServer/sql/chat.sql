@@ -56,7 +56,7 @@ CREATE TABLE `t_chat_users`  (
 DROP TABLE IF EXISTS `t_rsa_key`;
 CREATE TABLE `t_rsa_key`  (
                                  `rsa_key` varchar(200) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
-                                 `key_value` varchar(2000) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
+                                 `key_value` varchar(4096) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL,
                                  PRIMARY KEY (`rsa_key`) USING BTREE
 ) ENGINE = MyISAM AUTO_INCREMENT = 1 CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = Dynamic;
 
@@ -72,6 +72,10 @@ CREATE TABLE `t_rsa_key`  (
 -- 已存在 totp_secret 的旧库需要扩容（加密后的密钥约 81 字符）：
 -- ALTER TABLE `t_register_users`
 --     MODIFY COLUMN `totp_secret` varchar(255) NULL COMMENT 'TOTP 密钥（AES-GCM 密文，兼容旧 Base32）';
+
+-- 启用 MIM_MASTER_KEY 前先扩容 JWT 密钥列（加密后的 RSA 私钥约 2.2KB）：
+-- ALTER TABLE `t_rsa_key`
+--     MODIFY COLUMN `key_value` varchar(4096) NOT NULL;
 
 -- ------------------------------------------------------------
 -- 从旧版本升级（取消注释后执行）：

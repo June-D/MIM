@@ -7,4 +7,6 @@ public interface RsaKeyService {
     String get(String key);
 
     int set(String key, String value);
+
+    boolean isEncrypted(String key);
 }
