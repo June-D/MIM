@@ -27,6 +27,9 @@ mim:
   # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
   # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
   instance-id: ${HOSTNAME:local}
+  redis:
+    # 设为 true 时，非本机 Redis 必须同时配置密码与 TLS，否则拒绝启动。
+    require-secure: ${MIM_REDIS_REQUIRE_SECURE:false}
   auth:
     # 客户端全部升级后设为 true：拒绝未绑定设备的旧 JWT，强制重新登录。
     require-device-binding: ${MIM_AUTH_REQUIRE_DEVICE_BINDING:false}

@@ -324,11 +324,16 @@ export MIM_DB_USERNAME=root
 export MIM_DB_PASSWORD=
 export MIM_REDIS_HOST=127.0.0.1
 export MIM_REDIS_PORT=6379
+export MIM_REDIS_USERNAME=
 export MIM_REDIS_PASSWORD=
+export MIM_REDIS_SSL=false
+export MIM_REDIS_REQUIRE_SECURE=false
 mvn spring-boot:run
 ```
 
-> Redis 必须设置密码并只监听本机或内网（生产环境建议启用 TLS/ACL）。
+> Redis 必须设置密码并只监听本机或内网。非本机 Redis 还应启用 TLS
+> （`MIM_REDIS_SSL=true`）；设置 `MIM_REDIS_REQUIRE_SECURE=true` 后，
+> 非本机地址缺密码或 TLS 会直接拒绝启动。
 > Pub/Sub 推送频道本身不带签名，Redis 被攻破等同于能伪造推送信封；
 > 不要把 6379 暴露到公网。
 
@@ -600,6 +605,9 @@ mvn test
 79. JWT 库从 `jjwt 0.9.1` 升级到 **0.11.5**（`jjwt-api` + `jjwt-impl` +
     `jjwt-jackson`），解析改用 `Jwts.parserBuilder()`；登录、普通接口与
     WebSocket 握手均已通过 e2e。
+80. Redis 增加 ACL 用户名、TLS 与强制安全检查：支持 `MIM_REDIS_USERNAME`、
+    `MIM_REDIS_SSL`；`MIM_REDIS_REQUIRE_SECURE=true` 时，非本机 Redis
+    缺密码或 TLS 会拒绝启动。
 
 ## 仍需处理
 
