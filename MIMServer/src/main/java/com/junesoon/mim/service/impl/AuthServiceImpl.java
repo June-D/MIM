@@ -12,7 +12,7 @@ import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.service.AuthService;
 import com.junesoon.mim.service.UserService;
 import com.junesoon.mim.utils.JwtTokenUtil;
-import com.junesoon.mim.utils.TotpUtil;
+import com.junesoon.mim.utils.TotpVerifier;
 import java.util.UUID;
 import javax.annotation.Resource;
 import org.springframework.stereotype.Service;
@@ -30,6 +30,9 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private DeviceMapper deviceMapper;
 
+    @Resource
+    private TotpVerifier totpVerifier;
+
     @Override
     public String login(JwtAuthenticationRequest authenticationRequest, String deviceId)
         throws Exception {
@@ -43,8 +46,9 @@ public class AuthServiceImpl implements AuthService {
                     throw new UserInvalidException("请输入二次验证码",
                         CommonConstants.EX_2FA_REQUIRED_CODE);
                 }
-                if (!TotpUtil.verify(user.getTotpSecret(), code)) {
-                    throw new UserInvalidException("二次验证码错误");
+                if (!totpVerifier.verifyAndConsume(user.getUsername(),
+                    user.getTotpSecret(), code)) {
+                    throw new UserInvalidException("二次验证码错误或已被使用");
                 }
             }
             int tokenVersion = 0;

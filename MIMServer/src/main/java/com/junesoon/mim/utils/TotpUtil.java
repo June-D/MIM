@@ -56,12 +56,21 @@ public final class TotpUtil {
      * 校验验证码，允许前后各一个时间步的偏差。
      */
     public static boolean verify(String secretBase32, String code) {
+        return matchedStep(secretBase32, code) >= 0;
+    }
+
+    /**
+     * 返回验证码匹配到的时间步；不匹配返回 -1。
+     *
+     * <p>调用方可用它做防重放：同一个时间步只允许使用一次。
+     */
+    public static long matchedStep(String secretBase32, String code) {
         if (secretBase32 == null || code == null) {
-            return false;
+            return -1L;
         }
         String normalized = code.trim();
         if (!normalized.matches("\\d{" + DIGITS + "}")) {
-            return false;
+            return -1L;
         }
         try {
             byte[] key = base32Decode(secretBase32);
@@ -71,12 +80,12 @@ public final class TotpUtil {
                 String expected = code(key, counter + offset);
                 if (MessageDigest.isEqual(expected.getBytes(StandardCharsets.US_ASCII),
                     expectedBytes)) {
-                    return true;
+                    return counter + offset;
                 }
             }
-            return false;
+            return -1L;
         } catch (Exception e) {
-            return false;
+            return -1L;
         }
     }
 

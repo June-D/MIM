@@ -12,6 +12,7 @@ import com.junesoon.mim.responses.TwoFactorSetupResponse;
 import com.junesoon.mim.service.TwoFactorService;
 import com.junesoon.mim.utils.JwtTokenUtil;
 import com.junesoon.mim.utils.TotpUtil;
+import com.junesoon.mim.utils.TotpVerifier;
 import com.junesoon.mim.websocket.SessionRegistry;
 import java.util.Date;
 import java.util.UUID;
@@ -34,16 +35,18 @@ public class TwoFactorServiceImpl implements TwoFactorService {
     private final DeviceMapper deviceMapper;
     private final JwtTokenUtil jwtTokenUtil;
     private final SessionRegistry sessionRegistry;
+    private final TotpVerifier totpVerifier;
 
     private final BCryptPasswordEncoder encoder =
         new BCryptPasswordEncoder(CommonConstants.PW_ENCORDER_SALT);
 
     public TwoFactorServiceImpl(UserMapper userMapper, DeviceMapper deviceMapper,
-        JwtTokenUtil jwtTokenUtil, SessionRegistry sessionRegistry) {
+        JwtTokenUtil jwtTokenUtil, SessionRegistry sessionRegistry, TotpVerifier totpVerifier) {
         this.userMapper = userMapper;
         this.deviceMapper = deviceMapper;
         this.jwtTokenUtil = jwtTokenUtil;
         this.sessionRegistry = sessionRegistry;
+        this.totpVerifier = totpVerifier;
     }
 
     @Override
@@ -71,8 +74,8 @@ public class TwoFactorServiceImpl implements TwoFactorService {
         if (!StringUtils.hasText(user.getTotpSecret())) {
             throw new UserInvalidException("请先生成二次验证密钥");
         }
-        if (!TotpUtil.verify(user.getTotpSecret(), code)) {
-            throw new UserInvalidException("二次验证码错误");
+        if (!totpVerifier.verifyAndConsume(username, user.getTotpSecret(), code)) {
+            throw new UserInvalidException("二次验证码错误或已被使用");
         }
         user.setTotpEnabled(true);
         user.setUpdTime(new Date());
@@ -91,8 +94,8 @@ public class TwoFactorServiceImpl implements TwoFactorService {
         if (!StringUtils.hasText(password) || !encoder.matches(password, user.getPassword())) {
             throw new UserInvalidException("当前密码不正确");
         }
-        if (!TotpUtil.verify(user.getTotpSecret(), code)) {
-            throw new UserInvalidException("二次验证码错误");
+        if (!totpVerifier.verifyAndConsume(username, user.getTotpSecret(), code)) {
+            throw new UserInvalidException("二次验证码错误或已被使用");
         }
         // 选择性更新不会把 null 写回数据库，用空串显式清空
         user.setTotpSecret("");
