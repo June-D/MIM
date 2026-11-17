@@ -6,10 +6,14 @@ import com.junesoon.mim.model.UserInfo;
 import com.junesoon.mim.model.JwtAuthenticationRequest;
 import com.junesoon.mim.model.PasswordChangeRequest;
 import com.junesoon.mim.model.PasswordChangeResult;
+import com.junesoon.mim.model.TwoFactorCodeRequest;
+import com.junesoon.mim.model.TwoFactorDisableRequest;
+import com.junesoon.mim.model.TwoFactorSetup;
 import feign.Headers;
 import feign.Param;
 import feign.RequestLine;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 登录与基础信息接口。
@@ -40,6 +44,18 @@ public interface LoginFeign extends FeignAPI {
      */
     @RequestLine("POST /user/password")
     ObjectRestResponse<PasswordChangeResult> changePassword(PasswordChangeRequest request);
+
+    @RequestLine("GET /user/2fa/status")
+    ObjectRestResponse<Map<String, Object>> twoFactorStatus();
+
+    @RequestLine("POST /user/2fa/setup")
+    ObjectRestResponse<TwoFactorSetup> setupTwoFactor();
+
+    @RequestLine("POST /user/2fa/enable")
+    ObjectRestResponse<PasswordChangeResult> enableTwoFactor(TwoFactorCodeRequest request);
+
+    @RequestLine("POST /user/2fa/disable")
+    ObjectRestResponse<PasswordChangeResult> disableTwoFactor(TwoFactorDisableRequest request);
 
     @RequestLine("GET /chat/contacts")
     List<ChatContact> getChatContacts();

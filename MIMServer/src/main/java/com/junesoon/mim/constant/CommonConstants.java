@@ -10,6 +10,8 @@ public class CommonConstants {
     // 用户token异常
     public static final Integer EX_USER_INVALID_CODE = 40101;
     public static final Integer EX_USER_PASS_INVALID_CODE = 40001;
+    /** 需要二次验证码：客户端据此弹出验证码输入框并重试登录。 */
+    public static final Integer EX_2FA_REQUIRED_CODE = 40102;
     // 用户名重复
     public static final Integer EX_USERNAME_REPEAT_INVALID_CODE = 40002;
     // 客户端token异常

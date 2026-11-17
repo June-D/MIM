@@ -66,6 +66,11 @@ import lombok.extern.slf4j.Slf4j;
 @ViewController("/fxml/login.fxml")
 public class LoginController {
 
+    /**
+     * 服务端返回该状态码表示密码已通过，需要补充 TOTP 验证码。
+     */
+    private static final int STATUS_2FA_REQUIRED = 40102;
+
     @ActionHandler
     private FlowActionHandler actionHandler;
     private final UsernameTakenValidator usernameTakenValidator = new UsernameTakenValidator();
@@ -485,13 +490,22 @@ public class LoginController {
             ApplicatonStore.setDeviceId(
                 new com.junesoon.mim.service.DeviceIdentity().getOrCreate(username.trim()));
         }
-        JwtAuthenticationRequest jwtAuthenticationRequest = new JwtAuthenticationRequest(username,
+        JwtAuthenticationRequest request = new JwtAuthenticationRequest(username,
             EncryptUtil.base64Encode(rawPassword));
+        runLogin(request, username, rawPassword);
+    }
+
+    /**
+     * 执行一次登录。服务端返回“需要二次验证码”时，弹窗输入后带 code 重试。
+     */
+    private void runLogin(JwtAuthenticationRequest jwtAuthenticationRequest, String username,
+        String rawPassword) {
         ProcessChain.create().addRunnableInPlatformThread(() -> {
             centerPane.setDisable(true);
             loginBut.setText("正在登录...");
         }).addSupplierInExecutor(() -> {
-            ObjectRestResponse<String> rel = Request.connector(LoginFeign.class).login(jwtAuthenticationRequest);
+            ObjectRestResponse<String> rel =
+                Request.connector(LoginFeign.class).login(jwtAuthenticationRequest);
             if (rel.getStatus() == 200 && rel.getData() != null) {
                 ApplicatonStore.setToken(rel.getData());
                 // 本地身份私钥用登录口令加密落盘，会话期间保留口令以便解锁
@@ -517,6 +531,8 @@ public class LoginController {
             if (rel.getStatus() == 200) {
                 errorLabel.setText("");
                 loadApplicatonStore();
+            } else if (rel.getStatus() == STATUS_2FA_REQUIRED) {
+                promptTwoFactorCode(jwtAuthenticationRequest, username, rawPassword);
             } else {
                 lodingBar.requestFocus();
                 errorLabel.setText(rel.getMessage());
@@ -529,6 +545,22 @@ public class LoginController {
             centerPane.setDisable(false);
             loginBut.setText("登录");
         }).run();
+    }
+
+    private void promptTwoFactorCode(JwtAuthenticationRequest request, String username,
+        String rawPassword) {
+        javafx.scene.control.TextInputDialog dialog =
+            new javafx.scene.control.TextInputDialog();
+        dialog.setTitle("二次验证");
+        dialog.setHeaderText("该账号已启用二次验证");
+        dialog.setContentText("请输入身份验证器中的 6 位验证码：");
+        java.util.Optional<String> code = dialog.showAndWait();
+        if (!code.isPresent() || code.get().trim().isEmpty()) {
+            lodingBar.requestFocus();
+            return;
+        }
+        request.setCode(code.get().trim());
+        runLogin(request, username, rawPassword);
     }
 
     /**

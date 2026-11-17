@@ -26,6 +26,16 @@ public class User implements Serializable {
 
     private Date lastLoginTime;
 
+    /**
+     * TOTP 共享密钥（Base32）。启用二次验证后才有值。
+     */
+    private String totpSecret;
+
+    /**
+     * 是否已启用 TOTP 二次验证。
+     */
+    private Boolean totpEnabled;
+
     private static final long serialVersionUID = 1L;
 
     @Override

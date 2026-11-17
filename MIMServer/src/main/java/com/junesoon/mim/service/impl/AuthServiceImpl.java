@@ -1,5 +1,6 @@
 package com.junesoon.mim.service.impl;
 
+import com.junesoon.mim.constant.CommonConstants;
 import com.junesoon.mim.entity.Device;
 import com.junesoon.mim.entity.User;
 import com.junesoon.mim.entity.UserInfo;
@@ -11,6 +12,7 @@ import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.service.AuthService;
 import com.junesoon.mim.service.UserService;
 import com.junesoon.mim.utils.JwtTokenUtil;
+import com.junesoon.mim.utils.TotpUtil;
 import java.util.UUID;
 import javax.annotation.Resource;
 import org.springframework.stereotype.Service;
@@ -33,6 +35,18 @@ public class AuthServiceImpl implements AuthService {
         throws Exception {
         UserInfo info = userService.validate(authenticationRequest);
         if (!StringUtils.isEmpty(info.getId())) {
+            // 密码通过后再校验 TOTP；缺少验证码时用专用状态码提示客户端弹窗
+            User user = userService.getUserByUsername(info.getUsername());
+            if (user != null && Boolean.TRUE.equals(user.getTotpEnabled())) {
+                String code = authenticationRequest.getCode();
+                if (!StringUtils.hasText(code)) {
+                    throw new UserInvalidException("请输入二次验证码",
+                        CommonConstants.EX_2FA_REQUIRED_CODE);
+                }
+                if (!TotpUtil.verify(user.getTotpSecret(), code)) {
+                    throw new UserInvalidException("二次验证码错误");
+                }
+            }
             int tokenVersion = 0;
             if (StringUtils.hasText(deviceId)) {
                 Device device = deviceMapper.selectOne(info.getUsername(), deviceId);

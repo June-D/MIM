@@ -358,12 +358,148 @@ public class MainController {
             new javafx.scene.control.MenuItem("修改登录密码");
         changePassword.setOnAction(e -> showChangePasswordDialog());
 
+        javafx.scene.control.MenuItem twoFactor =
+            new javafx.scene.control.MenuItem("二次验证");
+        twoFactor.setOnAction(e -> showTwoFactorDialog());
+
         javafx.scene.control.MenuItem logout =
             new javafx.scene.control.MenuItem("退出登录");
         logout.setOnAction(e -> confirmLogout("退出登录", false));
 
-        menu.getItems().addAll(deviceCode, changePassword, switchAccount, logout);
+        menu.getItems().addAll(deviceCode, twoFactor, changePassword, switchAccount, logout);
         menu.show(accountMenuButton, event.getScreenX(), event.getScreenY());
+    }
+
+    /**
+     * 二次验证入口：先查状态，已启用则引导关闭，否则引导启用。
+     */
+    private void showTwoFactorDialog() {
+        new Thread(() -> {
+            try {
+                com.junesoon.mim.components.ObjectRestResponse<java.util.Map<String, Object>> resp =
+                    com.junesoon.mim.components.Request
+                        .connector(com.junesoon.mim.feign.LoginFeign.class).twoFactorStatus();
+                java.util.Map<String, Object> data = resp == null ? null : resp.getData();
+                boolean enabled = data != null && Boolean.TRUE.equals(data.get("enabled"));
+                Platform.runLater(() -> {
+                    if (enabled) {
+                        disableTwoFactorFlow();
+                    } else {
+                        enableTwoFactorFlow();
+                    }
+                });
+            } catch (Exception e) {
+                Platform.runLater(() -> AlertUtil.show("无法读取二次验证状态", e.getMessage()));
+            }
+        }, "2fa-status").start();
+    }
+
+    private void enableTwoFactorFlow() {
+        new Thread(() -> {
+            try {
+                com.junesoon.mim.components.ObjectRestResponse<com.junesoon.mim.model.TwoFactorSetup>
+                    resp = com.junesoon.mim.components.Request
+                        .connector(com.junesoon.mim.feign.LoginFeign.class).setupTwoFactor();
+                if (resp == null || resp.getStatus() != 200 || resp.getData() == null) {
+                    throw new IllegalStateException(resp == null ? "服务端无响应" : resp.getMessage());
+                }
+                com.junesoon.mim.model.TwoFactorSetup setup = resp.getData();
+                Platform.runLater(() -> promptEnableTwoFactor(setup));
+            } catch (Exception e) {
+                Platform.runLater(() -> AlertUtil.show("启用二次验证失败", e.getMessage()));
+            }
+        }, "2fa-setup").start();
+    }
+
+    private void promptEnableTwoFactor(com.junesoon.mim.model.TwoFactorSetup setup) {
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+            new javafx.scene.control.Dialog<>();
+        dialog.setTitle("启用二次验证");
+        dialog.setHeaderText("把密钥添加到身份验证器，然后输入当前 6 位验证码");
+
+        javafx.scene.control.TextArea info = new javafx.scene.control.TextArea(
+            "共享密钥：\n" + setup.getSecret()
+                + "\n\n可导入 URI：\n" + setup.getOtpauthUri());
+        info.setEditable(false);
+        info.setWrapText(true);
+        info.setPrefRowCount(7);
+        javafx.scene.control.TextField code = new javafx.scene.control.TextField();
+        code.setPromptText("6 位验证码");
+        javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(10, info, code);
+        dialog.getDialogPane().setContent(box);
+        dialog.getDialogPane().getButtonTypes().addAll(
+            javafx.scene.control.ButtonType.OK, javafx.scene.control.ButtonType.CANCEL);
+        java.util.Optional<javafx.scene.control.ButtonType> result = dialog.showAndWait();
+        if (!result.isPresent() || result.get() != javafx.scene.control.ButtonType.OK) {
+            return;
+        }
+        final String value = code.getText() == null ? "" : code.getText().trim();
+        new Thread(() -> {
+            try {
+                com.junesoon.mim.components.ObjectRestResponse<com.junesoon.mim.model.PasswordChangeResult>
+                    resp = com.junesoon.mim.components.Request
+                        .connector(com.junesoon.mim.feign.LoginFeign.class)
+                        .enableTwoFactor(new com.junesoon.mim.model.TwoFactorCodeRequest(value));
+                if (resp == null || resp.getStatus() != 200 || resp.getData() == null) {
+                    throw new IllegalStateException(resp == null ? "服务端无响应" : resp.getMessage());
+                }
+                applyTwoFactorToken(resp.getData().getToken());
+                Platform.runLater(() -> AlertUtil.show("已启用",
+                    "二次验证已启用；其它设备需要重新登录。"));
+            } catch (Exception e) {
+                Platform.runLater(() -> AlertUtil.show("启用二次验证失败", e.getMessage()));
+            }
+        }, "2fa-enable").start();
+    }
+
+    private void disableTwoFactorFlow() {
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+            new javafx.scene.control.Dialog<>();
+        dialog.setTitle("关闭二次验证");
+        dialog.setHeaderText("需要当前密码与身份验证器中的 6 位验证码");
+
+        javafx.scene.control.PasswordField password =
+            new javafx.scene.control.PasswordField();
+        password.setPromptText("当前密码");
+        javafx.scene.control.TextField code = new javafx.scene.control.TextField();
+        code.setPromptText("6 位验证码");
+        javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(10, password, code);
+        dialog.getDialogPane().setContent(box);
+        dialog.getDialogPane().getButtonTypes().addAll(
+            javafx.scene.control.ButtonType.OK, javafx.scene.control.ButtonType.CANCEL);
+        java.util.Optional<javafx.scene.control.ButtonType> result = dialog.showAndWait();
+        if (!result.isPresent() || result.get() != javafx.scene.control.ButtonType.OK) {
+            return;
+        }
+        final String rawPassword = password.getText() == null ? "" : password.getText();
+        final String value = code.getText() == null ? "" : code.getText().trim();
+        new Thread(() -> {
+            try {
+                com.junesoon.mim.components.ObjectRestResponse<com.junesoon.mim.model.PasswordChangeResult>
+                    resp = com.junesoon.mim.components.Request
+                        .connector(com.junesoon.mim.feign.LoginFeign.class)
+                        .disableTwoFactor(new com.junesoon.mim.model.TwoFactorDisableRequest(
+                            com.junesoon.mim.utils.EncryptUtil.base64Encode(rawPassword), value));
+                if (resp == null || resp.getStatus() != 200 || resp.getData() == null) {
+                    throw new IllegalStateException(resp == null ? "服务端无响应" : resp.getMessage());
+                }
+                applyTwoFactorToken(resp.getData().getToken());
+                Platform.runLater(() -> AlertUtil.show("已关闭",
+                    "二次验证已关闭；其它设备需要重新登录。"));
+            } catch (Exception e) {
+                Platform.runLater(() -> AlertUtil.show("关闭二次验证失败", e.getMessage()));
+            }
+        }, "2fa-disable").start();
+    }
+
+    private void applyTwoFactorToken(String token) {
+        ApplicatonStore.setToken(token);
+        try {
+            WSClient.discard();
+            WSClient.getInstance().connectWithToken();
+        } catch (Exception e) {
+            log.warn("二次验证变更后重连 WebSocket 失败：{}", e.getMessage());
+        }
     }
 
     /**
