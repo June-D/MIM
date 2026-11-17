@@ -149,6 +149,17 @@ class TokenServiceTest {
     }
 
     @Test
+    @DisplayName("启用强制设备绑定后，未绑定设备的旧令牌被拒绝")
+    void unboundTokenRejectedWhenRequired() {
+        TokenService service = new TokenService(
+            new StubAuthUtil(new JWTInfo("alice", "1", "Alice")), new StubDeviceMapper());
+        org.springframework.test.util.ReflectionTestUtils.setField(
+            service, "requireDeviceBinding", true);
+
+        assertThrows(UserTokenException.class, () -> service.resolve("token"));
+    }
+
+    @Test
     @DisplayName("解析失败时 deviceIdOf 返回 null，不抛异常")
     void deviceIdOfInvalidTokenIsNull() {
         TokenService service = new TokenService(new StubAuthUtil(null), new StubDeviceMapper());

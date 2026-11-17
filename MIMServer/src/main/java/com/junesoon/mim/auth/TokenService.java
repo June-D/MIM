@@ -6,6 +6,7 @@ import com.junesoon.mim.jwt.JWTInfo;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.utils.UserAuthUtil;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 
@@ -31,6 +32,13 @@ public class TokenService {
     private final UserAuthUtil userAuthUtil;
     private final DeviceMapper deviceMapper;
 
+    /**
+     * 强制拒绝未绑定设备的旧 JWT。默认关闭以兼容旧客户端；
+     * 生产环境在客户端升级完成后应设为 true，关闭这条遗留通道。
+     */
+    @Value("${mim.auth.require-device-binding:false}")
+    private boolean requireDeviceBinding;
+
     public TokenService(UserAuthUtil userAuthUtil, DeviceMapper deviceMapper) {
         this.userAuthUtil = userAuthUtil;
         this.deviceMapper = deviceMapper;
@@ -43,6 +51,9 @@ public class TokenService {
         JWTInfo info = userAuthUtil.getInfoFromToken(token);
         String deviceId = info.getDeviceId();
         if (!StringUtils.hasText(deviceId)) {
+            if (requireDeviceBinding) {
+                throw new UserTokenException("请使用带设备标识的新版客户端重新登录");
+            }
             return info;
         }
         Device device = deviceMapper.selectOne(info.getUsername(), deviceId);

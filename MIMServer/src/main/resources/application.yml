@@ -27,6 +27,9 @@ mim:
   # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
   # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
   instance-id: ${HOSTNAME:local}
+  auth:
+    # 客户端全部升级后设为 true：拒绝未绑定设备的旧 JWT，强制重新登录。
+    require-device-binding: ${MIM_AUTH_REQUIRE_DEVICE_BINDING:false}
   rate-limit:
     # 默认不信任 X-Forwarded-For / X-Real-IP。
     # 只有部署在可信反向代理后面（且代理会覆盖客户端自带的转发头）时才设为 true，
