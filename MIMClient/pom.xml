@@ -11,7 +11,7 @@
 
     <properties>
         <java.version>1.8</java.version>
-        <feign.version>13.2.1</feign.version>
+        <feign.version>13.18</feign.version>
         <jfoenix.version>8.0.10</jfoenix.version>
         <datafx.version>8.0.2</datafx.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
