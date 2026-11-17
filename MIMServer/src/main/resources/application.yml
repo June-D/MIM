@@ -32,6 +32,19 @@ mim:
     # 只有部署在可信反向代理后面（且代理会覆盖客户端自带的转发头）时才设为 true，
     # 否则客户端只要每次换一个头就能绕过登录/注册的 IP 限流。
     trust-forwarded-headers: ${MIM_TRUST_FORWARDED_HEADERS:false}
+  # 邮件服务（仅用于找回密码验证码，不发送其它通知）。
+  # host 为空时找回密码接口会提示“邮件服务未配置”。
+  mail:
+    host: ${MIM_SMTP_HOST:}
+    port: ${MIM_SMTP_PORT:465}
+    username: ${MIM_SMTP_USERNAME:}
+    password: ${MIM_SMTP_PASSWORD:}
+    from: ${MIM_MAIL_FROM:}
+    ssl: ${MIM_SMTP_SSL:true}
+  security:
+    # 邮箱加密密钥（Base64，32 字节）。留空时从 JWT 私钥派生。
+    # 更换该密钥会导致历史邮箱无法解密，请妥善保管。
+    email-key: ${MIM_EMAIL_KEY:}
   # 传输层安全。默认关闭便于本地开发；生产环境必须开启，
   # 否则 JWT 与登录口令会在网络上明文传输，E2EE 也会被中间人冒充绕过。
   tls:

@@ -7,6 +7,7 @@ import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.service.PresenceService;
 import com.junesoon.mim.service.UserService;
+import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.ValidationUtil;
 import java.util.Date;
 import org.springframework.beans.BeanUtils;
@@ -19,13 +20,16 @@ public class UserServiceImpl implements UserService {
 
     private final UserMapper userMapper;
     private final PresenceService presenceService;
+    private final EmailCryptoService emailCryptoService;
 
     private final BCryptPasswordEncoder encoder =
         new BCryptPasswordEncoder(CommonConstants.PW_ENCORDER_SALT);
 
-    public UserServiceImpl(UserMapper userMapper, PresenceService presenceService) {
+    public UserServiceImpl(UserMapper userMapper, PresenceService presenceService,
+        EmailCryptoService emailCryptoService) {
         this.userMapper = userMapper;
         this.presenceService = presenceService;
+        this.emailCryptoService = emailCryptoService;
     }
 
     @Override
@@ -59,6 +63,7 @@ public class UserServiceImpl implements UserService {
         UserInfo info = new UserInfo();
         BeanUtils.copyProperties(user, info);
         info.setId(user.getId().toString());
+        info.setEmail(emailCryptoService.decrypt(username, user.getEmailCipher()));
         return info;
     }
 
@@ -66,6 +71,7 @@ public class UserServiceImpl implements UserService {
     public void register(JwtAuthenticationRequest request) {
         ValidationUtil.validateUsername(request.getUsername());
         ValidationUtil.validatePassword(request.getPassword());
+        ValidationUtil.validateEmail(request.getEmail());
         User user = new User();
         user.setUsername(request.getUsername());
         user.setPassword(encoder.encode(request.getPassword()));
@@ -73,6 +79,12 @@ public class UserServiceImpl implements UserService {
         user.setCrtTime(new Date());
         user.setUpdTime(new Date());
         user.setStatus(CommonConstants.USER_STATUS_NORMAL);
+        if (StringUtils.hasText(request.getEmail())) {
+            user.setEmailCipher(emailCryptoService.encrypt(request.getUsername(),
+                request.getEmail().trim()));
+        }
+        user.setTermsVersion(CommonConstants.TERMS_VERSION);
+        user.setAgreedAt(new Date());
         userMapper.insertSelective(user);
     }
 

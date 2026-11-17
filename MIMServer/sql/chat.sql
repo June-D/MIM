@@ -15,6 +15,9 @@ CREATE TABLE `t_register_users`  (
                               `last_login_time` datetime NULL DEFAULT NULL comment '最后登录时间',
                               `totp_secret` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL comment 'TOTP 共享密钥（Base32）',
                               `totp_enabled` tinyint(1) NOT NULL DEFAULT 0 comment '是否启用 TOTP 二次验证',
+                              `email_cipher` varchar(512) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL comment '加密后的邮箱（仅本人可见）',
+                              `terms_version` varchar(16) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL comment '同意的用户协议版本',
+                              `agreed_at` datetime NULL DEFAULT NULL comment '同意用户协议时间',
                               PRIMARY KEY (`id`) USING BTREE,
                               UNIQUE INDEX `idx_username`(`username`) USING BTREE
 ) ENGINE = InnoDB AUTO_INCREMENT = 32 CHARACTER SET = utf8 COLLATE = utf8_general_ci ROW_FORMAT = Dynamic comment '注册用户';
@@ -65,3 +68,12 @@ CREATE TABLE `t_rsa_key`  (
 -- ALTER TABLE `t_register_users`
 --     ADD COLUMN `totp_secret` varchar(64) NULL COMMENT 'TOTP 共享密钥（Base32）',
 --     ADD COLUMN `totp_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否启用 TOTP 二次验证';
+
+-- ------------------------------------------------------------
+-- 从旧版本升级（取消注释后执行）：
+-- 邮箱找回密码与用户协议。
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_register_users`
+--     ADD COLUMN `email_cipher` varchar(512) NULL COMMENT '加密后的邮箱（仅本人可见）',
+--     ADD COLUMN `terms_version` varchar(16) NULL COMMENT '同意的用户协议版本',
+--     ADD COLUMN `agreed_at` datetime NULL COMMENT '同意用户协议时间';

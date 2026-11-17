@@ -71,6 +71,12 @@ public class AuthServiceImpl implements AuthService {
 
     @Override
     public void register(JwtAuthenticationRequest request) {
+        if (!Boolean.TRUE.equals(request.getAgreedTerms())) {
+            throw new UserInvalidException("请先阅读并同意用户协议");
+        }
+        if (!CommonConstants.TERMS_VERSION.equals(request.getTermsVersion())) {
+            throw new UserInvalidException("用户协议版本已更新，请刷新后重试");
+        }
         User user = userService.getUserByUsername(request.getUsername());
         if (user != null) {
             throw new UsernameRepeatException("用户名已存在");

@@ -97,6 +97,8 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
         Map<String, String> body = new HashMap<>();
         body.put("username", username);
         body.put("password", base64Password());
+        body.put("agreedTerms", "true");
+        body.put("termsVersion", "2026-11");
 
         mockMvc.perform(post("/register/token")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -122,6 +124,8 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
         Map<String, String> body = new HashMap<>();
         body.put("username", username);
         body.put("password", base64Password());
+        body.put("agreedTerms", "true");
+        body.put("termsVersion", "2026-11");
 
         mockMvc.perform(post("/register/token")
                 .contentType(MediaType.APPLICATION_JSON)
@@ -165,6 +169,8 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
         body.put("publicKey", publicKey);
         body.put("algorithm", "EC-P256");
         body.put("password", base64Password());
+        body.put("agreedTerms", "true");
+        body.put("termsVersion", "2026-11");
         mockMvc.perform(post("/key")
                 .header("Authorization", "Bearer " + token)
                 .header("X-Device-Id", deviceId)
@@ -397,6 +403,8 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
             Map<String, String> body = new HashMap<>();
             body.put("username", "ratelimit" + i);
             body.put("password", base64Password());
+        body.put("agreedTerms", "true");
+        body.put("termsVersion", "2026-11");
             MvcResult result = mockMvc.perform(post("/register/token")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(objectMapper.writeValueAsString(body)))
@@ -419,6 +427,8 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
         Map<String, String> body = new HashMap<>();
         body.put("username", "a b");
         body.put("password", base64Password());
+        body.put("agreedTerms", "true");
+        body.put("termsVersion", "2026-11");
         mockMvc.perform(post("/register/token")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(body)))

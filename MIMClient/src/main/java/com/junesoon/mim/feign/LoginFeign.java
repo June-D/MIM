@@ -6,6 +6,8 @@ import com.junesoon.mim.model.UserInfo;
 import com.junesoon.mim.model.JwtAuthenticationRequest;
 import com.junesoon.mim.model.PasswordChangeRequest;
 import com.junesoon.mim.model.PasswordChangeResult;
+import com.junesoon.mim.model.RecoverEmailRequest;
+import com.junesoon.mim.model.RecoverResetRequest;
 import com.junesoon.mim.model.TwoFactorCodeRequest;
 import com.junesoon.mim.model.TwoFactorDisableRequest;
 import com.junesoon.mim.model.TwoFactorSetup;
@@ -56,6 +58,12 @@ public interface LoginFeign extends FeignAPI {
 
     @RequestLine("POST /user/2fa/disable")
     ObjectRestResponse<PasswordChangeResult> disableTwoFactor(TwoFactorDisableRequest request);
+
+    @RequestLine("POST /recover/email")
+    ObjectRestResponse<Boolean> recoverEmail(RecoverEmailRequest request);
+
+    @RequestLine("POST /recover/reset")
+    ObjectRestResponse<Boolean> recoverReset(RecoverResetRequest request);
 
     @RequestLine("GET /chat/contacts")
     List<ChatContact> getChatContacts();

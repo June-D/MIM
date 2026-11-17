@@ -14,6 +14,14 @@ public final class ValidationUtil {
      */
     private static final Pattern USERNAME_PATTERN = Pattern.compile("^[\\p{L}\\p{N}_.-]{2,32}$");
 
+    /**
+     * 邮箱只做基本格式检查，不验证送达性。找回密码依赖用户填写真实地址。
+     */
+    private static final Pattern EMAIL_PATTERN =
+        Pattern.compile("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$");
+
+    private static final int EMAIL_MAX_LENGTH = 254;
+
     private static final int PASSWORD_MIN = 6;
     /**
      * BCrypt 只使用前 72 字节，超过部分会被静默丢弃，因此显式限制。
@@ -49,6 +57,19 @@ public final class ValidationUtil {
         }
         if (password.getBytes(StandardCharsets.UTF_8).length > PASSWORD_MAX_BYTES) {
             throw new UserInvalidException("密码过长");
+        }
+    }
+
+    /**
+     * 可选邮箱：为空表示不填写；非空时只做格式与长度检查。
+     */
+    public static void validateEmail(String email) {
+        if (email == null || email.trim().isEmpty()) {
+            return;
+        }
+        String value = email.trim();
+        if (value.length() > EMAIL_MAX_LENGTH || !EMAIL_PATTERN.matcher(value).matches()) {
+            throw new UserInvalidException("邮箱格式不正确");
         }
     }
 

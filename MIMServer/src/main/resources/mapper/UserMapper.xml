@@ -14,10 +14,13 @@
         <result column="last_login_time" jdbcType="TIMESTAMP" property="lastLoginTime"/>
         <result column="totp_secret" jdbcType="VARCHAR" property="totpSecret"/>
         <result column="totp_enabled" jdbcType="TINYINT" property="totpEnabled"/>
+        <result column="email_cipher" jdbcType="VARCHAR" property="emailCipher"/>
+        <result column="terms_version" jdbcType="VARCHAR" property="termsVersion"/>
+        <result column="agreed_at" jdbcType="TIMESTAMP" property="agreedAt"/>
     </resultMap>
     <sql id="Base_Column_List">
         id, username, password, nickname, pic, signature, status, crt_time, upd_time,
-        last_login_time, totp_secret, totp_enabled
+        last_login_time, totp_secret, totp_enabled, email_cipher, terms_version, agreed_at
     </sql>
     <select id="selectByPrimaryKey" parameterType="java.lang.Integer" resultMap="BaseResultMap">
         select
@@ -34,12 +37,14 @@
         insert into t_register_users (id, username, password,
                                       nickname, pic, signature,
                                       status, crt_time, upd_time,
-                                      last_login_time, totp_secret, totp_enabled)
+                                      last_login_time, totp_secret, totp_enabled,
+                                      email_cipher, terms_version, agreed_at)
         values (#{id,jdbcType=INTEGER}, #{username,jdbcType=VARCHAR}, #{password,jdbcType=VARCHAR},
                 #{nickname,jdbcType=VARCHAR}, #{pic,jdbcType=VARCHAR}, #{signature,jdbcType=VARCHAR},
                 #{status,jdbcType=CHAR}, #{crtTime,jdbcType=TIMESTAMP}, #{updTime,jdbcType=TIMESTAMP},
                 #{lastLoginTime,jdbcType=TIMESTAMP}, #{totpSecret,jdbcType=VARCHAR},
-                #{totpEnabled,jdbcType=TINYINT})
+                #{totpEnabled,jdbcType=TINYINT}, #{emailCipher,jdbcType=VARCHAR},
+                #{termsVersion,jdbcType=VARCHAR}, #{agreedAt,jdbcType=TIMESTAMP})
     </insert>
     <insert id="insertSelective" parameterType="com.junesoon.mim.entity.User">
         insert into t_register_users
@@ -80,6 +85,15 @@
             <if test="totpEnabled != null">
                 totp_enabled,
             </if>
+            <if test="emailCipher != null">
+                email_cipher,
+            </if>
+            <if test="termsVersion != null">
+                terms_version,
+            </if>
+            <if test="agreedAt != null">
+                agreed_at,
+            </if>
         </trim>
         <trim prefix="values (" suffix=")" suffixOverrides=",">
             <if test="id != null">
@@ -117,6 +131,15 @@
             </if>
             <if test="totpEnabled != null">
                 #{totpEnabled,jdbcType=TINYINT},
+            </if>
+            <if test="emailCipher != null">
+                #{emailCipher,jdbcType=VARCHAR},
+            </if>
+            <if test="termsVersion != null">
+                #{termsVersion,jdbcType=VARCHAR},
+            </if>
+            <if test="agreedAt != null">
+                #{agreedAt,jdbcType=TIMESTAMP},
             </if>
         </trim>
     </insert>
@@ -156,6 +179,15 @@
             <if test="totpEnabled != null">
                 totp_enabled = #{totpEnabled,jdbcType=TINYINT},
             </if>
+            <if test="emailCipher != null">
+                email_cipher = #{emailCipher,jdbcType=VARCHAR},
+            </if>
+            <if test="termsVersion != null">
+                terms_version = #{termsVersion,jdbcType=VARCHAR},
+            </if>
+            <if test="agreedAt != null">
+                agreed_at = #{agreedAt,jdbcType=TIMESTAMP},
+            </if>
         </set>
         where id = #{id,jdbcType=INTEGER}
     </update>
@@ -171,7 +203,10 @@
             upd_time        = #{updTime,jdbcType=TIMESTAMP},
             last_login_time = #{lastLoginTime,jdbcType=TIMESTAMP},
             totp_secret     = #{totpSecret,jdbcType=VARCHAR},
-            totp_enabled    = #{totpEnabled,jdbcType=TINYINT}
+            totp_enabled    = #{totpEnabled,jdbcType=TINYINT},
+            email_cipher    = #{emailCipher,jdbcType=VARCHAR},
+            terms_version   = #{termsVersion,jdbcType=VARCHAR},
+            agreed_at       = #{agreedAt,jdbcType=TIMESTAMP}
         where id = #{id,jdbcType=INTEGER}
     </update>
 

@@ -69,6 +69,17 @@ class ValidationUtilTest {
     }
 
     @Test
+    @DisplayName("邮箱可选，格式基本校验")
+    void emailValidation() {
+        assertDoesNotThrow(() -> ValidationUtil.validateEmail(null));
+        assertDoesNotThrow(() -> ValidationUtil.validateEmail(""));
+        assertDoesNotThrow(() -> ValidationUtil.validateEmail("alice@example.com"));
+        assertThrows(UserInvalidException.class, () -> ValidationUtil.validateEmail("alice"));
+        assertThrows(UserInvalidException.class, () -> ValidationUtil.validateEmail("a b@example.com"));
+        assertThrows(UserInvalidException.class, () -> ValidationUtil.validateEmail("@example.com"));
+    }
+
+    @Test
     @DisplayName("requireText 校验空值与超长")
     void requireText() {
         assertDoesNotThrow(() -> ValidationUtil.requireText("abc", "字段", 10));

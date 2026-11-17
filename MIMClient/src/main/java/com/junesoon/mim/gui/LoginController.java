@@ -91,6 +91,9 @@ public class LoginController {
     public Hyperlink registeredLink;
     @FXML
     public Hyperlink loginLink;
+
+    @FXML
+    public Hyperlink recoverLink;
     @FXML
     private Label errorLabel;
     @FXML
@@ -359,12 +362,207 @@ public class LoginController {
             registeredPane.setEffect(backEffect);
             backTimeLine.play();
         });
+        recoverLink.setOnAction(event -> showRecoveryDialog());
+    }
+
+    /**
+     * 注册前收集可选邮箱与用户协议同意状态。
+     */
+    private static final class RegistrationInfo {
+        private final String email;
+        private final String termsVersion;
+
+        RegistrationInfo(String email, String termsVersion) {
+            this.email = email;
+            this.termsVersion = termsVersion;
+        }
+    }
+
+    /**
+     * 注册信息对话框：邮箱可选（仅本人可见，用于找回密码），必须勾选同意用户协议。
+     */
+    private RegistrationInfo askRegistrationInfo() {
+        String retainedEmail = "";
+        while (true) {
+            javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+                new javafx.scene.control.Dialog<>();
+            dialog.setTitle("注册信息");
+            dialog.setHeaderText("邮箱可选，仅本人可见，用于找回密码");
+            javafx.scene.control.TextField emailField =
+                new javafx.scene.control.TextField(retainedEmail);
+            emailField.setPromptText("邮箱（可选，请填写真实有效地址）");
+            javafx.scene.control.Label hint = new javafx.scene.control.Label(
+                "邮箱不做真实性验证；请务必填写可用邮箱，否则将无法找回密码。");
+            hint.setWrapText(true);
+            javafx.scene.control.CheckBox agree = new javafx.scene.control.CheckBox(
+                "我已阅读并同意《用户协议》");
+            javafx.scene.control.Hyperlink terms =
+                new javafx.scene.control.Hyperlink("查看用户协议");
+            terms.setOnAction(e -> showTermsDialog());
+            javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(10,
+                new javafx.scene.control.Label("邮箱（可选）"), emailField, hint, agree, terms);
+            box.setPrefWidth(480);
+            dialog.getDialogPane().setContent(box);
+            dialog.getDialogPane().getButtonTypes().addAll(
+                javafx.scene.control.ButtonType.OK, javafx.scene.control.ButtonType.CANCEL);
+            java.util.Optional<javafx.scene.control.ButtonType> result = dialog.showAndWait();
+            if (!result.isPresent() || result.get() != javafx.scene.control.ButtonType.OK) {
+                return null;
+            }
+            retainedEmail = emailField.getText() == null ? "" : emailField.getText().trim();
+            if (!agree.isSelected()) {
+                AlertUtil.show("请先同意用户协议", "必须勾选同意《用户协议》才能注册。");
+                continue;
+            }
+            return new RegistrationInfo(retainedEmail,
+                com.junesoon.mim.utils.UserAgreement.VERSION);
+        }
+    }
+
+    private void showTermsDialog() {
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+            new javafx.scene.control.Dialog<>();
+        dialog.setTitle("用户协议");
+        dialog.setHeaderText("请阅读以下条款与风险提示");
+        javafx.scene.control.TextArea text = new javafx.scene.control.TextArea(
+            com.junesoon.mim.utils.UserAgreement.TEXT);
+        text.setEditable(false);
+        text.setWrapText(true);
+        text.setPrefRowCount(18);
+        text.setPrefColumnCount(52);
+        dialog.getDialogPane().setContent(text);
+        dialog.getDialogPane().getButtonTypes().add(javafx.scene.control.ButtonType.CLOSE);
+        dialog.showAndWait();
+    }
+
+    /**
+     * 邮箱验证码找回密码。
+     */
+    private void showRecoveryDialog() {
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+            new javafx.scene.control.Dialog<>();
+        dialog.setTitle("找回密码");
+        dialog.setHeaderText("通过注册邮箱验证码重置密码；重置会同时关闭二次验证");
+
+        javafx.scene.control.TextField username = new javafx.scene.control.TextField();
+        username.setPromptText("用户名");
+        javafx.scene.control.TextField code = new javafx.scene.control.TextField();
+        code.setPromptText("邮箱验证码");
+        javafx.scene.control.PasswordField password =
+            new javafx.scene.control.PasswordField();
+        password.setPromptText("新密码（至少 6 位）");
+        javafx.scene.control.PasswordField confirm =
+            new javafx.scene.control.PasswordField();
+        confirm.setPromptText("确认新密码");
+
+        javafx.scene.layout.GridPane grid = new javafx.scene.layout.GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.add(new javafx.scene.control.Label("用户名"), 0, 0);
+        grid.add(username, 1, 0);
+        grid.add(new javafx.scene.control.Label("邮箱验证码"), 0, 1);
+        grid.add(code, 1, 1);
+        grid.add(new javafx.scene.control.Label("新密码"), 0, 2);
+        grid.add(password, 1, 2);
+        grid.add(new javafx.scene.control.Label("确认新密码"), 0, 3);
+        grid.add(confirm, 1, 3);
+        dialog.getDialogPane().setContent(grid);
+
+        javafx.scene.control.ButtonType send = new javafx.scene.control.ButtonType(
+            "发送验证码", javafx.scene.control.ButtonBar.ButtonData.LEFT);
+        javafx.scene.control.ButtonType reset = new javafx.scene.control.ButtonType(
+            "重置密码", javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
+        javafx.scene.control.ButtonType cancel = new javafx.scene.control.ButtonType(
+            "取消", javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE);
+        dialog.getDialogPane().getButtonTypes().addAll(send, reset, cancel);
+        dialog.getDialogPane().lookupButton(send).addEventFilter(
+            javafx.event.ActionEvent.ACTION, event -> {
+                event.consume();
+                sendRecoveryCode(username.getText());
+            });
+        dialog.getDialogPane().lookupButton(reset).addEventFilter(
+            javafx.event.ActionEvent.ACTION, event -> {
+                event.consume();
+                String user = username.getText() == null ? "" : username.getText().trim();
+                if (user.isEmpty()) {
+                    AlertUtil.show("无法重置", "请输入用户名。");
+                    return;
+                }
+                String value = password.getText() == null ? "" : password.getText();
+                if (value.length() < 6) {
+                    AlertUtil.show("无法重置", "新密码至少 6 位。");
+                    return;
+                }
+                if (!value.equals(confirm.getText())) {
+                    AlertUtil.show("无法重置", "两次输入的新密码不一致。");
+                    return;
+                }
+                resetRecoveredPassword(dialog, reset, user, code.getText(), value);
+            });
+        dialog.showAndWait();
+    }
+
+    private void sendRecoveryCode(String username) {
+        if (username == null || username.trim().isEmpty()) {
+            AlertUtil.show("提示", "请输入用户名。");
+            return;
+        }
+        final String user = username.trim();
+        new Thread(() -> {
+            try {
+                ObjectRestResponse<Boolean> resp = Request.connector(LoginFeign.class)
+                    .recoverEmail(new com.junesoon.mim.model.RecoverEmailRequest(user));
+                String message = resp != null && resp.getStatus() == 200
+                    ? "如果该账号填写了邮箱，验证码已发送，请查收（包括垃圾邮件箱）。"
+                    : (resp == null ? "服务端无响应" : resp.getMessage());
+                javafx.application.Platform.runLater(() -> AlertUtil.show("提示", message));
+            } catch (Exception e) {
+                javafx.application.Platform.runLater(
+                    () -> AlertUtil.show("发送失败", String.valueOf(e.getMessage())));
+            }
+        }, "recover-send").start();
+    }
+
+    private void resetRecoveredPassword(
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog,
+        javafx.scene.control.ButtonType resetType, String username, String code,
+        String newPassword) {
+        final String recoveryCode = code == null ? "" : code.trim();
+        new Thread(() -> {
+            try {
+                ObjectRestResponse<Boolean> resp = Request.connector(LoginFeign.class)
+                    .recoverReset(new com.junesoon.mim.model.RecoverResetRequest(username,
+                        recoveryCode, EncryptUtil.base64Encode(newPassword)));
+                if (resp != null && resp.getStatus() == 200) {
+                    javafx.application.Platform.runLater(() -> {
+                        dialog.setResult(resetType);
+                        dialog.close();
+                        AlertUtil.show("密码已重置",
+                            "请使用新密码登录；该账号的二次验证已关闭。");
+                    });
+                } else {
+                    String message = resp == null ? "服务端无响应" : resp.getMessage();
+                    javafx.application.Platform.runLater(
+                        () -> AlertUtil.show("重置失败", message));
+                }
+            } catch (Exception e) {
+                javafx.application.Platform.runLater(
+                    () -> AlertUtil.show("重置失败", String.valueOf(e.getMessage())));
+            }
+        }, "recover-reset").start();
     }
 
     @ActionMethod("register")
     private void register() {
-        JwtAuthenticationRequest jwtAuthenticationRequest = new JwtAuthenticationRequest(reUserNameTextField.getText(),
-            EncryptUtil.base64Encode(rePwdTextField.getText()));
+        RegistrationInfo info = askRegistrationInfo();
+        if (info == null) {
+            return;
+        }
+        JwtAuthenticationRequest jwtAuthenticationRequest = new JwtAuthenticationRequest(
+            reUserNameTextField.getText(), EncryptUtil.base64Encode(rePwdTextField.getText()));
+        jwtAuthenticationRequest.setEmail(info.email);
+        jwtAuthenticationRequest.setAgreedTerms(Boolean.TRUE);
+        jwtAuthenticationRequest.setTermsVersion(info.termsVersion);
         final AtomicBoolean succeeded = new AtomicBoolean(false);
         ProcessChain.create().addRunnableInPlatformThread(() -> {
             centerPane.setDisable(true);

@@ -11,4 +11,9 @@ public class UserInfo implements Serializable {
     private String pic;
     private String signature;
 
+    /**
+     * 仅返回给账号本人，用于找回密码与确认；不会出现在搜索/联系人接口里。
+     */
+    private String email;
+
 }

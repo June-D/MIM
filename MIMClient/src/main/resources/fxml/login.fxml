@@ -86,6 +86,7 @@
                                     </font>
                                 </JFXButton>
                                 <Hyperlink fx:id="registeredLink" layoutX="224.0" layoutY="405.0" text="注册" />
+                                <Hyperlink fx:id="recoverLink" layoutX="66.0" layoutY="405.0" text="找回密码" />
                                 <Label id="login-prompt" layoutX="143.0" layoutY="409.0" text="还没有帐号?去" />
                                 <VBox alignment="CENTER" layoutY="302.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0">
                                     <children>

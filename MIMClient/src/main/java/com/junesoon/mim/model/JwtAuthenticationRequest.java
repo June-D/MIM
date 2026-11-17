@@ -18,6 +18,21 @@ public class JwtAuthenticationRequest implements Serializable {
      */
     private String code;
 
+    /**
+     * 注册时可选填写的找回密码邮箱。
+     */
+    private String email;
+
+    /**
+     * 注册时必须为 true：已阅读并同意用户协议。
+     */
+    private Boolean agreedTerms;
+
+    /**
+     * 用户协议版本，必须与服务端当前版本一致。
+     */
+    private String termsVersion;
+
     public JwtAuthenticationRequest(String username, String password) {
         this.username = username;
         this.password = password;

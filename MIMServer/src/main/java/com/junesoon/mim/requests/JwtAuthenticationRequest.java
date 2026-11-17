@@ -20,4 +20,19 @@ public class JwtAuthenticationRequest implements Serializable {
      * 启用 TOTP 二次验证后登录必须携带的 6 位验证码。
      */
     private String code;
+
+    /**
+     * 注册时可选填写的找回密码邮箱。仅本人可见，不做真实性校验。
+     */
+    private String email;
+
+    /**
+     * 注册时必须为 true：已阅读并同意用户协议。
+     */
+    private Boolean agreedTerms;
+
+    /**
+     * 用户协议版本，由客户端携带；服务端以当前版本为准记录。
+     */
+    private String termsVersion;
 }

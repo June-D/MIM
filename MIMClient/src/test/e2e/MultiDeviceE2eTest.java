@@ -250,7 +250,7 @@ public final class MultiDeviceE2eTest {
 
     private static void register(String username) throws Exception {
         String body = "{\"username\":\"" + username + "\",\"password\":\""
-            + base64(PASSWORD) + "\"}";
+            + base64(PASSWORD) + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-11\"}";
         // 注册接口按 IP 限流（5 次/分钟）。verify.sh 和 CI 会在每个脚本前清掉计数，
         // 这里不再等待重试，避免一次回归被拖到 80 秒以上。
         String response = httpPost(BASE + "/register/token", null, null, body);

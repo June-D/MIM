@@ -358,6 +358,10 @@ public class MainController {
             new javafx.scene.control.MenuItem("修改登录密码");
         changePassword.setOnAction(e -> showChangePasswordDialog());
 
+        javafx.scene.control.MenuItem myEmail =
+            new javafx.scene.control.MenuItem("我的邮箱");
+        myEmail.setOnAction(e -> showMyEmail());
+
         javafx.scene.control.MenuItem twoFactor =
             new javafx.scene.control.MenuItem("二次验证");
         twoFactor.setOnAction(e -> showTwoFactorDialog());
@@ -366,8 +370,20 @@ public class MainController {
             new javafx.scene.control.MenuItem("退出登录");
         logout.setOnAction(e -> confirmLogout("退出登录", false));
 
-        menu.getItems().addAll(deviceCode, twoFactor, changePassword, switchAccount, logout);
+        menu.getItems().addAll(deviceCode, myEmail, twoFactor, changePassword,
+            switchAccount, logout);
         menu.show(accountMenuButton, event.getScreenX(), event.getScreenY());
+    }
+
+    /**
+     * 邮箱仅本人可见，用于找回密码；不展示给联系人。
+     */
+    private void showMyEmail() {
+        com.junesoon.mim.model.UserInfo info = ApplicatonStore.getUserInfo();
+        String email = info == null ? null : info.getEmail();
+        AlertUtil.show("我的邮箱", email == null || email.isEmpty()
+            ? "未填写邮箱。\n未填写邮箱将无法通过邮箱找回密码。"
+            : email + "\n\n仅自己可见，用于找回密码。");
     }
 
     /**
