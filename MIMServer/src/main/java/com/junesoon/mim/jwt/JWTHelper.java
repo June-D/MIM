@@ -59,7 +59,7 @@ public class JWTHelper {
         if (jwtInfo.getDeviceId() != null && !jwtInfo.getDeviceId().isEmpty()) {
             builder.claim(CommonConstants.JWT_KEY_DEVICE_ID, jwtInfo.getDeviceId());
         }
-        return builder.signWith(SignatureAlgorithm.RS256, privateKey).compact();
+        return builder.signWith(privateKey, SignatureAlgorithm.RS256).compact();
     }
 
     /**
@@ -70,7 +70,10 @@ public class JWTHelper {
      * @throws Exception
      */
     public static Jws<Claims> parserToken(String token, String pubKeyPath) throws Exception {
-        Jws<Claims> claimsJws = Jwts.parser().setSigningKey(RsaKeyHelper.getPublicKey(RsaKeyHelper.decode(pubKeyPath))).parseClaimsJws(token);
+        Jws<Claims> claimsJws = Jwts.parserBuilder()
+            .setSigningKey(RsaKeyHelper.getPublicKey(RsaKeyHelper.decode(pubKeyPath)))
+            .build()
+            .parseClaimsJws(token);
         return claimsJws;
     }
 
@@ -82,7 +85,10 @@ public class JWTHelper {
      * @throws Exception
      */
     public static Jws<Claims> parserToken(String token, byte[] pubKey) throws Exception {
-        Jws<Claims> claimsJws = Jwts.parser().setSigningKey(RsaKeyHelper.getPublicKey(pubKey)).parseClaimsJws(token);
+        Jws<Claims> claimsJws = Jwts.parserBuilder()
+            .setSigningKey(RsaKeyHelper.getPublicKey(pubKey))
+            .build()
+            .parseClaimsJws(token);
         return claimsJws;
     }
 

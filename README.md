@@ -597,6 +597,9 @@ mvn test
     旧库需执行 `CONVERT TO` 迁移。
 78. 修正多设备 e2e 的身份公钥上传：口令改为 Base64，与登录/注册接口一致。
     本地完整回归通过：服务端 127 项、客户端 99 项、e2e 14+13 项。
+79. JWT 库从 `jjwt 0.9.1` 升级到 **0.11.5**（`jjwt-api` + `jjwt-impl` +
+    `jjwt-jackson`），解析改用 `Jwts.parserBuilder()`；登录、普通接口与
+    WebSocket 握手均已通过 e2e。
 
 ## 仍需处理
 
@@ -606,8 +609,8 @@ mvn test
   同时拿到数据库和该私钥仍可解密。生产环境应配置独立密钥或使用 KMS。
 - 旧版未绑定设备的 JWT 默认仍兼容；客户端全部升级后可设
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
-- `jjwt` 仍为 0.9.1，升级到 0.11.x 需要改 JWT API；Boot 2.7.18 也已结束
-  OSS 支持，后续建议整体迁移到 Boot 3 + Java 17。
+- Boot 2.7.18 已结束 OSS 支持，后续建议整体迁移到 Boot 3 + Java 17；
+  这会同时带来 `javax` → `jakarta` 的改造。
 - 跨设备历史仍受上面那条限制：没有原文的消息补不回来。
 
 ## 许可证
