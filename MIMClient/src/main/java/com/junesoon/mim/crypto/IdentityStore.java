@@ -297,14 +297,7 @@ public class IdentityStore {
     }
 
     private void restrictPermissions(Path file) {
-        try {
-            Set<PosixFilePermission> perms = new HashSet<>(Arrays.asList(
-                PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
-            Files.setPosixFilePermissions(file, perms);
-        } catch (UnsupportedOperationException | IOException e) {
-            // Windows 等不支持 POSIX 权限的场景忽略
-            log.debug("无法设置密钥文件权限：{}", e.getMessage());
-        }
+        FilePermissions.ownerOnly(file);
     }
 
     private byte[] deriveWrappingKey(String password, byte[] salt) throws Exception {

@@ -476,13 +476,7 @@ public class PreKeyStore {
     }
 
     private void restrictPermissions(Path file) {
-        try {
-            Files.setPosixFilePermissions(file, new java.util.HashSet<>(java.util.Arrays.asList(
-                java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-                java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)));
-        } catch (Exception e) {
-            log.debug("无法设置预密钥文件权限：{}", e.getMessage());
-        }
+        FilePermissions.ownerOnly(file);
     }
 
     private int parseInt(String value, int fallback) {

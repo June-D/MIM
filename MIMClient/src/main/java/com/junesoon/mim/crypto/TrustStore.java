@@ -451,13 +451,7 @@ public class TrustStore {
             Files.createDirectories(directory);
             Path temp = Files.createTempFile(directory, "trust-", ".tmp");
             Files.write(temp, file.toString().getBytes(StandardCharsets.UTF_8));
-            try {
-                Files.setPosixFilePermissions(temp, new java.util.HashSet<>(java.util.Arrays.asList(
-                    java.nio.file.attribute.PosixFilePermission.OWNER_READ,
-                    java.nio.file.attribute.PosixFilePermission.OWNER_WRITE)));
-            } catch (Exception ignored) {
-                // 非 POSIX 文件系统，忽略
-            }
+            FilePermissions.ownerOnly(temp);
             Files.move(temp, fileOf(selfUsername), java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                 java.nio.file.StandardCopyOption.ATOMIC_MOVE);
         } catch (Exception e) {

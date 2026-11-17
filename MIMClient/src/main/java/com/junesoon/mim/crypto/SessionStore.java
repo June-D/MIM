@@ -294,13 +294,7 @@ public class SessionStore {
     }
 
     private void restrictPermissions(Path file) {
-        try {
-            Set<PosixFilePermission> perms = new HashSet<>(Arrays.asList(
-                PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
-            Files.setPosixFilePermissions(file, perms);
-        } catch (UnsupportedOperationException | IOException e) {
-            log.debug("无法设置会话文件权限：{}", e.getMessage());
-        }
+        FilePermissions.ownerOnly(file);
     }
 
     private String readField(String content, String prefix) throws IdentityException {

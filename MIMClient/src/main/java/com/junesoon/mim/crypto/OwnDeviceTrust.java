@@ -212,12 +212,6 @@ public class OwnDeviceTrust {
     }
 
     private void restrict(Path file) {
-        try {
-            Set<PosixFilePermission> perms = new HashSet<>(Arrays.asList(
-                PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE));
-            Files.setPosixFilePermissions(file, perms);
-        } catch (Exception ignored) {
-            // 非 POSIX 文件系统，忽略
-        }
+        FilePermissions.ownerOnly(file);
     }
 }
