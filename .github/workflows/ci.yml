@@ -45,7 +45,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: 安装 JDK 8
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '8'
@@ -89,24 +89,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 JDK 8
-        uses: actions/setup-java@v4
+      # 客户端源码直接使用 javafx.*，JavaFX 8 是随 JDK 分发的。
+      # 因此这里不装 Temurin，而是用带 JavaFX 的 Zulu FX 8（jdk+fx）。
+      - name: 安装 JDK 8（含 JavaFX）
+        uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: zulu
           java-version: '8'
+          java-package: jdk+fx
           cache: maven
-
-      - name: 安装 JavaFX（客户端编译需要）
-        run: |
-          # Temurin 8 不带 JavaFX。装 libopenjfx-java 提供 jar 与原生库。
-          # Maven 编译仍用 JAVA_HOME 下的 JDK，因此把 openjfx 的 jar
-          # 拷进 JDK 的 ext 目录，模拟 Zulu FX 的效果。
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq libopenjfx-java
-          EXT_DIR="${JAVA_HOME}/jre/lib/ext"
-          sudo mkdir -p "$EXT_DIR"
-          sudo cp -n /usr/share/java/openjfx*.jar "$EXT_DIR"/ 2>/dev/null || true
-          ls -1 "$EXT_DIR" | grep -i jfx || { echo "未找到 JavaFX jar"; exit 1; }
 
       - name: 编译与测试
         working-directory: MIMClient
@@ -147,11 +138,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 JDK 8
-        uses: actions/setup-java@v4
+      # 端到端步骤要编译客户端主源码，同样需要带 JavaFX 的 JDK 8
+      - name: 安装 JDK 8（含 JavaFX）
+        uses: actions/setup-java@v5
         with:
-          distribution: temurin
+          distribution: zulu
           java-version: '8'
+          java-package: jdk+fx
           cache: maven
 
       - name: 初始化数据库
