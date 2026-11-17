@@ -576,6 +576,9 @@ mvn test
 74. 新增 `MIM_AUTH_REQUIRE_DEVICE_BINDING` 开关（默认 false）：客户端全部升级后
     设为 true，服务端与 WebSocket 会拒绝未绑定设备的旧 JWT，强制重新登录；
     启动自检在未开启时也会提示。未配置 `MIM_EMAIL_KEY` 时同样会在启动日志告警。
+75. 服务端依赖升级：Spring Boot **2.3.7 → 2.7.18**，MyBatis starter
+    **2.1.4 → 2.3.1**，Druid starter **1.1.14 → 1.2.20**；Tomcat、Jackson、
+    Spring Security 等由 BOM 一并更新。无数据库变更，客户端不受影响。
 
 ## 仍需处理
 
@@ -585,7 +588,8 @@ mvn test
   同时拿到数据库和该私钥仍可解密。生产环境应配置独立密钥或使用 KMS。
 - 旧版未绑定设备的 JWT 默认仍兼容；客户端全部升级后可设
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
-- 依赖版本偏旧（Spring Boot 2.3.7 已 EOL、jjwt 0.9.1 等），建议安排升级。
+- `jjwt` 仍为 0.9.1，升级到 0.11.x 需要改 JWT API；Boot 2.7.18 也已结束
+  OSS 支持，后续建议整体迁移到 Boot 3 + Java 17。
 - 跨设备历史仍受上面那条限制：没有原文的消息补不回来。
 
 ## 许可证
