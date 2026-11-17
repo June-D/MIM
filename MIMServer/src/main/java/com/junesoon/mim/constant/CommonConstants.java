@@ -80,6 +80,8 @@ public class CommonConstants {
      * 载荷 {@code {deviceId}} 是需要历史的那台设备。
      */
     public static final Integer NOTIFY_TYPE_HISTORY_SYNC = 100022;
+    /** 新登录/新设备安全提醒，只发给该账号的其他在线设备 */
+    public static final Integer NOTIFY_TYPE_SECURITY_ALERT = 100023;
 
     /**
      * 跨实例消息路由的 Redis 频道。所有实例都订阅，收到后只投递给本机在线会话。

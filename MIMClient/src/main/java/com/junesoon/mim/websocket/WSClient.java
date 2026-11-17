@@ -42,6 +42,7 @@ public class WSClient extends WebSocketClient {
     public static final int NOTIFY_PONG = 100021;
     /** 其他设备请本机把已解开的历史转过去 */
     public static final int NOTIFY_HISTORY_SYNC = 100022;
+    public static final int NOTIFY_SECURITY_ALERT = 100023;
 
     private static volatile WSClient instance;
 
@@ -188,6 +189,7 @@ public class WSClient extends WebSocketClient {
             case NOTIFY_FRIEND_REJECTED:
             case NOTIFY_CONVERSATION_CLEARED:
             case NOTIFY_HISTORY_SYNC:
+            case NOTIFY_SECURITY_ALERT:
                 dispatchToListeners(notify);
                 break;
             case NOTIFY_PONG:

@@ -1,6 +1,7 @@
 package com.junesoon.mim.service.impl;
 
 import com.junesoon.mim.constant.CommonConstants;
+import com.junesoon.mim.entity.BaseNotify;
 import com.junesoon.mim.entity.Device;
 import com.junesoon.mim.entity.User;
 import com.junesoon.mim.entity.UserInfo;
@@ -10,15 +11,20 @@ import com.junesoon.mim.jwt.JWTInfo;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.service.AuthService;
+import com.junesoon.mim.service.PushService;
 import com.junesoon.mim.service.UserService;
 import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.JwtTokenUtil;
 import com.junesoon.mim.utils.TotpVerifier;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.UUID;
 import javax.annotation.Resource;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
+@Slf4j
 @Service
 public class AuthServiceImpl implements AuthService {
 
@@ -36,6 +42,9 @@ public class AuthServiceImpl implements AuthService {
 
     @Resource
     private EmailCryptoService emailCryptoService;
+
+    @Resource
+    private PushService pushService;
 
     @Override
     public String login(JwtAuthenticationRequest authenticationRequest, String deviceId)
@@ -70,9 +79,31 @@ public class AuthServiceImpl implements AuthService {
             JWTInfo jwtInfo = new JWTInfo(info.getUsername(), info.getId() + "",
                 info.getNickname(), StringUtils.hasText(deviceId) ? deviceId : null,
                 tokenVersion, UUID.randomUUID().toString(), System.currentTimeMillis());
-            return jwtTokenUtil.generateToken(jwtInfo);
+            String token = jwtTokenUtil.generateToken(jwtInfo);
+            notifyOtherDevices(info.getUsername(), deviceId);
+            return token;
         }
         throw new UserInvalidException("用户不存在或账户密码错误!");
+    }
+
+    /**
+     * 给该账号的其他在线设备发一条安全提醒。推送失败不影响登录。
+     */
+    private void notifyOtherDevices(String username, String deviceId) {
+        if (pushService == null) {
+            return;
+        }
+        try {
+            String current = StringUtils.hasText(deviceId) ? deviceId : "default";
+            Map<String, Object> data = new HashMap<>();
+            data.put("event", "login");
+            data.put("deviceId", current);
+            data.put("time", System.currentTimeMillis());
+            pushService.pushToUserExcept(username, current,
+                BaseNotify.of(CommonConstants.NOTIFY_TYPE_SECURITY_ALERT, data));
+        } catch (Exception e) {
+            log.debug("发送登录安全提醒失败：{}", e.getMessage());
+        }
     }
 
     @Override

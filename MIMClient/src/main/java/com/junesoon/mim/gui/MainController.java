@@ -171,6 +171,24 @@ public class MainController {
                 return;
             }
             int type = notify.getType();
+            if (type == WSClient.NOTIFY_SECURITY_ALERT) {
+                if (!(notify.getData() instanceof Map)) {
+                    return;
+                }
+                Map<?, ?> data = (Map<?, ?>) notify.getData();
+                Object device = data.get("deviceId");
+                Object time = data.get("time");
+                String when = "";
+                if (time instanceof Number) {
+                    when = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm")
+                        .format(new java.util.Date(((Number) time).longValue()));
+                }
+                String text = "账号在设备 " + (device == null ? "未知设备" : device)
+                    + (when.isEmpty() ? "" : "（" + when + "）")
+                    + " 登录。如非本人操作，请立即修改密码并注销该设备。";
+                Platform.runLater(() -> AlertUtil.show("安全提醒", text));
+                return;
+            }
             if (type == WSClient.NOTIFY_FRIEND_REQUEST
                 || type == WSClient.NOTIFY_FRIEND_ACCEPTED
                 || type == WSClient.NOTIFY_FRIEND_REJECTED) {
