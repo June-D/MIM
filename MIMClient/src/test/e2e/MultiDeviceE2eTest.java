@@ -158,6 +158,11 @@ public final class MultiDeviceE2eTest {
             }
             PreKeyStore.LocalOneTimePreKey consumed =
                 target.preKeys.consumeOneTimePreKey(received.consumedOneTimePreKeyId);
+            if (consumed == null) {
+                System.out.println("  ! " + bundle.deviceId + " 找不到本地 OPK "
+                    + received.consumedOneTimePreKeyId + "（used="
+                    + received.senderUsedOneTimePreKey + "）");
+            }
             SessionState state = ratchet.responderSession(aliceName, target.identity.getPrivateKey(),
                 target.identity.getPublicKeyBase64(),
                 target.preKeys.getSignedPreKey().getPrivateKey(),
@@ -271,7 +276,7 @@ public final class MultiDeviceE2eTest {
     private static void uploadIdentityKey(String token, String deviceId, String publicKey)
         throws Exception {
         String body = "{\"publicKey\":\"" + publicKey
-            + "\",\"algorithm\":\"EC-P256\",\"password\":\"" + PASSWORD + "\"}";
+            + "\",\"algorithm\":\"EC-P256\",\"password\":\"" + base64(PASSWORD) + "\"}";
         requireOk(httpPost(BASE + "/key", token, deviceId, body), "上传身份公钥");
     }
 

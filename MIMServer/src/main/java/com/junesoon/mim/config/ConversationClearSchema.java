@@ -22,7 +22,7 @@ public class ConversationClearSchema implements ApplicationRunner {
         + "  cleared_before_id bigint NOT NULL,"
         + "  updated_at bigint NOT NULL,"
         + "  PRIMARY KEY (username, peer)"
-        + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+        + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
 
     private final JdbcTemplate jdbcTemplate;
 

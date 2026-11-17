@@ -3,6 +3,7 @@ package com.junesoon.mim.utils;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.junesoon.mim.config.KeyConfiguration;
 import org.junit.jupiter.api.DisplayName;
@@ -47,6 +48,7 @@ class EmailCryptoServiceTest {
         EmailCryptoService crypto = service();
         String stored = crypto.encryptTotp("alice", "JBSWY3DPEHPK3PXP");
         assertNotEquals("JBSWY3DPEHPK3PXP", stored);
+        assertTrue(stored.length() <= 255, "TOTP 密文必须放得进 varchar(255) 列");
         assertEquals("JBSWY3DPEHPK3PXP", crypto.decryptTotp("alice", stored));
         assertNull(crypto.decryptTotp("bob", stored), "AAD 绑定用户名");
         assertNull(crypto.decrypt("alice", stored), "TOTP 密文不能当邮箱密文解");

@@ -192,3 +192,13 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 --     ADD COLUMN `sync_original_device` varchar(64) NULL COMMENT '同步副本原发送设备',
 --     ADD COLUMN `sync_signature` text NULL COMMENT '同步副本来源签名',
 --     ADD COLUMN `recipient_spk_id` int NULL COMMENT 'X3DH 使用的接收方签名预密钥编号';
+
+-- ------------------------------------------------------------
+-- 从旧版本升级（取消注释后执行）：
+-- 早期启动 DDL 创建的这两张表可能继承 MySQL 8 默认 collation，
+-- 与 t_message 的 utf8mb4_general_ci 比较时会报 1267。
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_conversation_clear`
+--     CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+-- ALTER TABLE `t_friend_request`
+--     CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;

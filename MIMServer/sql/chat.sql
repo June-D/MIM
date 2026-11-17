@@ -13,7 +13,7 @@ CREATE TABLE `t_register_users`  (
                               `crt_time` datetime NULL DEFAULT NULL comment '创建时间',
                               `upd_time` datetime NULL DEFAULT NULL comment '更新时间',
                               `last_login_time` datetime NULL DEFAULT NULL comment '最后登录时间',
-                              `totp_secret` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL comment 'TOTP 共享密钥（Base32）',
+                              `totp_secret` varchar(255) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL comment 'TOTP 密钥（AES-GCM 密文，兼容旧 Base32）',
                               `totp_enabled` tinyint(1) NOT NULL DEFAULT 0 comment '是否启用 TOTP 二次验证',
                               `email_cipher` varchar(512) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL comment '加密后的邮箱（仅本人可见）',
                               `terms_version` varchar(16) CHARACTER SET utf8 COLLATE utf8_general_ci NULL DEFAULT NULL comment '同意的用户协议版本',
@@ -63,11 +63,15 @@ CREATE TABLE `t_rsa_key`  (
 
 -- ------------------------------------------------------------
 -- 从旧版本升级（取消注释后执行）：
--- TOTP 二次验证。密钥为 Base32；enabled 为 0 表示尚未启用。
+-- TOTP 二次验证。密钥为 AES-GCM 密文（兼容旧 Base32）；enabled 为 0 表示尚未启用。
 -- ------------------------------------------------------------
 -- ALTER TABLE `t_register_users`
---     ADD COLUMN `totp_secret` varchar(64) NULL COMMENT 'TOTP 共享密钥（Base32）',
+--     ADD COLUMN `totp_secret` varchar(255) NULL COMMENT 'TOTP 密钥（AES-GCM 密文，兼容旧 Base32）',
 --     ADD COLUMN `totp_enabled` tinyint(1) NOT NULL DEFAULT 0 COMMENT '是否启用 TOTP 二次验证';
+--
+-- 已存在 totp_secret 的旧库需要扩容（加密后的密钥约 81 字符）：
+-- ALTER TABLE `t_register_users`
+--     MODIFY COLUMN `totp_secret` varchar(255) NULL COMMENT 'TOTP 密钥（AES-GCM 密文，兼容旧 Base32）';
 
 -- ------------------------------------------------------------
 -- 从旧版本升级（取消注释后执行）：

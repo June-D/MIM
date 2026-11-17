@@ -294,16 +294,27 @@ mysql -uroot mim_core < MIMServer/sql/chat.sql
 mysql -uroot mim_core < MIMServer/sql/e2ee.sql
 ```
 
-从旧版本升级时，`e2ee.sql` 末尾附了 `ALTER TABLE` 补丁（取消注释后执行）。
+从旧版本升级时，`e2ee.sql` 末尾附了设备/消息/OPK 的 `ALTER` 补丁，
+`chat.sql` 末尾附了用户表 TOTP/邮箱/协议列的 `ALTER` 补丁（取消注释后执行）。
 本轮新增了以下列，从旧库升级时**必须**执行对应 `ALTER`，否则相关查询会因缺列失败：
 - `t_device.token_version`：设备令牌版本，登出/注销时自增使旧 JWT 失效；
 - `t_message.sync_original_from / sync_original_to / sync_original_device / sync_signature`：
   同步副本的来源签名；
 - `t_message.recipient_spk_id`：握手使用的接收方签名预密钥编号；
-- `t_register_users.totp_secret / totp_enabled`：TOTP 二次验证共享密钥与开关；
+- `t_register_users.totp_secret / totp_enabled`：TOTP 密钥（AES-GCM 密文）与开关；
+  `totp_secret` 必须是 `varchar(255)`，旧库需执行 `MODIFY` 扩容（加密后约 81 字符）；
 - `t_register_users.email_cipher / terms_version / agreed_at`：加密邮箱、
   用户协议版本与同意时间；
 - `t_one_time_prekey.claimed_by / claimed_at`：OPK 预留请求者与预留时间。
+
+旧库中由早期启动 DDL 创建的 `t_conversation_clear` / `t_friend_request`
+可能继承了 MySQL 8 默认的 `utf8mb4_0900_ai_ci`，与消息表的
+`utf8mb4_general_ci` 比较会报 1267。升级时执行：
+
+```sql
+ALTER TABLE t_conversation_clear CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+ALTER TABLE t_friend_request CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+```
 
 ### 启动服务端
 
@@ -579,6 +590,13 @@ mvn test
 75. 服务端依赖升级：Spring Boot **2.3.7 → 2.7.18**，MyBatis starter
     **2.1.4 → 2.3.1**，Druid starter **1.1.14 → 1.2.20**；Tomcat、Jackson、
     Spring Security 等由 BOM 一并更新。无数据库变更，客户端不受影响。
+76. 修复 TOTP 密文列长度：`totp_secret` 从 `varchar(64)` 扩到 `varchar(255)`，
+    否则加密后的密钥（约 81 字符）存不下；旧库需执行 `MODIFY`。
+77. 修复启动 DDL 的 collation：`t_conversation_clear` / `t_friend_request`
+    显式使用 `utf8mb4_general_ci`，避免 MySQL 8 下与消息表比较报 1267；
+    旧库需执行 `CONVERT TO` 迁移。
+78. 修正多设备 e2e 的身份公钥上传：口令改为 Base64，与登录/注册接口一致。
+    本地完整回归通过：服务端 127 项、客户端 99 项、e2e 14+13 项。
 
 ## 仍需处理
 

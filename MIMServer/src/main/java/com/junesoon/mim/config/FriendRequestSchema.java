@@ -29,7 +29,7 @@ public class FriendRequestSchema implements ApplicationRunner {
         + "  PRIMARY KEY (id),"
         + "  UNIQUE KEY uk_pair (from_user, to_user),"
         + "  KEY idx_inbox (to_user, status)"
-        + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4";
+        + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
 
     private final JdbcTemplate jdbcTemplate;
 
