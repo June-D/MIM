@@ -135,7 +135,8 @@ class TrustStoreTest {
     void legacyRecordMigrates(@TempDir Path dir) throws Exception {
         String bobKey = newPublicKey();
         SecretBox.Sealed sealed = SecretBox.seal("pw", "alice|trust",
-            ("bob=" + bobKey + "\n").getBytes(StandardCharsets.UTF_8));
+            ("bob=" + bobKey + "\n").getBytes(StandardCharsets.UTF_8),
+            SecretBox.LEGACY_ITERATIONS);
         StringBuilder file = new StringBuilder();
         file.append("salt=").append(java.util.Base64.getEncoder()
             .encodeToString(sealed.getSalt())).append('\n');

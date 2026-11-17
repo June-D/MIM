@@ -68,6 +68,7 @@ public class OwnDeviceTrust {
             byte[] salt = null;
             byte[] nonce = null;
             byte[] data = null;
+            int iterations = SecretBox.LEGACY_ITERATIONS;
             for (String line : content.split("\n")) {
                 int idx = line.indexOf('=');
                 if (idx <= 0) {
@@ -85,6 +86,9 @@ public class OwnDeviceTrust {
                     case "data":
                         data = java.util.Base64.getDecoder().decode(value);
                         break;
+                    case "iterations":
+                        iterations = Integer.parseInt(value);
+                        break;
                     default:
                         break;
                 }
@@ -93,7 +97,8 @@ public class OwnDeviceTrust {
                 log.warn("本机设备信任文件格式损坏，按空清单处理");
                 return;
             }
-            byte[] plain = SecretBox.open(password, aad(selfUsername), salt, nonce, data);
+            byte[] plain = SecretBox.open(password, aad(selfUsername), salt, nonce, data,
+                iterations);
             String body = new String(plain, StandardCharsets.UTF_8);
             for (String line : body.split("\n")) {
                 int idx = line.indexOf(FIELD_SEP);
@@ -189,6 +194,7 @@ public class OwnDeviceTrust {
                 .append('\n');
             file.append("data=").append(java.util.Base64.getEncoder().encodeToString(sealed.getCiphertext()))
                 .append('\n');
+            file.append("iterations=").append(sealed.getIterations()).append('\n');
 
             Files.createDirectories(directory);
             Path temp = Files.createTempFile(directory, "own-devices-", ".tmp");

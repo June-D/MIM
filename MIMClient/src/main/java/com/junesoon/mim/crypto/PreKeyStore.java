@@ -415,10 +415,11 @@ public class PreKeyStore {
         try {
             SecretBox.Sealed sealed = SecretBox.seal(password, aad(username, deviceId) + "|prekeys",
                 plaintext.getBytes(StandardCharsets.UTF_8));
-            Map<String, String> fields = new LinkedHashMap<>(4);
+            Map<String, String> fields = new LinkedHashMap<>(5);
             fields.put("salt", Base64.getEncoder().encodeToString(sealed.getSalt()));
             fields.put("nonce", Base64.getEncoder().encodeToString(sealed.getNonce()));
             fields.put("data", Base64.getEncoder().encodeToString(sealed.getCiphertext()));
+            fields.put("iterations", String.valueOf(sealed.getIterations()));
             StringBuilder sb = new StringBuilder(512);
             for (Map.Entry<String, String> entry : fields.entrySet()) {
                 sb.append(entry.getKey()).append('=').append(entry.getValue()).append('\n');
@@ -441,6 +442,7 @@ public class PreKeyStore {
             byte[] salt = null;
             byte[] nonce = null;
             byte[] data = null;
+            int iterations = SecretBox.LEGACY_ITERATIONS;
             for (String line : content.split("\n")) {
                 int idx = line.indexOf('=');
                 if (idx <= 0) {
@@ -458,6 +460,9 @@ public class PreKeyStore {
                     case "data":
                         data = Base64.getDecoder().decode(value);
                         break;
+                    case "iterations":
+                        iterations = Integer.parseInt(value);
+                        break;
                     default:
                         break;
                 }
@@ -466,7 +471,7 @@ public class PreKeyStore {
                 throw new IdentityException("预密钥文件格式损坏");
             }
             byte[] plain = SecretBox.open(password, aad(username, deviceId) + "|prekeys",
-                salt, nonce, data);
+                salt, nonce, data, iterations);
             return new String(plain, StandardCharsets.UTF_8);
         } catch (IdentityException e) {
             throw e;

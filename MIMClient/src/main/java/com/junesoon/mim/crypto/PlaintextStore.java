@@ -25,6 +25,7 @@ public final class PlaintextStore {
     private static final String FIELD_SALT = "salt=";
     private static final String FIELD_NONCE = "nonce=";
     private static final String FIELD_DATA = "data=";
+    private static final String FIELD_ITERATIONS = "iterations=";
 
     private final Path directory;
     private final Map<String, String> texts = new LinkedHashMap<>();
@@ -59,9 +60,10 @@ public final class PlaintextStore {
             String salt = field(content, FIELD_SALT);
             String nonce = field(content, FIELD_NONCE);
             String data = field(content, FIELD_DATA);
+            int iterations = readIterations(content);
             byte[] plain = SecretBox.open(password, aad(username),
                 Base64.getDecoder().decode(salt), Base64.getDecoder().decode(nonce),
-                Base64.getDecoder().decode(data));
+                Base64.getDecoder().decode(data), iterations);
             String body = new String(plain, StandardCharsets.UTF_8);
             Hkdf.wipe(plain);
             for (String line : body.split("\n")) {
@@ -140,6 +142,7 @@ public final class PlaintextStore {
         file.append(FIELD_SALT).append(Base64.getEncoder().encodeToString(sealed.getSalt())).append('\n');
         file.append(FIELD_NONCE).append(Base64.getEncoder().encodeToString(sealed.getNonce())).append('\n');
         file.append(FIELD_DATA).append(Base64.getEncoder().encodeToString(sealed.getCiphertext())).append('\n');
+        file.append(FIELD_ITERATIONS).append(sealed.getIterations()).append('\n');
 
         Files.createDirectories(directory);
         Path target = fileOf(username);
@@ -179,6 +182,14 @@ public final class PlaintextStore {
             }
         }
         throw new IdentityException("明文记录缺少字段：" + prefix);
+    }
+
+    private int readIterations(String content) {
+        try {
+            return Integer.parseInt(field(content, FIELD_ITERATIONS));
+        } catch (Exception e) {
+            return SecretBox.LEGACY_ITERATIONS;
+        }
     }
 
     private void restrict(Path file) {

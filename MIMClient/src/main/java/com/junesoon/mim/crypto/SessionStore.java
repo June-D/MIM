@@ -52,6 +52,7 @@ public class SessionStore {
     private static final String FIELD_SALT = "salt=";
     private static final String FIELD_NONCE = "nonce=";
     private static final String FIELD_DATA = "data=";
+    private static final String FIELD_ITERATIONS = "iterations=";
 
     private final Path directory;
 
@@ -98,9 +99,10 @@ public class SessionStore {
             String salt = readField(content, FIELD_SALT);
             String nonce = readField(content, FIELD_NONCE);
             String data = readField(content, FIELD_DATA);
+            int iterations = readIterations(content);
             byte[] plain = SecretBox.open(password, aad(selfUsername, peer, deviceId, inbound),
                 Base64.getDecoder().decode(salt), Base64.getDecoder().decode(nonce),
-                Base64.getDecoder().decode(data));
+                Base64.getDecoder().decode(data), iterations);
             String body = new String(plain, StandardCharsets.UTF_8);
             Hkdf.wipe(plain);
             SessionState state = deserialize(peer, body);
@@ -150,6 +152,7 @@ public class SessionStore {
             sb.append(FIELD_SALT).append(Base64.getEncoder().encodeToString(sealed.getSalt())).append('\n');
             sb.append(FIELD_NONCE).append(Base64.getEncoder().encodeToString(sealed.getNonce())).append('\n');
             sb.append(FIELD_DATA).append(Base64.getEncoder().encodeToString(sealed.getCiphertext())).append('\n');
+            sb.append(FIELD_ITERATIONS).append(sealed.getIterations()).append('\n');
 
             Files.createDirectories(directory);
             temp = Files.createTempFile(directory, "session-", ".tmp");
@@ -304,6 +307,14 @@ public class SessionStore {
             }
         }
         throw new IdentityException("会话文件缺少字段：" + prefix);
+    }
+
+    private int readIterations(String content) {
+        try {
+            return Integer.parseInt(readField(content, FIELD_ITERATIONS));
+        } catch (Exception e) {
+            return SecretBox.LEGACY_ITERATIONS;
+        }
     }
 
     // ==================== 序列化 ====================

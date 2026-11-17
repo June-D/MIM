@@ -121,6 +121,22 @@ class HkdfTest {
     }
 
     @Test
+    @DisplayName("SecretBox 新文件使用 60 万次迭代，旧文件仍可按记录的次数解开")
+    void secretBoxKdfIterations() throws Exception {
+        byte[] plain = "kdf".getBytes(StandardCharsets.UTF_8);
+        SecretBox.Sealed current = SecretBox.seal("pw", "aad", plain);
+        assertEquals(SecretBox.DEFAULT_ITERATIONS, current.getIterations());
+        assertArrayEquals(plain, SecretBox.open("pw", "aad", current.getSalt(),
+            current.getNonce(), current.getCiphertext(), current.getIterations()));
+
+        SecretBox.Sealed legacy = SecretBox.seal("pw", "aad", plain,
+            SecretBox.LEGACY_ITERATIONS);
+        assertEquals(SecretBox.LEGACY_ITERATIONS, legacy.getIterations());
+        assertArrayEquals(plain, SecretBox.open("pw", "aad", legacy.getSalt(),
+            legacy.getNonce(), legacy.getCiphertext(), legacy.getIterations()));
+    }
+
+    @Test
     @DisplayName("SecretBox 密文被篡改时解密失败")
     void secretBoxTampered() {
         SecretBox.Sealed sealed = SecretBox.seal("pw", "aad", "x".getBytes(StandardCharsets.UTF_8));

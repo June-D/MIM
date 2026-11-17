@@ -51,7 +51,8 @@ public class IdentityStore {
 
     private static final String ALGORITHM = "EC";
     private static final String CURVE = "secp256r1";
-    private static final int PBKDF2_ITERATIONS = 120_000;
+    private static final int PBKDF2_ITERATIONS = 600_000;
+    private static final int LEGACY_PBKDF2_ITERATIONS = 120_000;
     private static final int PBKDF2_KEY_BITS = 256;
     private static final int GCM_NONCE_BYTES = 12;
     private static final int GCM_TAG_BITS = 128;
@@ -120,12 +121,13 @@ public class IdentityStore {
             String encryptedKeyB64 = readField(content, "privateKey");
             String publicKeyB64 = readField(content, "publicKey");
             int version = Integer.parseInt(readField(content, "version"));
+            int iterations = readIterations(content);
 
             byte[] salt = Base64.getDecoder().decode(saltB64);
             byte[] nonce = Base64.getDecoder().decode(nonceB64);
             byte[] encryptedKey = Base64.getDecoder().decode(encryptedKeyB64);
 
-            byte[] wrappingKey = deriveWrappingKey(password, salt);
+            byte[] wrappingKey = deriveWrappingKey(password, salt, iterations);
             byte[] pkcs8;
             try {
                 Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -146,7 +148,17 @@ public class IdentityStore {
                 new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyB64)));
             String fingerprint = Hkdf.sha256Hex(Base64.getDecoder().decode(publicKeyB64));
             Hkdf.wipe(pkcs8);
-            return new Identity(username, version, privateKey, publicKey, publicKeyB64, fingerprint);
+            Identity identity = new Identity(username, version, privateKey, publicKey,
+                publicKeyB64, fingerprint);
+            if (iterations < PBKDF2_ITERATIONS) {
+                // 旧文件在成功解锁后顺手升级 KDF，用户无感
+                try {
+                    saveExisting(identity, username, deviceId, password);
+                } catch (Exception e) {
+                    log.debug("本地身份密钥 KDF 升级失败：{}", e.getMessage());
+                }
+            }
+            return identity;
         } catch (IdentityException e) {
             throw e;
         } catch (Exception e) {
@@ -180,7 +192,7 @@ public class IdentityStore {
             byte[] nonce = new byte[GCM_NONCE_BYTES];
             RANDOM.nextBytes(nonce);
 
-            byte[] wrappingKey = deriveWrappingKey(password, salt);
+            byte[] wrappingKey = deriveWrappingKey(password, salt, PBKDF2_ITERATIONS);
             byte[] encrypted;
             try {
                 Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -196,6 +208,7 @@ public class IdentityStore {
             String content = "username=" + username + "\n"
                 + "device=" + deviceId + "\n"
                 + "version=" + version + "\n"
+                + "iterations=" + PBKDF2_ITERATIONS + "\n"
                 + "salt=" + Base64.getEncoder().encodeToString(salt) + "\n"
                 + "nonce=" + Base64.getEncoder().encodeToString(nonce) + "\n"
                 + "privateKey=" + Base64.getEncoder().encodeToString(encrypted) + "\n"
@@ -234,7 +247,7 @@ public class IdentityStore {
             byte[] nonce = new byte[GCM_NONCE_BYTES];
             RANDOM.nextBytes(nonce);
 
-            byte[] wrappingKey = deriveWrappingKey(password, salt);
+            byte[] wrappingKey = deriveWrappingKey(password, salt, PBKDF2_ITERATIONS);
             byte[] encrypted;
             try {
                 Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
@@ -250,6 +263,7 @@ public class IdentityStore {
             String content = "username=" + username + "\n"
                 + "device=" + deviceId + "\n"
                 + "version=" + identity.getVersion() + "\n"
+                + "iterations=" + PBKDF2_ITERATIONS + "\n"
                 + "salt=" + Base64.getEncoder().encodeToString(salt) + "\n"
                 + "nonce=" + Base64.getEncoder().encodeToString(nonce) + "\n"
                 + "privateKey=" + Base64.getEncoder().encodeToString(encrypted) + "\n"
@@ -300,13 +314,22 @@ public class IdentityStore {
         FilePermissions.ownerOnly(file);
     }
 
-    private byte[] deriveWrappingKey(String password, byte[] salt) throws Exception {
-        PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, PBKDF2_KEY_BITS);
+    private byte[] deriveWrappingKey(String password, byte[] salt, int iterations)
+        throws Exception {
+        PBEKeySpec spec = new PBEKeySpec(password.toCharArray(), salt, iterations, PBKDF2_KEY_BITS);
         try {
             SecretKeyFactory factory = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256");
             return factory.generateSecret(spec).getEncoded();
         } finally {
             spec.clearPassword();
+        }
+    }
+
+    private int readIterations(String content) {
+        try {
+            return Integer.parseInt(readField(content, "iterations"));
+        } catch (Exception e) {
+            return LEGACY_PBKDF2_ITERATIONS;
         }
     }
 

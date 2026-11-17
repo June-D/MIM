@@ -167,6 +167,7 @@ public class TrustStore {
             byte[] salt = null;
             byte[] nonce = null;
             byte[] data = null;
+            int iterations = SecretBox.LEGACY_ITERATIONS;
             for (String line : content.split("\n")) {
                 int idx = line.indexOf('=');
                 if (idx <= 0) {
@@ -184,6 +185,9 @@ public class TrustStore {
                     case "data":
                         data = java.util.Base64.getDecoder().decode(value);
                         break;
+                    case "iterations":
+                        iterations = Integer.parseInt(value);
+                        break;
                     default:
                         break;
                 }
@@ -191,7 +195,8 @@ public class TrustStore {
             if (salt == null || nonce == null || data == null) {
                 throw new IdentityException("信任库文件格式损坏");
             }
-            byte[] plain = SecretBox.open(password, selfUsername + "|trust", salt, nonce, data);
+            byte[] plain = SecretBox.open(password, selfUsername + "|trust", salt, nonce, data,
+                iterations);
             String body = new String(plain, StandardCharsets.UTF_8);
             parseBody(body);
             log.info("已加载 {} 条设备信任记录、{} 条旧版记录", pinned.size(), legacy.size());
@@ -447,6 +452,7 @@ public class TrustStore {
                 .append('\n');
             file.append("data=").append(java.util.Base64.getEncoder().encodeToString(sealed.getCiphertext()))
                 .append('\n');
+            file.append("iterations=").append(sealed.getIterations()).append('\n');
 
             Files.createDirectories(directory);
             Path temp = Files.createTempFile(directory, "trust-", ".tmp");
