@@ -1,5 +1,8 @@
 # MIM · 端到端加密私密通讯
 
+[![CI](https://github.com/June-D/MIM/actions/workflows/ci.yml/badge.svg)](https://github.com/June-D/MIM/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流，不做群聊**。
 服务端只保存公钥与密文，私钥与所有会话密钥永远只在客户端。
 
