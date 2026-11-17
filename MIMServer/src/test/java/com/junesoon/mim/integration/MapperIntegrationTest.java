@@ -19,10 +19,13 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 /**
  * Mapper 集成测试：验证 MyBatis XML 在真实 MySQL 上的行为。
@@ -37,6 +40,23 @@ import org.springframework.beans.factory.annotation.Autowired;
  * </ul>
  */
 class MapperIntegrationTest extends IntegrationTestBase {
+
+    private static final Database DB = prepare("mapper");
+
+    @DynamicPropertySource
+    static void databaseProperties(DynamicPropertyRegistry registry) {
+        register(registry, DB);
+    }
+
+    @BeforeAll
+    static void requireDatabase() {
+        requireReady(DB);
+    }
+
+    @Override
+    protected Database database() {
+        return DB;
+    }
 
     private static final String ALICE = "alice";
     private static final String BOB = "bob";
@@ -361,6 +381,28 @@ class MapperIntegrationTest extends IntegrationTestBase {
         assertEquals(2, history.size(), "两条逻辑消息应返回两行，实际：" + history.size());
         assertEquals("msg-multi-002", history.get(0).getClientMsgId(), "应按 id 倒序（新的在前）");
         assertEquals("msg-multi-001", history.get(1).getClientMsgId());
+    }
+
+    @Test
+    @DisplayName("历史优先返回当前设备解得开的副本，而不是最早的那一份")
+    void historyPrefersReplicaForThisDevice() {
+        CipherMessage original = message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-sync-001", 0);
+        CipherMessage copy = message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-sync-001", 0);
+        copy.setSyncFromDevice(DEVICE_A);
+        messageMapper.insert(original);
+        messageMapper.insert(copy);
+
+        List<CipherMessage> forNewDevice = messageMapper.selectHistoryForDevice(
+            ALICE, BOB, DEVICE_B, null, 10);
+        assertEquals(1, forNewDevice.size());
+        assertEquals(DEVICE_B, forNewDevice.get(0).getTargetDeviceId());
+        assertEquals(DEVICE_A, forNewDevice.get(0).getSyncFromDevice());
+
+        List<CipherMessage> forOldDevice = messageMapper.selectHistoryForDevice(
+            ALICE, BOB, DEVICE_A, null, 10);
+        assertEquals(1, forOldDevice.size());
+        assertEquals(DEVICE_A, forOldDevice.get(0).getTargetDeviceId());
+        assertNull(forOldDevice.get(0).getSyncFromDevice());
     }
 
     @Test

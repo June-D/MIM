@@ -17,9 +17,12 @@ import java.security.spec.ECGenParameterSpec;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.Map;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
@@ -39,6 +42,23 @@ import org.springframework.web.context.WebApplicationContext;
  * </ul>
  */
 class HttpApiIntegrationTest extends IntegrationTestBase {
+
+    private static final Database DB = prepare("httpapi");
+
+    @DynamicPropertySource
+    static void databaseProperties(DynamicPropertyRegistry registry) {
+        register(registry, DB);
+    }
+
+    @BeforeAll
+    static void requireDatabase() {
+        requireReady(DB);
+    }
+
+    @Override
+    protected Database database() {
+        return DB;
+    }
 
     @Autowired
     private WebApplicationContext webApplicationContext;
