@@ -11,6 +11,7 @@ import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.service.AuthService;
 import com.junesoon.mim.service.UserService;
+import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.JwtTokenUtil;
 import com.junesoon.mim.utils.TotpVerifier;
 import java.util.UUID;
@@ -33,6 +34,9 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private TotpVerifier totpVerifier;
 
+    @Resource
+    private EmailCryptoService emailCryptoService;
+
     @Override
     public String login(JwtAuthenticationRequest authenticationRequest, String deviceId)
         throws Exception {
@@ -46,8 +50,10 @@ public class AuthServiceImpl implements AuthService {
                     throw new UserInvalidException("请输入二次验证码",
                         CommonConstants.EX_2FA_REQUIRED_CODE);
                 }
-                if (!totpVerifier.verifyAndConsume(user.getUsername(),
-                    user.getTotpSecret(), code)) {
+                String secret = emailCryptoService.decryptTotp(user.getUsername(),
+                    user.getTotpSecret());
+                if (!StringUtils.hasText(secret)
+                    || !totpVerifier.verifyAndConsume(user.getUsername(), secret, code)) {
                     throw new UserInvalidException("二次验证码错误或已被使用");
                 }
             }

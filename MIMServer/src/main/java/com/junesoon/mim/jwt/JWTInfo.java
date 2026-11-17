@@ -44,10 +44,23 @@ public class JWTInfo implements Serializable {
     private long issuedAt;
 
     /**
-     * 兼容旧调用：未绑定设备的令牌。
+     * 过期时间（毫秒，来自 JWT 的 exp）。WebSocket 用它判断连接是否应断开。
+     */
+    private long expiresAt;
+
+    /**
+     * 兼容旧调用：未绑定设备、无过期时间的令牌。
      */
     public JWTInfo(String username, String userId, String nickname) {
-        this(username, userId, nickname, null, 0, null, 0L);
+        this(username, userId, nickname, null, 0, null, 0L, 0L);
+    }
+
+    /**
+     * 兼容签发调用：过期时间由 JWTHelper 写入，无需调用方提供。
+     */
+    public JWTInfo(String username, String userId, String nickname, String deviceId,
+        int tokenVersion, String jti, long issuedAt) {
+        this(username, userId, nickname, deviceId, tokenVersion, jti, issuedAt, 0L);
     }
 
     @Override

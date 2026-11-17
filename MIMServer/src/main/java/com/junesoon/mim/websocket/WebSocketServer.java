@@ -12,6 +12,7 @@ import com.junesoon.mim.service.PushService;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -200,6 +201,22 @@ public class WebSocketServer extends TextWebSocketHandler {
             pushService.pushAll(targets, notify);
         } catch (Exception e) {
             log.warn("广播用户[{}]在线状态失败：{}", username, e.getMessage());
+        }
+    }
+
+    /**
+     * 定时关闭 JWT 已过期的长连接。WebSocket 只在握手时校验令牌，
+     * 不主动清理会让过期令牌的连接一直收到推送。
+     */
+    @Scheduled(fixedDelay = 60_000L)
+    public void closeExpiredConnections() {
+        try {
+            int closed = sessionRegistry.closeExpired(System.currentTimeMillis());
+            if (closed > 0) {
+                log.info("已关闭 {} 个 JWT 过期的 WebSocket 连接", closed);
+            }
+        } catch (Exception e) {
+            log.warn("清理过期 WebSocket 连接失败：{}", e.getMessage());
         }
     }
 

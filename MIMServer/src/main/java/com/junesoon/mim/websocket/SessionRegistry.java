@@ -205,21 +205,52 @@ public class SessionRegistry {
         closeAll(sessionsByDevice.remove(key(username, deviceId)));
     }
 
+    /**
+     * 关闭所有 JWT 已过期的连接。由定时任务调用。
+     *
+     * @return 关闭的连接数
+     */
+    public int closeExpired(long now) {
+        int closed = 0;
+        for (java.util.Map.Entry<String, Set<WebSocketSession>> entry
+            : sessionsByDevice.entrySet()) {
+            Set<WebSocketSession> sessions = entry.getValue();
+            for (WebSocketSession session : sessions) {
+                Object expiresAt = session.getAttributes()
+                    .get(CommonConstants.WEB_SOCKET_TOKEN_EXPIRES_AT);
+                if (expiresAt instanceof Long && (Long) expiresAt > 0
+                    && (Long) expiresAt <= now) {
+                    closeQuietly(session);
+                    sessions.remove(session);
+                    closed++;
+                }
+            }
+            if (sessions.isEmpty()) {
+                sessionsByDevice.remove(entry.getKey(), sessions);
+            }
+        }
+        return closed;
+    }
+
     private void closeAll(Set<WebSocketSession> sessions) {
         if (sessions == null) {
             return;
         }
         for (WebSocketSession session : sessions) {
-            if (session == null) {
-                continue;
+            closeQuietly(session);
+        }
+    }
+
+    private void closeQuietly(WebSocketSession session) {
+        if (session == null) {
+            return;
+        }
+        try {
+            if (session.isOpen()) {
+                session.close(CloseStatus.POLICY_VIOLATION);
             }
-            try {
-                if (session.isOpen()) {
-                    session.close(CloseStatus.POLICY_VIOLATION);
-                }
-            } catch (IOException e) {
-                log.debug("关闭 WebSocket 连接失败：{}", e.getMessage());
-            }
+        } catch (IOException e) {
+            log.debug("关闭 WebSocket 连接失败：{}", e.getMessage());
         }
     }
 

@@ -290,6 +290,23 @@ class SessionRegistryTest {
     }
 
     @Test
+    @DisplayName("JWT 过期的连接会被关闭并从注册表移除")
+    void closeExpiredSessions() {
+        FakeSession expired = new FakeSession("s1").withDevice("desktop");
+        expired.getAttributes().put(CommonConstants.WEB_SOCKET_TOKEN_EXPIRES_AT, 1000L);
+        FakeSession valid = new FakeSession("s2").withDevice("mobile");
+        valid.getAttributes().put(CommonConstants.WEB_SOCKET_TOKEN_EXPIRES_AT, 9000L);
+        registry.register("bob", "desktop", expired);
+        registry.register("bob", "mobile", valid);
+
+        int closed = registry.closeExpired(5000L);
+        assertEquals(1, closed);
+        assertFalse(expired.isOpen());
+        assertFalse(registry.hasLocalSession("bob", "desktop"));
+        assertTrue(registry.hasLocalSession("bob", "mobile"));
+    }
+
+    @Test
     @DisplayName("向同一 session 并发投递不会因并发写抛异常")
     void concurrentSendToSameSession() throws Exception {
         FakeSession desktop = new FakeSession("s1").withDevice("desktop");

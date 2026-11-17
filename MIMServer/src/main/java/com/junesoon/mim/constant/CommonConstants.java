@@ -45,6 +45,8 @@ public class CommonConstants {
     public static final String WEB_SOCKET_USER_ID = "web_socket_user_id";
     /** 握手时写入 session 属性的设备标识，用于按设备投递 */
     public static final String WEB_SOCKET_DEVICE_ID = "web_socket_device_id";
+    /** 握手时写入的 JWT 过期时间，用于定时关闭已过期的长连接 */
+    public static final String WEB_SOCKET_TOKEN_EXPIRES_AT = "web_socket_token_expires_at";
     public static final String WEB_SOCKET_TOKEN = "WEB_SOCKET_TOKEN";
 
     // ---------------- WebSocket 通知类型 ----------------

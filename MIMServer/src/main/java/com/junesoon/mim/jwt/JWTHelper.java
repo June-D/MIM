@@ -130,9 +130,10 @@ public class JWTHelper {
             }
         }
         long issuedAt = body.getIssuedAt() == null ? 0L : body.getIssuedAt().getTime();
+        long expiresAt = body.getExpiration() == null ? 0L : body.getExpiration().getTime();
         return new JWTInfo(body.getSubject(),
             StringHelper.getObjectValue(body.get(CommonConstants.JWT_KEY_USER_ID)),
             StringHelper.getObjectValue(body.get(CommonConstants.JWT_KEY_NICKNAME)),
-            deviceId, tokenVersion, body.getId(), issuedAt);
+            deviceId, tokenVersion, body.getId(), issuedAt, expiresAt);
     }
 }

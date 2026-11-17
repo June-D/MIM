@@ -9,7 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 /**
- * 找回邮箱的加密存储测试。
+ * 服务端敏感字段（邮箱、TOTP 密钥）的加密存储测试。
  */
 class EmailCryptoServiceTest {
 
@@ -39,6 +39,26 @@ class EmailCryptoServiceTest {
         String tampered = stored.substring(0, stored.length() - 1)
             + (stored.endsWith("A") ? "B" : "A");
         assertNull(crypto.decrypt("alice", tampered));
+    }
+
+    @Test
+    @DisplayName("TOTP 密钥加密存储，且与邮箱域隔离")
+    void totpRoundTripAndDomainSeparation() {
+        EmailCryptoService crypto = service();
+        String stored = crypto.encryptTotp("alice", "JBSWY3DPEHPK3PXP");
+        assertNotEquals("JBSWY3DPEHPK3PXP", stored);
+        assertEquals("JBSWY3DPEHPK3PXP", crypto.decryptTotp("alice", stored));
+        assertNull(crypto.decryptTotp("bob", stored), "AAD 绑定用户名");
+        assertNull(crypto.decrypt("alice", stored), "TOTP 密文不能当邮箱密文解");
+    }
+
+    @Test
+    @DisplayName("旧版明文 TOTP 密钥仍可读取，便于平滑升级")
+    void legacyPlaintextTotp() {
+        EmailCryptoService crypto = service();
+        assertEquals("JBSWY3DPEHPK3PXP",
+            crypto.decryptTotp("alice", "JBSWY3DPEHPK3PXP"));
+        assertNull(crypto.decryptTotp("alice", ""));
     }
 
     @Test

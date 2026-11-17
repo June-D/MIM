@@ -50,6 +50,7 @@ public class WebcocketInterceptor implements HandshakeInterceptor {
                 return false;
             }
             attributes.put(CommonConstants.WEB_SOCKET_USER_ID, info.getUsername());
+            attributes.put(CommonConstants.WEB_SOCKET_TOKEN_EXPIRES_AT, info.getExpiresAt());
             // 令牌绑定的设备优先；旧版未绑定设备时才看握手头
             attributes.put(CommonConstants.WEB_SOCKET_DEVICE_ID,
                 StringUtils.hasText(info.getDeviceId())

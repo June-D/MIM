@@ -13,11 +13,13 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
- * 找回密码邮箱的加密存储。
+ * 服务端敏感字段的加密存储。
  *
- * <p>邮箱只用于找回密码、仅本人可见，但仍按敏感数据对待：AES-256-GCM 加密，
- * AAD 绑定用户名，防止密文被跨账号搬运。密钥优先取 {@code MIM_EMAIL_KEY}
+ * <p>目前用于找回密码邮箱与 TOTP 密钥：AES-256-GCM，AAD 绑定用户名与字段类型，
+ * 防止密文被跨账号/跨字段搬运。密钥优先取 {@code MIM_EMAIL_KEY}
  * （Base64 32 字节）；未配置时从 JWT 私钥派生，保证自建环境开箱可用。
+ * 注意：回退派生意味着只拿到数据库、没拿到 JWT 私钥时仍无法解密；
+ * 若攻击者同时拿到两者，则仍可解密，生产环境建议显式配置独立密钥。
  */
 @Slf4j
 @Component
@@ -42,25 +44,56 @@ public class EmailCryptoService {
         if (email == null || email.trim().isEmpty()) {
             return null;
         }
-        try {
-            byte[] nonce = new byte[NONCE_BYTES];
-            random.nextBytes(nonce);
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key(), "AES"),
-                new GCMParameterSpec(TAG_BITS, nonce));
-            cipher.updateAAD(aad(username));
-            byte[] ciphertext = cipher.doFinal(email.trim().getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().encodeToString(nonce) + ":"
-                + Base64.getEncoder().encodeToString(ciphertext);
-        } catch (Exception e) {
-            throw new IllegalStateException("加密邮箱失败", e);
-        }
+        return encryptValue("MIM/email/v1|", "邮箱", username, email.trim());
     }
 
     /**
      * 解密失败返回 null（密钥更换或数据损坏），不影响登录与其它功能。
      */
     public String decrypt(String username, String stored) {
+        return decryptValue("MIM/email/v1|", "邮箱", username, stored);
+    }
+
+    /**
+     * 加密 TOTP 共享密钥，避免数据库泄露后直接拿到可生成验证码的种子。
+     */
+    public String encryptTotp(String username, String secret) {
+        if (secret == null || secret.trim().isEmpty()) {
+            return null;
+        }
+        return encryptValue("MIM/totp/v1|", "二次验证密钥", username, secret.trim());
+    }
+
+    /**
+     * 解密 TOTP 密钥。旧数据是未加密的 Base32（不含冒号），按原样返回以便平滑升级。
+     */
+    public String decryptTotp(String username, String stored) {
+        if (stored == null || stored.trim().isEmpty()) {
+            return null;
+        }
+        if (stored.indexOf(':') <= 0) {
+            return stored.trim();
+        }
+        return decryptValue("MIM/totp/v1|", "二次验证密钥", username, stored);
+    }
+
+    private String encryptValue(String aadPrefix, String label, String username, String value) {
+        try {
+            byte[] nonce = new byte[NONCE_BYTES];
+            random.nextBytes(nonce);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(key(), "AES"),
+                new GCMParameterSpec(TAG_BITS, nonce));
+            cipher.updateAAD(aad(aadPrefix, username));
+            byte[] ciphertext = cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
+            return Base64.getEncoder().encodeToString(nonce) + ":"
+                + Base64.getEncoder().encodeToString(ciphertext);
+        } catch (Exception e) {
+            throw new IllegalStateException("加密" + label + "失败", e);
+        }
+    }
+
+    private String decryptValue(String aadPrefix, String label, String username, String stored) {
         if (stored == null || stored.trim().isEmpty()) {
             return null;
         }
@@ -74,10 +107,10 @@ public class EmailCryptoService {
             Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key(), "AES"),
                 new GCMParameterSpec(TAG_BITS, nonce));
-            cipher.updateAAD(aad(username));
+            cipher.updateAAD(aad(aadPrefix, username));
             return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
         } catch (Exception e) {
-            log.warn("解密用户 {} 的邮箱失败：{}", username, e.getMessage());
+            log.warn("解密用户 {} 的{}失败：{}", username, label, e.getMessage());
             return null;
         }
     }
@@ -108,7 +141,7 @@ public class EmailCryptoService {
         }
     }
 
-    private byte[] aad(String username) {
-        return ("MIM/email/v1|" + username).getBytes(StandardCharsets.UTF_8);
+    private byte[] aad(String prefix, String username) {
+        return (prefix + username).getBytes(StandardCharsets.UTF_8);
     }
 }

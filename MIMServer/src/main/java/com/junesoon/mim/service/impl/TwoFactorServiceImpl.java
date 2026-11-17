@@ -10,6 +10,7 @@ import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.responses.PasswordChangeResult;
 import com.junesoon.mim.responses.TwoFactorSetupResponse;
 import com.junesoon.mim.service.TwoFactorService;
+import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.JwtTokenUtil;
 import com.junesoon.mim.utils.TotpUtil;
 import com.junesoon.mim.utils.TotpVerifier;
@@ -36,17 +37,20 @@ public class TwoFactorServiceImpl implements TwoFactorService {
     private final JwtTokenUtil jwtTokenUtil;
     private final SessionRegistry sessionRegistry;
     private final TotpVerifier totpVerifier;
+    private final EmailCryptoService emailCryptoService;
 
     private final BCryptPasswordEncoder encoder =
         new BCryptPasswordEncoder(CommonConstants.PW_ENCORDER_SALT);
 
     public TwoFactorServiceImpl(UserMapper userMapper, DeviceMapper deviceMapper,
-        JwtTokenUtil jwtTokenUtil, SessionRegistry sessionRegistry, TotpVerifier totpVerifier) {
+        JwtTokenUtil jwtTokenUtil, SessionRegistry sessionRegistry, TotpVerifier totpVerifier,
+        EmailCryptoService emailCryptoService) {
         this.userMapper = userMapper;
         this.deviceMapper = deviceMapper;
         this.jwtTokenUtil = jwtTokenUtil;
         this.sessionRegistry = sessionRegistry;
         this.totpVerifier = totpVerifier;
+        this.emailCryptoService = emailCryptoService;
     }
 
     @Override
@@ -56,7 +60,7 @@ public class TwoFactorServiceImpl implements TwoFactorService {
             throw new UserInvalidException("二次验证已启用，请先关闭");
         }
         String secret = TotpUtil.generateSecret();
-        user.setTotpSecret(secret);
+        user.setTotpSecret(emailCryptoService.encryptTotp(username, secret));
         user.setTotpEnabled(false);
         user.setUpdTime(new Date());
         userMapper.updateByPrimaryKeySelective(user);
@@ -74,10 +78,16 @@ public class TwoFactorServiceImpl implements TwoFactorService {
         if (!StringUtils.hasText(user.getTotpSecret())) {
             throw new UserInvalidException("请先生成二次验证密钥");
         }
-        if (!totpVerifier.verifyAndConsume(username, user.getTotpSecret(), code)) {
+        String secret = emailCryptoService.decryptTotp(username, user.getTotpSecret());
+        if (!StringUtils.hasText(secret)) {
+            throw new UserInvalidException("二次验证密钥不可用，请重新生成");
+        }
+        if (!totpVerifier.verifyAndConsume(username, secret, code)) {
             throw new UserInvalidException("二次验证码错误或已被使用");
         }
         user.setTotpEnabled(true);
+        // 旧版明文密钥在启用成功时顺手升级为密文
+        user.setTotpSecret(emailCryptoService.encryptTotp(username, secret));
         user.setUpdTime(new Date());
         userMapper.updateByPrimaryKeySelective(user);
         return revokeAllAndIssue(user, deviceId);
@@ -94,7 +104,11 @@ public class TwoFactorServiceImpl implements TwoFactorService {
         if (!StringUtils.hasText(password) || !encoder.matches(password, user.getPassword())) {
             throw new UserInvalidException("当前密码不正确");
         }
-        if (!totpVerifier.verifyAndConsume(username, user.getTotpSecret(), code)) {
+        String secret = emailCryptoService.decryptTotp(username, user.getTotpSecret());
+        if (!StringUtils.hasText(secret)) {
+            throw new UserInvalidException("二次验证密钥不可用，请使用邮箱找回密码重置");
+        }
+        if (!totpVerifier.verifyAndConsume(username, secret, code)) {
             throw new UserInvalidException("二次验证码错误或已被使用");
         }
         // 选择性更新不会把 null 写回数据库，用空串显式清空

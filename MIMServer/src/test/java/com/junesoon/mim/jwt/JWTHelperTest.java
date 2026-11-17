@@ -31,6 +31,8 @@ class JWTHelperTest {
         assertEquals(3, parsed.getTokenVersion());
         assertEquals("jti-123", parsed.getJti());
         assertTrue(parsed.getIssuedAt() > 0);
+        assertTrue(parsed.getExpiresAt() > parsed.getIssuedAt(),
+            "解析结果必须带过期时间，WebSocket 才能按时断开");
     }
 
     @Test

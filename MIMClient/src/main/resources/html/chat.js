@@ -87,7 +87,12 @@ chat.markRecalled = function (clientMsgId) {
     if (!clientMsgId) {
         return;
     }
-    var nodes = document.querySelectorAll("[data-id='" + clientMsgId + "']");
+    // 只允许服务端消息 ID 的合法字符，避免推送内容注入选择器
+    var safeId = String(clientMsgId).replace(/[^A-Za-z0-9._-]/g, "");
+    if (!safeId) {
+        return;
+    }
+    var nodes = document.querySelectorAll("[data-id='" + safeId + "']");
     for (var i = 0; i < nodes.length; i++) {
         var node = nodes[i];
         node.classList.add("recalled");

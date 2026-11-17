@@ -57,6 +57,10 @@ public class EmailSender {
             props.put("mail.smtp.ssl.enable", String.valueOf(ssl));
             if (!ssl) {
                 props.put("mail.smtp.starttls.enable", "true");
+                props.put("mail.smtp.starttls.required", "true");
+            } else {
+                // 校验 SMTP 服务器证书主机名，避免中间人替换证书
+                props.put("mail.smtp.ssl.checkserveridentity", "true");
             }
             props.put("mail.smtp.connectiontimeout", "10000");
             props.put("mail.smtp.timeout", "10000");
