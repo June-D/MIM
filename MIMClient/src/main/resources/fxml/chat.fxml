@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.TextArea?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<?import javafx.scene.web.WebView?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<!--
+  会话窗口：头部（对方信息 + 加密标识）+ 消息区 + 输入区。
+  消息区用 WebView 承载，因为富文本换行、代码块、链接的处理比 TextFlow 省事。
+-->
+<StackPane fx:id="chatRootPane" style="-fx-background-color: -fx-main-base;"
+           xmlns="http://javafx.com/javafx/8.0.171" xmlns:fx="http://javafx.com/fxml/1">
+
+    <BorderPane>
+
+        <!-- 头部：告诉用户"你在和谁说话"以及"这条通道是加密的" -->
+        <top>
+            <HBox styleClass="chat-header" alignment="CENTER_LEFT">
+                <Label fx:id="peerAvatar" styleClass="avatar-sm" text="?"/>
+                <VBox spacing="2">
+                    <Label fx:id="peerName" styleClass="chat-peer-name" text="会话"/>
+                    <Label fx:id="e2eeBadge" styleClass="e2ee-badge" text="端到端加密"/>
+                </VBox>
+                <Region HBox.hgrow="ALWAYS"/>
+                <Button fx:id="safetyNumberButton" styleClass="btn-quiet" text="核对安全码"/>
+            </HBox>
+        </top>
+
+        <!-- 消息区 -->
+        <center>
+            <StackPane styleClass="chat-transcript">
+                <WebView fx:id="chatWebView"/>
+                <VBox fx:id="transcriptEmpty" styleClass="empty-state"
+                      style="-fx-background-color: -fx-main-base;" visible="false" managed="false">
+                    <Label styleClass="empty-title" text="还没有消息"/>
+                    <Label styleClass="empty-hint" text="发送第一条消息，它会在这台设备上加密后发出。"/>
+                </VBox>
+            </StackPane>
+        </center>
+
+        <!-- 输入区 -->
+        <bottom>
+            <VBox styleClass="composer">
+                <VBox fx:id="composerBox" styleClass="composer-box">
+                    <TextArea fx:id="messageTextArea" styleClass="message-input"
+                              wrapText="true" prefRowCount="1" promptText="输入消息…"/>
+                    <HBox styleClass="composer-actions" alignment="CENTER_LEFT" spacing="8">
+                        <Label styleClass="composer-hint" text="Enter 发送 · Shift+Enter 换行"/>
+                        <Region HBox.hgrow="ALWAYS"/>
+                        <Button fx:id="sendButton" styleClass="send-button" disable="true">
+                            <graphic>
+                                <FontIcon iconLiteral="fas-arrow-up" iconSize="13"/>
+                            </graphic>
+                        </Button>
+                    </HBox>
+                </VBox>
+            </VBox>
+        </bottom>
+
+    </BorderPane>
+</StackPane>

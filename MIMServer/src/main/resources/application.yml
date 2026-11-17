@@ -1,0 +1,38 @@
+spring:
+  profiles:
+    active: mysql
+
+logging:
+  level:
+    root: info
+    com.junesoon.mim: info
+
+# JWT 配置。rsa-secret 已废弃：签名密钥改为首次启动生成并持久化到 t_rsa_key，
+# 不再从配置文件读取，避免私钥随代码仓库泄漏。
+jwt:
+  token-header: Authorization
+  expire: 14400
+
+auth:
+  user:
+    token-header: Authorization
+
+message:
+  # 单条密文字节上限
+  max-bytes: 262144
+  # 撤回时间窗口（秒）。超过后拒绝撤回，避免无限期篡改历史
+  recall-window-seconds: 120
+
+mim:
+  # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
+  # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
+  instance-id: ${HOSTNAME:local}
+  # 传输层安全。默认关闭便于本地开发；生产环境必须开启，
+  # 否则 JWT 与登录口令会在网络上明文传输，E2EE 也会被中间人冒充绕过。
+  tls:
+    enabled: ${MIM_TLS_ENABLED:false}
+    keystore: ${MIM_TLS_KEYSTORE:}
+    keystore-password: ${MIM_TLS_KEYSTORE_PASSWORD:}
+    keystore-type: PKCS12
+    key-alias: ${MIM_TLS_KEY_ALIAS:mim}
+    client-auth: false

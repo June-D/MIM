@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.PreKeyMapper">
+
+    <resultMap id="SignedPreKeyMap" type="com.junesoon.mim.entity.SignedPreKey">
+        <id column="username" jdbcType="VARCHAR" property="username"/>
+        <id column="device_id" jdbcType="VARCHAR" property="deviceId"/>
+        <result column="pre_key_id" jdbcType="INTEGER" property="preKeyId"/>
+        <result column="public_key" jdbcType="LONGVARCHAR" property="publicKey"/>
+        <result column="signature" jdbcType="LONGVARCHAR" property="signature"/>
+        <result column="crt_time" jdbcType="BIGINT" property="crtTime"/>
+        <result column="upd_time" jdbcType="BIGINT" property="updTime"/>
+    </resultMap>
+
+    <resultMap id="OneTimePreKeyMap" type="com.junesoon.mim.entity.OneTimePreKey">
+        <id column="id" jdbcType="BIGINT" property="id"/>
+        <result column="username" jdbcType="VARCHAR" property="username"/>
+        <result column="device_id" jdbcType="VARCHAR" property="deviceId"/>
+        <result column="pre_key_id" jdbcType="INTEGER" property="preKeyId"/>
+        <result column="public_key" jdbcType="LONGVARCHAR" property="publicKey"/>
+        <result column="crt_time" jdbcType="BIGINT" property="crtTime"/>
+    </resultMap>
+
+    <!-- ==================== 签名预密钥 ==================== -->
+
+    <select id="selectSignedPreKey" resultMap="SignedPreKeyMap">
+        select username, device_id, pre_key_id, public_key, signature, crt_time, upd_time
+        from t_signed_prekey
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </select>
+
+    <insert id="upsertSignedPreKey" parameterType="com.junesoon.mim.entity.SignedPreKey">
+        insert into t_signed_prekey (username, device_id, pre_key_id, public_key, signature,
+                                     crt_time, upd_time)
+        values (#{username,jdbcType=VARCHAR}, #{deviceId,jdbcType=VARCHAR},
+                #{preKeyId,jdbcType=INTEGER}, #{publicKey,jdbcType=LONGVARCHAR},
+                #{signature,jdbcType=LONGVARCHAR}, #{crtTime,jdbcType=BIGINT},
+                #{updTime,jdbcType=BIGINT})
+        on duplicate key update
+            pre_key_id = values(pre_key_id),
+            public_key = values(public_key),
+            signature = values(signature),
+            upd_time = values(upd_time)
+    </insert>
+
+    <!-- ==================== 一次性预密钥 ==================== -->
+
+    <insert id="insertOneTimePreKey" parameterType="com.junesoon.mim.entity.OneTimePreKey"
+            useGeneratedKeys="true" keyProperty="id">
+        insert ignore into t_one_time_prekey (username, device_id, pre_key_id, public_key, crt_time)
+        values (#{username,jdbcType=VARCHAR}, #{deviceId,jdbcType=VARCHAR},
+                #{preKeyId,jdbcType=INTEGER}, #{publicKey,jdbcType=LONGVARCHAR},
+                #{crtTime,jdbcType=BIGINT})
+    </insert>
+
+    <insert id="batchInsertOneTimePreKeys">
+        insert ignore into t_one_time_prekey (username, device_id, pre_key_id, public_key, crt_time)
+        values
+        <foreach collection="keys" item="item" separator=",">
+            (#{item.username,jdbcType=VARCHAR}, #{item.deviceId,jdbcType=VARCHAR},
+             #{item.preKeyId,jdbcType=INTEGER}, #{item.publicKey,jdbcType=LONGVARCHAR},
+             #{item.crtTime,jdbcType=BIGINT})
+        </foreach>
+    </insert>
+
+    <!--
+      领取该设备的一个一次性预密钥。FOR UPDATE 与后续 DELETE 在同一事务内，
+      保证并发请求不会拿到同一个 OPK。
+    -->
+    <select id="selectOneTimePreKeyForUpdate" resultMap="OneTimePreKeyMap">
+        select id, username, device_id, pre_key_id, public_key, crt_time
+        from t_one_time_prekey
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+        order by id asc
+        limit 1
+        for update
+    </select>
+
+    <delete id="deleteOneTimePreKey">
+        delete from t_one_time_prekey
+        where id = #{id,jdbcType=BIGINT}
+          and username = #{username,jdbcType=VARCHAR}
+    </delete>
+
+    <select id="countOneTimePreKeys" resultType="java.lang.Integer">
+        select count(*)
+        from t_one_time_prekey
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </select>
+
+    <delete id="deleteAllOneTimePreKeys">
+        delete from t_one_time_prekey
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </delete>
+
+</mapper>

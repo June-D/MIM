@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.ChatUserMapper">
+
+    <resultMap id="BaseResultMap" type="com.junesoon.mim.entity.ChatUser">
+        <id column="id" jdbcType="INTEGER" property="id"/>
+        <result column="owner_user" jdbcType="VARCHAR" property="ownerUser"/>
+        <result column="username" jdbcType="VARCHAR" property="username"/>
+        <result column="group_id" jdbcType="VARCHAR" property="groupId"/>
+        <result column="label_name" jdbcType="VARCHAR" property="labelName"/>
+        <result column="crt_time" jdbcType="TIMESTAMP" property="crtTime"/>
+    </resultMap>
+
+    <select id="selectChatUserListByOwnerUser" resultType="com.junesoon.mim.entity.ChatUser">
+        select
+            a.id, a.owner_user as ownerUser, a.username, a.label_name as labelName,
+            a.group_id as groupId, a.crt_time as crtTime, b.pic, b.nickname
+        from t_chat_users a, t_register_users b
+        where a.owner_user = #{username,jdbcType=VARCHAR}
+          and a.username = b.username
+        order by a.crt_time asc
+    </select>
+
+    <!--
+      搜索可添加的用户。
+      用 CONCAT(#{keyword}, '%') 做前缀匹配，可以命中 idx_username 索引；
+      用户名也参与匹配，方便按昵称找到对方。
+    -->
+    <select id="searchAddableUsers" resultType="com.junesoon.mim.entity.User">
+        select u.id, u.username, u.nickname, u.pic, u.signature
+        from t_register_users u
+        where u.username != #{self,jdbcType=VARCHAR}
+          and u.status = '1'
+          and u.username not in (
+              select c.username from t_chat_users c
+              where c.owner_user = #{self,jdbcType=VARCHAR}
+          )
+          and (
+              u.username like concat(#{keyword,jdbcType=VARCHAR}, '%')
+              or ifnull(u.nickname, '') like concat(#{keyword,jdbcType=VARCHAR}, '%')
+          )
+        order by char_length(u.username), u.username
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <select id="selectRelation" resultMap="BaseResultMap">
+        select id, owner_user, username, label_name, group_id, crt_time
+        from t_chat_users
+        where owner_user = #{ownerUser,jdbcType=VARCHAR}
+          and username = #{username,jdbcType=VARCHAR}
+        limit 1
+    </select>
+
+    <insert id="insertContact">
+        insert ignore into t_chat_users (owner_user, username, label_name, group_id, crt_time)
+        values (#{ownerUser,jdbcType=VARCHAR}, #{username,jdbcType=VARCHAR},
+                #{labelName,jdbcType=VARCHAR}, '0', now())
+    </insert>
+
+    <delete id="deleteContact">
+        delete from t_chat_users
+        where owner_user = #{ownerUser,jdbcType=VARCHAR}
+          and username = #{username,jdbcType=VARCHAR}
+    </delete>
+
+    <update id="updateLabel">
+        update t_chat_users
+        set label_name = #{labelName,jdbcType=VARCHAR}
+        where owner_user = #{ownerUser,jdbcType=VARCHAR}
+          and username = #{username,jdbcType=VARCHAR}
+    </update>
+
+    <select id="countContacts" resultType="java.lang.Integer">
+        select count(*)
+        from t_chat_users
+        where owner_user = #{ownerUser,jdbcType=VARCHAR}
+    </select>
+
+</mapper>

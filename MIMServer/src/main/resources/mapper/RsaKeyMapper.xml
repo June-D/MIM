@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.RsaKeyMapper">
+  <resultMap id="BaseResultMap" type="com.junesoon.mim.entity.RsaKey">
+    <id column="rsa_key" jdbcType="VARCHAR" property="key" />
+    <result column="key_value" jdbcType="VARCHAR" property="value" />
+  </resultMap>
+  <sql id="Base_Column_List">
+    rsa_key, key_value
+  </sql>
+  <select id="selectByPrimaryKey" parameterType="java.lang.String" resultMap="BaseResultMap">
+    select 
+    <include refid="Base_Column_List" />
+    from t_rsa_key
+    where rsa_key = #{key,jdbcType=VARCHAR}
+  </select>
+  <delete id="deleteByPrimaryKey" parameterType="java.lang.String">
+    delete from t_rsa_key
+    where rsa_key = #{key,jdbcType=VARCHAR}
+  </delete>
+  <insert id="insert" parameterType="com.junesoon.mim.entity.RsaKey">
+    insert into t_rsa_key (rsa_key, key_value)
+    values (#{key,jdbcType=VARCHAR}, #{value,jdbcType=VARCHAR})
+  </insert>
+  <insert id="upsert" parameterType="com.junesoon.mim.entity.RsaKey">
+    insert into t_rsa_key (rsa_key, key_value)
+    values (#{key,jdbcType=VARCHAR}, #{value,jdbcType=VARCHAR})
+    on duplicate key update key_value = values(key_value)
+  </insert>
+  <insert id="insertSelective" parameterType="com.junesoon.mim.entity.RsaKey">
+    insert into t_rsa_key
+    <trim prefix="(" suffix=")" suffixOverrides=",">
+      <if test="key != null">
+        rsa_key,
+      </if>
+      <if test="value != null">
+        key_value,
+      </if>
+    </trim>
+    <trim prefix="values (" suffix=")" suffixOverrides=",">
+      <if test="key != null">
+        #{key,jdbcType=VARCHAR},
+      </if>
+      <if test="value != null">
+        #{value,jdbcType=VARCHAR},
+      </if>
+    </trim>
+  </insert>
+  <update id="updateByPrimaryKeySelective" parameterType="com.junesoon.mim.entity.RsaKey">
+    update t_rsa_key
+    <set>
+      <if test="value != null">
+        key_value = #{value,jdbcType=VARCHAR},
+      </if>
+    </set>
+    where rsa_key = #{key,jdbcType=VARCHAR}
+  </update>
+  <update id="updateByPrimaryKey" parameterType="com.junesoon.mim.entity.RsaKey">
+    update t_rsa_key
+    set key_value = #{value,jdbcType=VARCHAR}
+    where rsa_key = #{key,jdbcType=VARCHAR}
+  </update>
+</mapper>

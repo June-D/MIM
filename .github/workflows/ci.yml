@@ -1,0 +1,210 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  # ------------------------------------------------------------
+  # 服务端：单元测试 + 集成测试（真实 MySQL / Redis）
+  #
+  # 集成测试用真实 MySQL 而非 H2：Mapper 依赖 ON DUPLICATE KEY UPDATE、
+  # INSERT IGNORE、SELECT ... FOR UPDATE、分组去重子查询，
+  # H2 的兼容模式覆盖不全，用它测出的"通过"会误导人。
+  # ------------------------------------------------------------
+  server:
+    name: 服务端测试（单元 + 集成）
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      - name: 创建数据库
+        run: |
+          for db in mim_test mim_core; do
+            mysql -h 127.0.0.1 -P 3306 -uroot -e \
+              "CREATE DATABASE IF NOT EXISTS ${db} CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;"
+          done
+
+      - name: 执行测试
+        working-directory: MIMServer
+        env:
+          # 集成测试基类会据此连接；建表由基类的静态初始化完成
+          MIM_TEST_DB_URL: jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&allowMultiQueries=true
+          MIM_TEST_DB_USERNAME: root
+          MIM_TEST_DB_PASSWORD: ''
+          MIM_REDIS_HOST: 127.0.0.1
+          MIM_REDIS_PORT: '6379'
+          # CI 中数据库必须可用：不可用时让测试明确失败，而不是跳过造成假绿
+          MIM_TEST_DB_REQUIRED: 'true'
+        run: mvn -B clean test
+
+      - name: 测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: server-test-reports
+          path: MIMServer/target/surefire-reports/
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------
+  # 客户端：加密层单元测试
+  # ------------------------------------------------------------
+  client:
+    name: 客户端测试
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      - name: 安装 JavaFX（客户端编译需要）
+        run: |
+          # Temurin 8 不带 JavaFX。装 libopenjfx-java 提供 jar 与原生库。
+          # Maven 编译仍用 JAVA_HOME 下的 JDK，因此把 openjfx 的 jar
+          # 拷进 JDK 的 ext 目录，模拟 Zulu FX 的效果。
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libopenjfx-java
+          EXT_DIR="${JAVA_HOME}/jre/lib/ext"
+          sudo mkdir -p "$EXT_DIR"
+          sudo cp -n /usr/share/java/openjfx*.jar "$EXT_DIR"/ 2>/dev/null || true
+          ls -1 "$EXT_DIR" | grep -i jfx || { echo "未找到 JavaFX jar"; exit 1; }
+
+      - name: 编译与测试
+        working-directory: MIMClient
+        run: mvn -B clean compile && mvn -B test
+
+  # ------------------------------------------------------------
+  # 端到端：真实服务端 + 真实数据库，跑完整加解密链路
+  # ------------------------------------------------------------
+  e2e:
+    name: 端到端回归
+    runs-on: ubuntu-latest
+    needs: [server, client]
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: mim_core
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -uroot"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 JDK 8
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '8'
+          cache: maven
+
+      - name: 初始化数据库
+        run: |
+          mysql -h 127.0.0.1 -P 3306 -uroot mim_core < MIMServer/sql/chat.sql
+          mysql -h 127.0.0.1 -P 3306 -uroot mim_core < MIMServer/sql/e2ee.sql
+
+      - name: 启动服务端
+        working-directory: MIMServer
+        env:
+          MIM_DB_URL: jdbc:mysql://127.0.0.1:3306/mim_core?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8
+          MIM_DB_USERNAME: root
+          MIM_DB_PASSWORD: ''
+          MIM_REDIS_HOST: 127.0.0.1
+          MIM_REDIS_PORT: '6379'
+        run: |
+          mvn -B -q compile
+          mvn -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/cp.txt
+          nohup java -cp "target/classes:$(cat /tmp/cp.txt)" \
+            com.junesoon.mim.MIMServerStarter > /tmp/server.log 2>&1 &
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/user/info || true)
+            if [ "$code" = "401" ]; then
+              echo "服务端已就绪（未认证接口返回 401，符合预期）"
+              break
+            fi
+            sleep 1
+          done
+          grep -q "Started MIMServerStarter" /tmp/server.log || { cat /tmp/server.log; exit 1; }
+
+      - name: 编译客户端
+        working-directory: MIMClient
+        run: |
+          # 加密层不依赖 JavaFX，直接编译主源码即可跑 e2e
+          mvn -B -q compile
+          mvn -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/client-cp.txt
+
+      - name: 跑端到端回归
+        working-directory: MIMClient
+        run: |
+          CP="target/classes:$(cat /tmp/client-cp.txt)"
+          # 逐个运行 src/test/e2e 下的脚本，包名从源码 package 声明推导
+          FAILED=0
+          for E2E_FILE in src/test/e2e/*.java; do
+            [ -f "$E2E_FILE" ] || continue
+            E2E_NAME="$(basename "$E2E_FILE" .java)"
+            echo "--- ${E2E_NAME} ---"
+            javac -encoding UTF-8 -cp "$CP" -d /tmp/e2e "$E2E_FILE"
+            PKG="$(sed -n 's/^package \([a-zA-Z0-9_.]*\);.*/\1/p' "$E2E_FILE" | head -1)"
+            java -cp "/tmp/e2e:$CP" "${PKG}.${E2E_NAME}" || FAILED=1
+          done
+          exit $FAILED
+
+      - name: 失败时输出服务端日志
+        if: failure()
+        run: tail -120 /tmp/server.log || true

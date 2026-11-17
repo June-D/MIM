@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.UserKeyMapper">
+
+    <resultMap id="BaseResultMap" type="com.junesoon.mim.entity.UserKey">
+        <id column="username" jdbcType="VARCHAR" property="username"/>
+        <id column="device_id" jdbcType="VARCHAR" property="deviceId"/>
+        <result column="public_key" jdbcType="LONGVARCHAR" property="publicKey"/>
+        <result column="algorithm" jdbcType="VARCHAR" property="algorithm"/>
+        <result column="key_version" jdbcType="INTEGER" property="version"/>
+        <result column="fingerprint" jdbcType="VARCHAR" property="fingerprint"/>
+        <result column="crt_time" jdbcType="TIMESTAMP" property="crtTime"/>
+        <result column="upd_time" jdbcType="TIMESTAMP" property="updTime"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        username, device_id, public_key, algorithm, key_version, fingerprint, crt_time, upd_time
+    </sql>
+
+    <!--
+      缺省设备：device_id = 'default'，用于兼容尚未升级到多设备的客户端。
+    -->
+    <select id="selectByUsername" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_user_key
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = 'default'
+    </select>
+
+    <select id="selectByDevice" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_user_key
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </select>
+
+    <!--
+      列出某用户所有有效设备（未注销）的身份公钥。
+      发消息时需要为每个设备各加密一份，靠这个查询拿全量公钥。
+    -->
+    <select id="selectAllByUsername" resultMap="BaseResultMap">
+        select k.username, k.device_id, k.public_key, k.algorithm, k.key_version,
+               k.fingerprint, k.crt_time, k.upd_time
+        from t_user_key k
+        join t_device d
+          on d.username = k.username
+         and d.device_id = k.device_id
+         and d.revoked = 0
+        where k.username = #{username,jdbcType=VARCHAR}
+        order by d.last_seen desc
+    </select>
+
+    <insert id="upsert" parameterType="com.junesoon.mim.entity.UserKey">
+        insert into t_user_key (username, device_id, public_key, algorithm, key_version,
+                                fingerprint, crt_time, upd_time)
+        values (#{username,jdbcType=VARCHAR}, #{deviceId,jdbcType=VARCHAR},
+                #{publicKey,jdbcType=LONGVARCHAR}, #{algorithm,jdbcType=VARCHAR},
+                #{version,jdbcType=INTEGER}, #{fingerprint,jdbcType=VARCHAR},
+                #{crtTime,jdbcType=TIMESTAMP}, #{updTime,jdbcType=TIMESTAMP})
+        on duplicate key update
+            public_key = values(public_key),
+            algorithm = values(algorithm),
+            key_version = values(key_version),
+            fingerprint = values(fingerprint),
+            upd_time = values(upd_time)
+    </insert>
+</mapper>

@@ -1,0 +1,43 @@
+server:
+  port: 8080
+
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      # 连接信息优先从环境变量读取，避免明文凭证进入代码库
+      url: ${MIM_DB_URL:jdbc:mysql://127.0.0.1:3306/mim_core?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8}
+      username: ${MIM_DB_USERNAME:root}
+      password: ${MIM_DB_PASSWORD:}
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      initial-size: 5
+      min-idle: 5
+      maxActive: 20
+      maxWait: 60000
+      timeBetweenEvictionRunsMillis: 60000
+      minEvictableIdleTimeMillis: 300000
+      validationQuery: SELECT 1
+      testWhileIdle: true
+      testOnBorrow: false
+      testOnReturn: false
+      poolPreparedStatements: true
+      maxPooledStatementPerConnectionSize: 20
+      connectionProperties: druid.stat.mergeSql=true;druid.stat.slowSqlMillis=5000
+  redis:
+    host: ${MIM_REDIS_HOST:127.0.0.1}
+    port: ${MIM_REDIS_PORT:6379}
+    password: ${MIM_REDIS_PASSWORD:}
+    database: ${MIM_REDIS_DATABASE:0}
+    timeout: 3000
+    lettuce:
+      pool:
+        max-wait: -1
+        max-idle: 8
+        min-idle: 0
+        max-active: 16
+
+mybatis:
+  mapper-locations: classpath*:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: false
+    default-fetch-size: 100

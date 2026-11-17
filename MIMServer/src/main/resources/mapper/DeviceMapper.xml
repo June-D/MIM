@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.DeviceMapper">
+
+    <resultMap id="BaseResultMap" type="com.junesoon.mim.entity.Device">
+        <id column="username" jdbcType="VARCHAR" property="username"/>
+        <id column="device_id" jdbcType="VARCHAR" property="deviceId"/>
+        <result column="device_name" jdbcType="VARCHAR" property="deviceName"/>
+        <result column="crt_time" jdbcType="BIGINT" property="crtTime"/>
+        <result column="last_seen" jdbcType="BIGINT" property="lastSeen"/>
+        <result column="revoked" jdbcType="TINYINT" property="revoked"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        username, device_id, device_name, crt_time, last_seen, revoked
+    </sql>
+
+    <insert id="upsert" parameterType="com.junesoon.mim.entity.Device">
+        insert into t_device (username, device_id, device_name, crt_time, last_seen, revoked)
+        values (#{username,jdbcType=VARCHAR}, #{deviceId,jdbcType=VARCHAR},
+                #{deviceName,jdbcType=VARCHAR}, #{crtTime,jdbcType=BIGINT},
+                #{lastSeen,jdbcType=BIGINT}, 0)
+        on duplicate key update
+            device_name = values(device_name),
+            last_seen = values(last_seen),
+            -- 重新注册视为解除注销
+            revoked = 0
+    </insert>
+
+    <select id="selectOne" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_device
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectActiveDevices" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_device
+        where username = #{username,jdbcType=VARCHAR}
+          and revoked = 0
+        order by last_seen desc
+    </select>
+
+    <update id="touch">
+        update t_device
+        set last_seen = #{lastSeen,jdbcType=BIGINT}
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </update>
+
+    <update id="revoke">
+        update t_device
+        set revoked = 1
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </update>
+
+    <select id="countActiveDevices" resultType="java.lang.Integer">
+        select count(*)
+        from t_device
+        where username = #{username,jdbcType=VARCHAR}
+          and revoked = 0
+    </select>
+
+</mapper>

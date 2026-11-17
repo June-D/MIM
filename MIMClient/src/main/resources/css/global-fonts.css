@@ -1,0 +1,12 @@
+/*
+ * 字体说明
+ *
+ * 早期版本在仓库里内置了微软雅黑（msyh.ttf / msyhl.ttf / msyhbd.ttf）以保证
+ * JavaFX 8 下的中文显示。微软雅黑不可随项目再分发，因此这里改为使用系统字体：
+ *
+ *   macOS   -> Hiragino Sans GB（JavaFX 8 下中文渲染稳定）
+ *   Windows -> Microsoft YaHei（系统中自带）
+ *   Linux   -> 由 fontconfig 回退到系统中文字体
+ *
+ * 具体字体栈在 app.css / login.css / default-theme.css 中声明。
+ */

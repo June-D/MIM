@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.MessageMapper">
+
+    <resultMap id="BaseResultMap" type="com.junesoon.mim.entity.CipherMessage">
+        <id column="id" jdbcType="BIGINT" property="id"/>
+        <result column="client_msg_id" jdbcType="VARCHAR" property="clientMsgId"/>
+        <result column="from_user" jdbcType="VARCHAR" property="fromUsername"/>
+        <result column="from_device_id" jdbcType="VARCHAR" property="fromDeviceId"/>
+        <result column="to_user" jdbcType="VARCHAR" property="toUsername"/>
+        <result column="target_device_id" jdbcType="VARCHAR" property="targetDeviceId"/>
+        <result column="alg" jdbcType="VARCHAR" property="alg"/>
+        <result column="iv" jdbcType="VARCHAR" property="iv"/>
+        <result column="ciphertext" jdbcType="LONGVARCHAR" property="ciphertext"/>
+        <result column="ratchet_public" jdbcType="VARCHAR" property="ratchetPublic"/>
+        <result column="previous_chain_length" jdbcType="INTEGER" property="previousChainLength"/>
+        <result column="message_number" jdbcType="INTEGER" property="messageNumber"/>
+        <result column="sender_identity_key" jdbcType="LONGVARCHAR" property="senderIdentityKey"/>
+        <result column="sender_ephemeral_key" jdbcType="VARCHAR" property="senderEphemeralKey"/>
+        <result column="sender_used_opk" jdbcType="TINYINT" property="senderUsedOneTimePreKey"/>
+        <result column="consumed_opk_id" jdbcType="INTEGER" property="consumedOneTimePreKeyId"/>
+        <result column="sender_key_version" jdbcType="INTEGER" property="senderKeyVersion"/>
+        <result column="recipient_key_version" jdbcType="INTEGER" property="recipientKeyVersion"/>
+        <result column="client_time" jdbcType="BIGINT" property="clientTime"/>
+        <result column="server_time" jdbcType="BIGINT" property="serverTime"/>
+        <result column="delivered" jdbcType="TINYINT" property="delivered"/>
+        <result column="read_flag" jdbcType="TINYINT" property="readFlag"/>
+        <result column="recalled" jdbcType="TINYINT" property="recalled"/>
+        <result column="recalled_at" jdbcType="BIGINT" property="recalledAt"/>
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id, client_msg_id, from_user, from_device_id, to_user, target_device_id,
+        alg, iv, ciphertext,
+        ratchet_public, previous_chain_length, message_number,
+        sender_identity_key, sender_ephemeral_key, sender_used_opk, consumed_opk_id,
+        sender_key_version, recipient_key_version, client_time, server_time,
+        delivered, read_flag, recalled, recalled_at
+    </sql>
+
+    <insert id="insert" parameterType="com.junesoon.mim.entity.CipherMessage"
+            useGeneratedKeys="true" keyProperty="id">
+        insert into t_message (client_msg_id, from_user, from_device_id, to_user, target_device_id,
+                               alg, iv, ciphertext,
+                               ratchet_public, previous_chain_length, message_number,
+                               sender_identity_key, sender_ephemeral_key, sender_used_opk,
+                               consumed_opk_id,
+                               sender_key_version, recipient_key_version, client_time, server_time,
+                               delivered, read_flag, recalled)
+        values (#{clientMsgId,jdbcType=VARCHAR}, #{fromUsername,jdbcType=VARCHAR},
+                #{fromDeviceId,jdbcType=VARCHAR}, #{toUsername,jdbcType=VARCHAR},
+                #{targetDeviceId,jdbcType=VARCHAR},
+                #{alg,jdbcType=VARCHAR}, #{iv,jdbcType=VARCHAR}, #{ciphertext,jdbcType=LONGVARCHAR},
+                #{ratchetPublic,jdbcType=VARCHAR}, #{previousChainLength,jdbcType=INTEGER},
+                #{messageNumber,jdbcType=INTEGER},
+                #{senderIdentityKey,jdbcType=LONGVARCHAR}, #{senderEphemeralKey,jdbcType=VARCHAR},
+                #{senderUsedOneTimePreKey,jdbcType=TINYINT}, #{consumedOneTimePreKeyId,jdbcType=INTEGER},
+                #{senderKeyVersion,jdbcType=INTEGER}, #{recipientKeyVersion,jdbcType=INTEGER},
+                #{clientTime,jdbcType=BIGINT}, #{serverTime,jdbcType=BIGINT},
+                #{delivered,jdbcType=TINYINT}, #{readFlag,jdbcType=TINYINT},
+                #{recalled,jdbcType=TINYINT})
+    </insert>
+
+    <!--
+      幂等查询：同一条逻辑消息对同一目标设备只应该有一份。
+    -->
+    <select id="selectByClientMsgId" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where from_user = #{fromUsername,jdbcType=VARCHAR}
+          and client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+          and target_device_id = #{targetDeviceId,jdbcType=VARCHAR}
+        limit 1
+    </select>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where id = #{id,jdbcType=BIGINT}
+    </select>
+
+    <!--
+      取该 clientMsgId 的任意一份副本（不限目标设备）。
+      撤回需要先判定「是否本人发的」「是否超时」「是否已撤回」，
+      这些属性在所有设备副本上一致，取任意一份即可。
+    -->
+    <select id="selectAnyByClientMsgId" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where from_user = #{fromUsername,jdbcType=VARCHAR}
+          and client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+        limit 1
+    </select>
+
+    <!--
+      历史消息：按 client_msg_id 去重，避免同一个逻辑消息因多设备副本重复出现。
+      先按会话 + client_msg_id 聚出代表行（最小 id），再套 beforeId 分页，
+      这样「代表行 id」与分页游标在同一坐标系里，不会漏消息或重复。
+    -->
+    <select id="selectHistory" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where id in (
+            select min(t.id) from t_message t
+            where ((t.from_user = #{a,jdbcType=VARCHAR} and t.to_user = #{b,jdbcType=VARCHAR})
+                or (t.from_user = #{b,jdbcType=VARCHAR} and t.to_user = #{a,jdbcType=VARCHAR}))
+            group by t.client_msg_id
+        )
+        <if test="beforeId != null">
+            and id &lt; #{beforeId,jdbcType=BIGINT}
+        </if>
+        order by id desc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <!--
+      本设备的未投递消息。多设备下每个设备只取发给自己那一份。
+    -->
+    <select id="selectUndelivered" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where to_user = #{toUsername,jdbcType=VARCHAR}
+          and target_device_id = #{deviceId,jdbcType=VARCHAR}
+          and delivered = 0
+        order by id asc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <update id="markDelivered">
+        update t_message
+        set delivered = 1
+        where id = #{id,jdbcType=BIGINT}
+    </update>
+
+    <update id="markDeliveredUpTo">
+        update t_message
+        set delivered = 1
+        where to_user = #{toUsername,jdbcType=VARCHAR}
+          and target_device_id = #{deviceId,jdbcType=VARCHAR}
+          and delivered = 0
+          and id &lt;= #{beforeId,jdbcType=BIGINT}
+    </update>
+
+    <!--
+      已读标记作用于整条逻辑消息的所有设备副本：
+      用户在一个设备上读了，另一个设备不应再显示未读。
+    -->
+    <update id="markRead">
+        update t_message
+        set read_flag = 1
+        where from_user = #{fromUsername,jdbcType=VARCHAR}
+          and to_user = #{toUsername,jdbcType=VARCHAR}
+          and read_flag = 0
+          and recalled = 0
+        <if test="beforeId != null">
+          and id &lt;= #{beforeId,jdbcType=BIGINT}
+        </if>
+    </update>
+
+    <select id="countUnread" resultType="java.lang.Long">
+        select count(distinct client_msg_id)
+        from t_message
+        where from_user = #{fromUsername,jdbcType=VARCHAR}
+          and to_user = #{toUsername,jdbcType=VARCHAR}
+          and read_flag = 0
+          and recalled = 0
+    </select>
+
+    <!--
+      撤回：清空所有设备副本的密文。
+      条件里带 from_user 与 recalled = 0，保证只有发信人能撤回且不可重复撤回。
+      按 client_msg_id 而非 id 更新，才能一次撤回所有设备副本。
+    -->
+    <update id="recall">
+        update t_message
+        set ciphertext = null,
+            iv = null,
+            recalled = 1,
+            recalled_at = #{recalledAt,jdbcType=BIGINT}
+        where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+          and from_user = #{fromUsername,jdbcType=VARCHAR}
+          and recalled = 0
+    </update>
+
+</mapper>

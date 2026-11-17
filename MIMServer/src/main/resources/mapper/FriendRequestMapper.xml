@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.FriendRequestMapper">
+
+    <resultMap id="BaseResultMap" type="com.junesoon.mim.entity.FriendRequest">
+        <id column="id" jdbcType="BIGINT" property="id"/>
+        <result column="from_user" jdbcType="VARCHAR" property="fromUser"/>
+        <result column="to_user" jdbcType="VARCHAR" property="toUser"/>
+        <result column="status" jdbcType="TINYINT" property="status"/>
+        <result column="created_at" jdbcType="BIGINT" property="createdAt"/>
+        <result column="updated_at" jdbcType="BIGINT" property="updatedAt"/>
+    </resultMap>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        insert into t_friend_request (from_user, to_user, status, created_at, updated_at)
+        values (#{fromUser,jdbcType=VARCHAR}, #{toUser,jdbcType=VARCHAR},
+                #{status,jdbcType=TINYINT}, #{createdAt,jdbcType=BIGINT},
+                #{updatedAt,jdbcType=BIGINT})
+    </insert>
+
+    <select id="selectById" resultMap="BaseResultMap">
+        select id, from_user, to_user, status, created_at, updated_at
+        from t_friend_request
+        where id = #{id,jdbcType=BIGINT}
+    </select>
+
+    <select id="selectByPair" resultMap="BaseResultMap">
+        select id, from_user, to_user, status, created_at, updated_at
+        from t_friend_request
+        where from_user = #{fromUser,jdbcType=VARCHAR}
+          and to_user = #{toUser,jdbcType=VARCHAR}
+        limit 1
+    </select>
+
+    <!-- 拒绝或解除好友后再次申请：只有非待处理行才能被重新打开 -->
+    <update id="reopen">
+        update t_friend_request
+        set status = 0, updated_at = #{updatedAt,jdbcType=BIGINT}
+        where id = #{id,jdbcType=BIGINT}
+          and status &lt;&gt; 0
+    </update>
+
+    <!-- 同意 / 拒绝必须带上 status = 0，避免两个实例同时点同意写出两套结果 -->
+    <update id="resolve">
+        update t_friend_request
+        set status = #{status,jdbcType=TINYINT}, updated_at = #{updatedAt,jdbcType=BIGINT}
+        where id = #{id,jdbcType=BIGINT}
+          and status = 0
+    </update>
+
+    <select id="selectPending" resultMap="BaseResultMap">
+        select id, from_user, to_user, status, created_at, updated_at
+        from t_friend_request
+        where status = 0
+          and (from_user = #{username,jdbcType=VARCHAR} or to_user = #{username,jdbcType=VARCHAR})
+        order by updated_at desc
+    </select>
+
+</mapper>

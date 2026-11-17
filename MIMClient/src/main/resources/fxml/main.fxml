@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.Insets?>
+<?import javafx.scene.control.Button?>
+<?import javafx.scene.control.Label?>
+<?import javafx.scene.control.ScrollPane?>
+<?import javafx.scene.control.TextField?>
+<?import javafx.scene.layout.BorderPane?>
+<?import javafx.scene.layout.HBox?>
+<?import javafx.scene.layout.Region?>
+<?import javafx.scene.layout.StackPane?>
+<?import javafx.scene.layout.VBox?>
+<?import org.kordamp.ikonli.javafx.FontIcon?>
+
+<!--
+  主界面：左侧会话栏 + 右侧会话内容区。
+
+  刻意不用 JFXDrawersStack / JFXTabPane：
+  抽屉式导航要两次点击才能切会话，标签页在只有"会话"一种内容时是多余的一层。
+  固定双栏对每天要反复切换会话的场景效率最高。
+-->
+<StackPane fx:id="rootPane" styleClass="app-root"
+           xmlns="http://javafx.com/javafx/8.0.171" xmlns:fx="http://javafx.com/fxml/1">
+
+    <BorderPane>
+
+        <!-- ==================== 左侧：我的信息 + 搜索 + 会话列表 ==================== -->
+        <left>
+            <VBox styleClass="sidebar">
+
+                <!-- 顶部：头像 + 昵称 + 加好友入口 -->
+                <HBox styleClass="me-bar" alignment="CENTER_LEFT">
+                    <Label fx:id="meAvatar" styleClass="avatar" text="?"/>
+                    <VBox spacing="1" HBox.hgrow="ALWAYS">
+                        <Label fx:id="meName" styleClass="me-name" text="加载中"/>
+                        <Label fx:id="meStatus" styleClass="me-status" text="连接中…"/>
+                    </VBox>
+                    <HBox styleClass="me-actions" alignment="CENTER_RIGHT" spacing="2">
+                        <Button fx:id="addFriendButton" styleClass="btn-icon">
+                            <graphic>
+                                <FontIcon iconLiteral="fas-plus" iconSize="12"/>
+                            </graphic>
+                        </Button>
+                        <Button fx:id="accountMenuButton" styleClass="btn-icon">
+                            <graphic>
+                                <FontIcon iconLiteral="fas-ellipsis-h" iconSize="14"/>
+                            </graphic>
+                        </Button>
+                    </HBox>
+                </HBox>
+
+                <!-- 搜索：输入即筛选会话，回车触发"搜索用户" -->
+                <VBox spacing="8" style="-fx-padding: 14 16 6 16;">
+                    <TextField fx:id="searchField" styleClass="search-field" promptText="搜索"/>
+                </VBox>
+
+                <HBox fx:id="requestBar" styleClass="request-bar" alignment="CENTER_LEFT">
+                    <Label text="好友申请" styleClass="request-title"/>
+                    <Region HBox.hgrow="ALWAYS"/>
+                    <Label fx:id="requestBadge" styleClass="unread-badge" visible="false" managed="false"/>
+                </HBox>
+
+                <!-- 会话列表 -->
+                <StackPane VBox.vgrow="ALWAYS">
+                    <ScrollPane fitToWidth="true" style="-fx-background-color: transparent;" hbarPolicy="NEVER">
+                        <VBox fx:id="conversationList" styleClass="conv-list" spacing="1"/>
+                    </ScrollPane>
+
+                    <!-- 空状态：明确告诉用户下一步做什么 -->
+                    <VBox fx:id="emptyState" styleClass="empty-state" visible="false" managed="false">
+                        <Label styleClass="empty-title" text="还没有好友"/>
+                        <Label styleClass="empty-hint"
+                               text="点右上角加号，搜索用户名发出申请。对方同意后才会出现在这里。"/>
+                    </VBox>
+                </StackPane>
+
+            </VBox>
+        </left>
+
+        <!-- ==================== 右侧：当前会话 ==================== -->
+        <center>
+            <StackPane fx:id="contentArea" style="-fx-background-color: -fx-main-base;">
+                <!-- 未选择会话时的引导页 -->
+                <VBox fx:id="welcomeState" styleClass="welcome">
+                    <Label styleClass="welcome-mark" text="M"/>
+                    <Label styleClass="welcome-title" text="私密对话"/>
+                    <Label styleClass="welcome-hint"
+                           text="选一个好友。消息在本机加密后才离开这台电脑。"/>
+                </VBox>
+            </StackPane>
+        </center>
+
+    </BorderPane>
+
+    <!-- 搜索结果面板：覆盖式弹层，关掉不影响下面的会话列表 -->
+    <StackPane fx:id="overlayLayer" visible="false" managed="false"
+               style="-fx-background-color: rgba(28,36,51,0.28);"/>
+</StackPane>

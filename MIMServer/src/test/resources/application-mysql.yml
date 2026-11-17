@@ -1,0 +1,40 @@
+# 集成测试专用配置（覆盖 src/main/resources 下的同名文件）。
+#
+# 注意：这是**完整覆盖**，不是合并。主配置里有的非默认项必须在这里重新声明，
+# 否则会丢失（例如 mybatis.mapper-locations，缺失会导致
+# "Invalid bound statement (not found)"）。
+#
+# 关键点：
+#   1. TLS 关闭 —— 集成测试用 RANDOM_PORT，若启用 TLS 会额外占用固定端口，
+#      与本机其它实例或并行测试冲突。
+#   2. 数据源由 IntegrationTestBase 通过 @DynamicPropertySource 注入，
+#      这里不重复声明，避免两处配置互相覆盖造成困惑。
+#   3. 限流不做特殊放宽：HttpApiIntegrationTest 里有专门验证 429 的用例，
+#      放宽会掩盖真实行为。用例之间靠清空 mim:ratelimit:* 保证隔离。
+
+spring:
+  datasource:
+    type: com.alibaba.druid.pool.DruidDataSource
+
+mybatis:
+  mapper-locations: classpath*:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: false
+    default-fetch-size: 100
+
+# TLS 在测试中强制关闭。
+# 不写 ${MIM_TLS_ENABLED:false}：外部环境变量会覆盖它，导致测试去抢 8443，
+# 或被证书缺失搞挂。测试环境不验证 TLS（TLS 行为已在手工验证中确认）。
+mim:
+  tls:
+    enabled: false
+  instance-id: integration-test
+
+message:
+  max-bytes: 262144
+  recall-window-seconds: 120
+
+logging:
+  level:
+    root: warn
+    com.junesoon.mim: info
