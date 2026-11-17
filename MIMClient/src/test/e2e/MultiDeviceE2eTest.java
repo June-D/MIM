@@ -270,7 +270,8 @@ public final class MultiDeviceE2eTest {
 
     private static void uploadIdentityKey(String token, String deviceId, String publicKey)
         throws Exception {
-        String body = "{\"publicKey\":\"" + publicKey + "\",\"algorithm\":\"EC-P256\"}";
+        String body = "{\"publicKey\":\"" + publicKey
+            + "\",\"algorithm\":\"EC-P256\",\"password\":\"" + PASSWORD + "\"}";
         requireOk(httpPost(BASE + "/key", token, deviceId, body), "上传身份公钥");
     }
 

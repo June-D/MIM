@@ -131,9 +131,14 @@ public class KeyManager {
      * 把本设备公钥同步到服务端。服务端对同一指纹幂等，不会无谓涨版本。
      */
     public KeyBundle uploadPublicKey(IdentityStore.Identity current) throws IdentityException {
+        char[] password = ApplicatonStore.getSessionPassword();
+        if (password == null || password.length == 0) {
+            throw new IdentityException("会话已锁定，请重新登录");
+        }
         try {
             ObjectRestResponse<KeyBundle> response = Request.connector(KeyFeign.class)
-                .upload(new KeyUploadRequest(current.getPublicKeyBase64(), "EC-P256"));
+                .upload(new KeyUploadRequest(current.getPublicKeyBase64(), "EC-P256",
+                    com.junesoon.mim.utils.EncryptUtil.base64Encode(new String(password))));
             if (response == null || response.getStatus() != 200 || response.getData() == null) {
                 String message = response == null ? "服务端无响应" : response.getMessage();
                 throw new IdentityException("同步公钥失败：" + message);

@@ -139,7 +139,8 @@ class KeyServiceTest {
     void setUp() {
         mapper = new InMemoryUserKeyMapper();
         deviceMapper = new InMemoryDeviceMapper();
-        service = new KeyServiceImpl(mapper, deviceMapper);
+        service = new KeyServiceImpl(mapper, deviceMapper,
+            (username, password) -> "pw".equals(password));
         // 默认给 alice/bob 都注册好设备，让上传能通过
         deviceMapper.register("alice", DEVICE);
         deviceMapper.register("bob", DEVICE);
@@ -161,7 +162,7 @@ class KeyServiceTest {
     @DisplayName("首次上传公钥，版本为 1，指纹为 SHA-256")
     void firstUpload() throws Exception {
         String publicKey = realP256PublicKey();
-        KeyBundle bundle = service.upload("alice", DEVICE, publicKey, "EC-P256");
+        KeyBundle bundle = service.upload("alice", DEVICE, publicKey, "EC-P256", "pw");
         assertEquals("alice", bundle.getUsername());
         assertEquals(1, bundle.getVersion());
         assertEquals(publicKey, bundle.getPublicKey());
@@ -172,18 +173,18 @@ class KeyServiceTest {
     @DisplayName("重复上传同一把公钥是幂等的，版本不增长")
     void idempotentUpload() throws Exception {
         String publicKey = realP256PublicKey();
-        service.upload("alice", DEVICE, publicKey, "EC-P256");
-        KeyBundle second = service.upload("alice", DEVICE, publicKey, "EC-P256");
+        service.upload("alice", DEVICE, publicKey, "EC-P256", "pw");
+        KeyBundle second = service.upload("alice", DEVICE, publicKey, "EC-P256", "pw");
         assertEquals(1, second.getVersion(), "同一指纹不应涨版本");
     }
 
     @Test
     @DisplayName("上传不同公钥时版本自增")
     void keyRotationBumpsVersion() throws Exception {
-        service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256");
-        KeyBundle rotated = service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256");
+        service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw");
+        KeyBundle rotated = service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw");
         assertEquals(2, rotated.getVersion());
-        KeyBundle again = service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256");
+        KeyBundle again = service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw");
         assertEquals(3, again.getVersion());
     }
 
@@ -191,9 +192,9 @@ class KeyServiceTest {
     @DisplayName("同一公钥的指纹稳定")
     void fingerprintStable() throws Exception {
         String publicKey = realP256PublicKey();
-        service.upload("alice", DEVICE, publicKey, "EC-P256");
+        service.upload("alice", DEVICE, publicKey, "EC-P256", "pw");
         KeyBundle a = service.get("alice", DEVICE);
-        service.upload("bob", DEVICE, publicKey, "EC-P256");
+        service.upload("bob", DEVICE, publicKey, "EC-P256", "pw");
         KeyBundle b = service.get("bob", DEVICE);
         assertEquals(a.getFingerprint(), b.getFingerprint(), "相同公钥指纹必须一致");
     }
@@ -214,7 +215,7 @@ class KeyServiceTest {
         String publicKey = Base64.getEncoder().encodeToString(
             generator.generateKeyPair().getPublic().getEncoded());
         UserInvalidException ex = assertThrows(UserInvalidException.class,
-            () -> service.upload("alice", DEVICE, publicKey, "EC-P256"));
+            () -> service.upload("alice", DEVICE, publicKey, "EC-P256", "pw"));
         assertTrue(ex.getMessage().contains("P-256"), "实际：" + ex.getMessage());
     }
 
@@ -222,11 +223,11 @@ class KeyServiceTest {
     @DisplayName("拒绝非法 Base64 与空公钥")
     void rejectMalformedKey() {
         assertThrows(UserInvalidException.class,
-            () -> service.upload("alice", DEVICE, "not-base64!!!", "EC-P256"));
+            () -> service.upload("alice", DEVICE, "not-base64!!!", "EC-P256", "pw"));
         assertThrows(UserInvalidException.class,
-            () -> service.upload("alice", DEVICE, null, "EC-P256"));
+            () -> service.upload("alice", DEVICE, null, "EC-P256", "pw"));
         assertThrows(UserInvalidException.class,
-            () -> service.upload("alice", DEVICE, "", "EC-P256"));
+            () -> service.upload("alice", DEVICE, "", "EC-P256", "pw"));
     }
 
     @Test
@@ -234,7 +235,7 @@ class KeyServiceTest {
     void rejectUnsupportedAlgorithm() throws Exception {
         String publicKey = realP256PublicKey();
         assertThrows(UserInvalidException.class,
-            () -> service.upload("alice", DEVICE, publicKey, "RSA-2048"));
+            () -> service.upload("alice", DEVICE, publicKey, "RSA-2048", "pw"));
     }
 
     @Test
@@ -242,7 +243,7 @@ class KeyServiceTest {
     void rejectTooShortKey() {
         String shortKey = Base64.getEncoder().encodeToString(new byte[8]);
         assertThrows(UserInvalidException.class,
-            () -> service.upload("alice", DEVICE, shortKey, "EC-P256"));
+            () -> service.upload("alice", DEVICE, shortKey, "EC-P256", "pw"));
     }
 
     @Test
@@ -250,13 +251,24 @@ class KeyServiceTest {
     void rejectInvalidUsername() throws Exception {
         String publicKey = realP256PublicKey();
         assertThrows(UserInvalidException.class,
-            () -> service.upload("a b", DEVICE, publicKey, "EC-P256"));
+            () -> service.upload("a b", DEVICE, publicKey, "EC-P256", "pw"));
+    }
+
+    @Test
+    @DisplayName("更换身份公钥缺少正确密码被拒绝")
+    void keyRotationRequiresPassword() throws Exception {
+        service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw");
+        assertThrows(UserInvalidException.class,
+            () -> service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "wrong"));
+        KeyBundle rotated =
+            service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw");
+        assertEquals(2, rotated.getVersion());
     }
 
     @Test
     @DisplayName("上传后能查到自己的公钥")
     void getAfterUpload() throws Exception {
-        service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256");
+        service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw");
         KeyBundle bundle = service.get("alice", DEVICE);
         assertNotNull(bundle);
         assertEquals("alice", bundle.getUsername());

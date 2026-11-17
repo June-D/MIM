@@ -281,7 +281,8 @@ public final class WsDevicePushE2eTest {
         IdentityStore identityStore = new IdentityStore(dir.resolve("identity"));
         IdentityStore.Identity identity = identityStore.create(username, deviceId, PASSWORD, 1);
         requireOk(httpPost(BASE + "/key", token, deviceId,
-            "{\"publicKey\":\"" + identity.getPublicKeyBase64() + "\",\"algorithm\":\"EC-P256\"}"),
+            "{\"publicKey\":\"" + identity.getPublicKeyBase64()
+                + "\",\"algorithm\":\"EC-P256\",\"password\":\"" + base64(PASSWORD) + "\"}"),
             "上传身份公钥");
 
         PreKeyStore preKeys = new PreKeyStore(dir.resolve("prekeys"));

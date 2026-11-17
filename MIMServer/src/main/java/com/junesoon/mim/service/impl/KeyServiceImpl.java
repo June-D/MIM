@@ -6,6 +6,7 @@ import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.responses.KeyBundle;
 import com.junesoon.mim.service.KeyService;
+import com.junesoon.mim.service.PasswordVerifier;
 import com.junesoon.mim.utils.ValidationUtil;
 import java.security.KeyFactory;
 import java.security.MessageDigest;
@@ -38,14 +39,18 @@ public class KeyServiceImpl implements KeyService {
 
     private final UserKeyMapper userKeyMapper;
     private final DeviceMapper deviceMapper;
+    private final PasswordVerifier passwordVerifier;
 
-    public KeyServiceImpl(UserKeyMapper userKeyMapper, DeviceMapper deviceMapper) {
+    public KeyServiceImpl(UserKeyMapper userKeyMapper, DeviceMapper deviceMapper,
+        PasswordVerifier passwordVerifier) {
         this.userKeyMapper = userKeyMapper;
         this.deviceMapper = deviceMapper;
+        this.passwordVerifier = passwordVerifier;
     }
 
     @Override
-    public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm) {
+    public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
+        String password) {
         ValidationUtil.validateUsername(username);
         String device = StringUtils.hasText(deviceId)
             ? deviceId.trim() : UserKey.DEFAULT_DEVICE_ID;
@@ -76,8 +81,13 @@ public class KeyServiceImpl implements KeyService {
         String fingerprint = fingerprint(keyBytes);
         UserKey existing = userKeyMapper.selectByDevice(username, device);
         if (existing != null && fingerprint.equals(existing.getFingerprint())) {
-            // 同一把公钥重复上传，保持幂等，不涨版本
+            // 同一把公钥重复上传，保持幂等，不涨版本；旧客户端重登也能通过
             return toBundle(existing);
+        }
+        // 新增或更换身份公钥必须验证当前口令：
+        // 仅凭一条被盗 JWT 不能把受害者设备的身份公钥换成攻击者的。
+        if (!passwordVerifier.matches(username, password)) {
+            throw new UserInvalidException("上传或更换身份公钥需要验证当前密码");
         }
 
         UserKey key = existing == null ? new UserKey() : existing;

@@ -8,7 +8,8 @@ public interface KeyService {
     /**
      * 上传/更新本设备的身份公钥。
      */
-    KeyBundle upload(String username, String deviceId, String publicKey, String algorithm);
+    KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
+        String password);
 
     /**
      * 取指定设备（缺省为 default）的公钥。

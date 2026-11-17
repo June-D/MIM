@@ -15,4 +15,9 @@ public class KeyUploadRequest {
     private String publicKey;
 
     private String algorithm;
+
+    /**
+     * 当前登录口令的 Base64。新增或更换身份公钥时必须提供。
+     */
+    private String password;
 }

@@ -164,6 +164,7 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
         Map<String, String> body = new HashMap<>();
         body.put("publicKey", publicKey);
         body.put("algorithm", "EC-P256");
+        body.put("password", base64Password());
         mockMvc.perform(post("/key")
                 .header("Authorization", "Bearer " + token)
                 .header("X-Device-Id", deviceId)
