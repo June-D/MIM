@@ -313,8 +313,13 @@ export MIM_DB_USERNAME=root
 export MIM_DB_PASSWORD=
 export MIM_REDIS_HOST=127.0.0.1
 export MIM_REDIS_PORT=6379
+export MIM_REDIS_PASSWORD=
 mvn spring-boot:run
 ```
+
+> Redis 必须设置密码并只监听本机或内网（生产环境建议启用 TLS/ACL）。
+> Pub/Sub 推送频道本身不带签名，Redis 被攻破等同于能伪造推送信封；
+> 不要把 6379 暴露到公网。
 
 ### 启动客户端
 
@@ -558,6 +563,8 @@ mvn test
     连接并移出注册表；同时启用 `@EnableScheduling`，密钥刷新任务才会正常执行。
 69. SMTP 启用 SSL 时强制校验服务器证书主机名，非 SSL 端口要求 STARTTLS；
     撤回消息的 DOM 选择器只接受合法消息 ID 字符，避免推送内容注入。
+70. 邮箱找回密码的验证码改为 Redis **原子比较并删除**：并发请求只有一个能
+    消费成功，避免同一个验证码同时重置两次密码。
 
 ## 仍需处理
 

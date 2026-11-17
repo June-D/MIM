@@ -11,11 +11,14 @@ import com.junesoon.mim.utils.EmailSender;
 import com.junesoon.mim.utils.ValidationUtil;
 import com.junesoon.mim.websocket.SessionRegistry;
 import java.security.SecureRandom;
+import java.util.Collections;
 import java.util.Date;
 import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.data.redis.core.script.RedisScript;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +41,15 @@ public class RecoveryServiceImpl implements RecoveryService {
     private static final String CODE_PREFIX = "mim:recover:code:";
     private static final String ATTEMPT_PREFIX = "mim:recover:attempts:";
     private static final String SEND_PREFIX = "mim:recover:send:";
+
+    /**
+     * 校验通过后原子地“比较并删除”：并发请求只有一个能把验证码消费掉，
+     * 避免同一个验证码同时重置两次密码。
+     */
+    private static final RedisScript<Long> CONSUME_CODE = new DefaultRedisScript<>(
+        "if redis.call('get', KEYS[1]) == ARGV[1] then "
+            + "redis.call('del', KEYS[1]); return 1 else return 0 end",
+        Long.class);
 
     private final UserMapper userMapper;
     private final DeviceMapper deviceMapper;
@@ -143,6 +155,16 @@ public class RecoveryServiceImpl implements RecoveryService {
         }
         if (!encoder.matches(code.trim(), storedHash)) {
             throw new UserInvalidException("验证码错误");
+        }
+        Long consumed;
+        try {
+            consumed = redisTemplate.execute(CONSUME_CODE,
+                Collections.singletonList(CODE_PREFIX + username), storedHash);
+        } catch (Exception e) {
+            throw new UserInvalidException("服务暂不可用，请稍后再试");
+        }
+        if (consumed == null || consumed == 0L) {
+            throw new UserInvalidException("验证码错误或已过期");
         }
 
         User user = userMapper.selectOne(username);
