@@ -135,38 +135,53 @@ public class PreKeyServiceImpl implements PreKeyService {
 
         List<PreKeyBundle> bundles = new ArrayList<>(devices.size());
         for (Device device : devices) {
-            // 只有发布了签名预密钥的设备才能被发起会话
-            SignedPreKey signed = preKeyMapper.selectSignedPreKey(username, device.getDeviceId());
-            UserKey identity = userKeyMapper.selectByDevice(username, device.getDeviceId());
-            if (signed == null || identity == null) {
+            PreKeyBundle bundle = buildBundle(username, device.getDeviceId());
+            if (bundle == null) {
                 log.debug("用户 {} 设备 {} 尚未发布预密钥，跳过", username, device.getDeviceId());
                 continue;
             }
-
-            // 领取一次性预密钥：SELECT ... FOR UPDATE + DELETE 在同一事务内，
-            // 保证并发请求不会拿到同一个 OPK。
-            OneTimePreKey oneTime = preKeyMapper.selectOneTimePreKeyForUpdate(username,
-                device.getDeviceId());
-            Integer oneTimeId = null;
-            String oneTimePublic = null;
-            if (oneTime != null) {
-                preKeyMapper.deleteOneTimePreKey(oneTime.getId(), username);
-                oneTimeId = oneTime.getPreKeyId();
-                oneTimePublic = oneTime.getPublicKey();
-            } else {
-                log.debug("用户 {} 设备 {} 一次性预密钥已耗尽，本次会话将省略 DH4",
-                    username, device.getDeviceId());
-            }
-
-            bundles.add(new PreKeyBundle(username, device.getDeviceId(),
-                identity.getPublicKey(), identity.getVersion(), signed.getPreKeyId(),
-                signed.getPublicKey(), signed.getSignature(), oneTimeId, oneTimePublic));
+            bundles.add(bundle);
         }
 
         if (bundles.isEmpty()) {
             throw new UserInvalidException("对方尚未发布预密钥，无法发起加密会话");
         }
         return bundles;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public PreKeyBundle fetchBundle(String username, String deviceId) {
+        ValidationUtil.validateUsername(username);
+        String device = requireDevice(username, deviceId);
+        PreKeyBundle bundle = buildBundle(username, device);
+        if (bundle == null) {
+            throw new UserInvalidException("该设备尚未发布预密钥");
+        }
+        return bundle;
+    }
+
+    /**
+     * 组装一台设备的预密钥包，并消耗它的一个一次性预密钥。没有签名预密钥时返回 null。
+     */
+    private PreKeyBundle buildBundle(String username, String deviceId) {
+        SignedPreKey signed = preKeyMapper.selectSignedPreKey(username, deviceId);
+        UserKey identity = userKeyMapper.selectByDevice(username, deviceId);
+        if (signed == null || identity == null) {
+            return null;
+        }
+        OneTimePreKey oneTime = preKeyMapper.selectOneTimePreKeyForUpdate(username, deviceId);
+        Integer oneTimeId = null;
+        String oneTimePublic = null;
+        if (oneTime != null) {
+            preKeyMapper.deleteOneTimePreKey(oneTime.getId(), username);
+            oneTimeId = oneTime.getPreKeyId();
+            oneTimePublic = oneTime.getPublicKey();
+        } else {
+            log.debug("用户 {} 设备 {} 一次性预密钥已耗尽，本次会话将省略 DH4", username, deviceId);
+        }
+        return new PreKeyBundle(username, deviceId, identity.getPublicKey(), identity.getVersion(),
+            signed.getPreKeyId(), signed.getPublicKey(), signed.getSignature(), oneTimeId, oneTimePublic);
     }
 
     @Override

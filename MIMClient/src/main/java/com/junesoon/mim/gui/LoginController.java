@@ -15,6 +15,7 @@ import com.junesoon.mim.feign.LoginFeign;
 import com.junesoon.mim.feign.RegisterFeign;
 import com.junesoon.mim.model.JwtAuthenticationRequest;
 import com.junesoon.mim.model.UserInfo;
+import com.junesoon.mim.service.HistorySync;
 import com.junesoon.mim.service.KeyManager;
 import com.junesoon.mim.service.MessageService;
 import com.junesoon.mim.service.PreKeyManager;
@@ -563,8 +564,11 @@ public class LoginController {
         ).addConsumerInPlatformThread(rel -> {
             ApplicatonStore.getChatContacts().addAll(rel);
         }).addRunnableInExecutor(() -> {
-            // 凭证就绪后再建立长连接，握手拦截器需要 Authorization 头
+            // 凭证就绪后再建立长连接，握手拦截器需要 Authorization 头。
+            // 先挂上历史同步监听，避免其他设备的补发在监听注册前到达。
+            HistorySync.arm();
             WSClient.getInstance().connectWithToken();
+            HistorySync.requestInBackground();
         }).addConsumerInPlatformThread(rel -> {
             try {
                 actionHandler.navigate(MainController.class);

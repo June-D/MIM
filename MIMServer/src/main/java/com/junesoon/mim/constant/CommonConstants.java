@@ -62,6 +62,11 @@ public class CommonConstants {
     public static final Integer NOTIFY_TYPE_PING = 100020;
     /** 心跳响应 */
     public static final Integer NOTIFY_TYPE_PONG = 100021;
+    /**
+     * 请其他设备把本机还没有的历史，用设备间会话重新加密后交过来。
+     * 载荷 {@code {deviceId}} 是需要历史的那台设备。
+     */
+    public static final Integer NOTIFY_TYPE_HISTORY_SYNC = 100022;
 
     /**
      * 跨实例消息路由的 Redis 频道。所有实例都订阅，收到后只投递给本机在线会话。

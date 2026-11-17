@@ -33,6 +33,11 @@ public interface PreKeyService {
     List<PreKeyBundle> fetchBundles(String username);
 
     /**
+     * 只取一台设备的预密钥包，避免为了同步历史把该用户其他设备的一次性预密钥也消耗掉。
+     */
+    PreKeyBundle fetchBundle(String username, String deviceId);
+
+    /**
      * 本设备剩余可用的一次性预密钥数量。
      */
     int countOneTimePreKeys(String username, String deviceId);

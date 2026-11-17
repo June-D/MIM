@@ -123,4 +123,10 @@ public class CipherMessage implements Serializable {
     private Boolean recalled;
 
     private Long recalledAt;
+
+    /**
+     * 哪台设备把原文重新加密给 {@link #targetDeviceId}。
+     * 为空表示这是原始副本；非空时接收方要用与该设备的会话解密，而不是用发信人的会话。
+     */
+    private String syncFromDevice;
 }

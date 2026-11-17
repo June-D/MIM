@@ -46,4 +46,14 @@ public interface MessageFeign extends FeignAPI {
 
     @RequestLine("POST /message/clear")
     ObjectRestResponse<ClearResult> clear(ClearRequest request);
+
+    /**
+     * 把已有消息重新加密给自己的另一台设备。
+     */
+    @RequestLine("POST /message/sync")
+    ObjectRestResponse<List<CipherMessage>> sync(List<CipherMessage> replicas);
+
+    @RequestLine("POST /message/sync/request")
+    @feign.Body("%7B%7D")
+    ObjectRestResponse<Boolean> requestSync();
 }

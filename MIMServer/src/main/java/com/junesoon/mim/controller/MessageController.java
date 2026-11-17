@@ -55,11 +55,12 @@ public class MessageController {
      */
     @GetMapping("/history/{peer}")
     public ObjectRestResponse<List<CipherMessage>> history(@CurrentUser String username,
+        @CurrentDevice String deviceId,
         @PathVariable String peer,
         @RequestParam(value = "beforeId", required = false) Long beforeId,
         @RequestParam(value = "limit", defaultValue = "50") int limit) {
         return new ObjectRestResponse<List<CipherMessage>>()
-            .data(messageService.history(username, peer, beforeId, limit))
+            .data(messageService.history(username, peer, beforeId, limit, deviceId))
             .rel(true);
     }
 
@@ -128,5 +129,28 @@ public class MessageController {
         return new ObjectRestResponse<ClearResult>()
             .data(messageService.clearConversation(username, request.getPeer(), request.isForBoth()))
             .rel(true);
+    }
+
+    /**
+     * 把已有消息重新加密给自己的另一台设备。服务端只保存新密文，不接触原文。
+     */
+    @PostMapping("/sync")
+    @RateLimit(limit = 60, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<List<CipherMessage>> sync(@CurrentUser String username,
+        @CurrentDevice String deviceId, @RequestBody List<CipherMessage> replicas) {
+        return new ObjectRestResponse<List<CipherMessage>>()
+            .data(messageService.syncReplicas(username, deviceId, replicas))
+            .rel(true);
+    }
+
+    /**
+     * 请本账号的其他设备把历史转发过来。
+     */
+    @PostMapping("/sync/request")
+    @RateLimit(limit = 10, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<Boolean> requestSync(@CurrentUser String username,
+        @CurrentDevice String deviceId) {
+        messageService.requestHistorySync(username, deviceId);
+        return new ObjectRestResponse<Boolean>().data(Boolean.TRUE).rel(true);
     }
 }

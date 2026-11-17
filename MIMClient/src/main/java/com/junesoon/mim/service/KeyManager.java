@@ -11,6 +11,7 @@ import com.junesoon.mim.feign.DeviceFeign;
 import com.junesoon.mim.feign.KeyFeign;
 import com.junesoon.mim.feign.KeyUploadRequest;
 import com.junesoon.mim.model.KeyBundle;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -144,6 +145,35 @@ public class KeyManager {
         } catch (IllegalArgumentException e) {
             return false;
         }
+    }
+
+    /**
+     * 同步来的密文必须由本账号已登记设备的身份公钥签名，避免把别人伪造的历史当成好友消息。
+     */
+    public void assertDeviceIdentity(String deviceId, String publicKey) throws IdentityException {
+        if (publicKey == null || publicKey.isEmpty()) {
+            throw new IdentityException("同步消息缺少来源设备的身份公钥");
+        }
+        if (identity == null) {
+            throw new IdentityException("本地加密身份尚未初始化");
+        }
+        try {
+            ObjectRestResponse<List<KeyBundle>> response = Request.connector(KeyFeign.class)
+                .getDevice(identity.getUsername(), deviceId);
+            if (response == null || response.getStatus() != 200 || response.getData() == null) {
+                throw new IdentityException("无法核对本账号设备的身份公钥");
+            }
+            for (KeyBundle bundle : response.getData()) {
+                if (bundle != null && publicKey.equals(bundle.getPublicKey())) {
+                    return;
+                }
+            }
+        } catch (IdentityException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IdentityException("无法核对本账号设备的身份公钥：" + e.getMessage());
+        }
+        throw new IdentityException("同步来源不是本账号的设备");
     }
 
     public void reset() {

@@ -24,6 +24,19 @@ public interface MessageMapper {
         @Param("clientMsgId") String clientMsgId);
 
     /**
+     * 当前用户参与过的原始副本（不含设备间转发的副本）。
+     */
+    CipherMessage selectParticipantCopy(@Param("username") String username,
+        @Param("clientMsgId") String clientMsgId);
+
+    /**
+     * 会话历史，优先取这台设备解得开的副本。
+     */
+    List<CipherMessage> selectHistoryForDevice(@Param("viewer") String viewer,
+        @Param("peer") String peer, @Param("deviceId") String deviceId,
+        @Param("beforeId") Long beforeId, @Param("limit") int limit);
+
+    /**
      * 会话历史，按 client_msg_id 去重（多设备副本不会重复出现）。
      */
     List<CipherMessage> selectHistory(@Param("a") String a, @Param("b") String b,

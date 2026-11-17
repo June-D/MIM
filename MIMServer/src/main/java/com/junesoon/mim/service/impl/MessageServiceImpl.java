@@ -309,10 +309,13 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
-    public List<CipherMessage> history(String username, String peer, Long beforeId, int limit) {
+    public List<CipherMessage> history(String username, String peer, Long beforeId, int limit,
+        String deviceId) {
         ValidationUtil.validateUsername(peer);
         int safeLimit = Math.max(1, Math.min(limit, MAX_HISTORY_LIMIT));
-        List<CipherMessage> messages = messageMapper.selectHistory(username, peer, beforeId, safeLimit);
+        List<CipherMessage> messages = StringUtils.hasText(deviceId)
+            ? messageMapper.selectHistoryForDevice(username, peer, deviceId.trim(), beforeId, safeLimit)
+            : messageMapper.selectHistory(username, peer, beforeId, safeLimit);
         long cursor = clearCursor(username, peer);
         if (cursor > 0 && messages != null) {
             messages.removeIf(message -> message.getId() != null && message.getId() <= cursor);
@@ -479,6 +482,131 @@ public class MessageServiceImpl implements MessageService {
         sample.setIv(null);
         log.info("用户 {} 撤回消息 {}", username, clientMsgId);
         return sample;
+    }
+
+    private static final int MAX_SYNC_BATCH = 50;
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public List<CipherMessage> syncReplicas(String username, String fromDeviceId,
+        List<CipherMessage> replicas) {
+        if (replicas == null || replicas.isEmpty()) {
+            throw new UserInvalidException("没有可同步的消息");
+        }
+        if (replicas.size() > MAX_SYNC_BATCH) {
+            throw new UserInvalidException("单次同步的消息过多");
+        }
+        String fromDevice = requireOwnDevice(username, fromDeviceId);
+        List<CipherMessage> saved = new ArrayList<>();
+        for (CipherMessage replica : replicas) {
+            saved.add(syncOne(username, fromDevice, replica));
+        }
+        return saved;
+    }
+
+    @Override
+    public void requestHistorySync(String username, String deviceId) {
+        String device = requireOwnDevice(username, deviceId);
+        Map<String, Object> payload = new LinkedHashMap<>(1);
+        payload.put("deviceId", device);
+        try {
+            pushService.pushToUserExcept(username, device,
+                BaseNotify.of(CommonConstants.NOTIFY_TYPE_HISTORY_SYNC, payload));
+        } catch (Exception e) {
+            log.warn("历史同步请求推送失败：{}", e.getMessage());
+        }
+    }
+
+    /**
+     * 按库里的原消息复制一行，密文换成请求里这份。请求体里的发信人会被忽略。
+     */
+    private CipherMessage syncOne(String username, String fromDevice, CipherMessage replica) {
+        if (replica == null || !StringUtils.hasText(replica.getClientMsgId())
+            || !CLIENT_MSG_ID.matcher(replica.getClientMsgId()).matches()) {
+            throw new UserInvalidException("消息 ID 不合法");
+        }
+        String target = requireOwnDevice(username, replica.getTargetDeviceId());
+        if (target.equals(fromDevice)) {
+            throw new UserInvalidException("不能把历史同步给当前设备");
+        }
+        CipherMessage original = messageMapper.selectParticipantCopy(username, replica.getClientMsgId());
+        if (original == null) {
+            throw new UserInvalidException("没有可同步的原消息");
+        }
+        CipherMessage existing = messageMapper.selectByClientMsgId(original.getFromUsername(),
+            original.getClientMsgId(), target);
+        if (existing != null) {
+            return existing;
+        }
+        String other = username.equals(original.getFromUsername())
+            ? original.getToUsername() : original.getFromUsername();
+        if (original.getId() != null && original.getId() <= clearCursor(username, other)) {
+            CipherMessage skipped = new CipherMessage();
+            skipped.setClientMsgId(original.getClientMsgId());
+            return skipped;
+        }
+
+        CipherMessage record = new CipherMessage();
+        record.setClientMsgId(original.getClientMsgId());
+        record.setFromUsername(original.getFromUsername());
+        record.setFromDeviceId(original.getFromDeviceId());
+        record.setToUsername(original.getToUsername());
+        record.setTargetDeviceId(target);
+        record.setSyncFromDevice(fromDevice);
+        record.setClientTime(original.getClientTime());
+        record.setReadFlag(Boolean.TRUE.equals(original.getReadFlag()));
+        record.setDelivered(false);
+        record.setServerTime(System.currentTimeMillis());
+        if (Boolean.TRUE.equals(original.getRecalled())) {
+            record.setAlg(original.getAlg() == null ? ALGORITHM_RATCHET : original.getAlg());
+            record.setRecalled(true);
+        } else {
+            if (!ALGORITHM_RATCHET.equals(replica.getAlg())) {
+                throw new UserInvalidException("同步消息的加密算法不支持");
+            }
+            validateRatchetHeader(replica);
+            validateCipherFields(replica);
+            record.setAlg(replica.getAlg());
+            record.setIv(replica.getIv());
+            record.setCiphertext(replica.getCiphertext());
+            record.setRatchetPublic(replica.getRatchetPublic());
+            record.setPreviousChainLength(replica.getPreviousChainLength());
+            record.setMessageNumber(replica.getMessageNumber());
+            record.setSenderIdentityKey(replica.getSenderIdentityKey());
+            record.setSenderEphemeralKey(replica.getSenderEphemeralKey());
+            record.setSenderUsedOneTimePreKey(replica.getSenderUsedOneTimePreKey());
+            record.setConsumedOneTimePreKeyId(replica.getConsumedOneTimePreKeyId());
+            record.setRecalled(false);
+        }
+        try {
+            messageMapper.insert(record);
+        } catch (DuplicateKeyException e) {
+            CipherMessage duplicate = messageMapper.selectByClientMsgId(original.getFromUsername(),
+                original.getClientMsgId(), target);
+            if (duplicate != null) {
+                return duplicate;
+            }
+            throw e;
+        }
+        try {
+            pushService.pushToDevice(username, target,
+                BaseNotify.of(CommonConstants.NOTIFY_TYPE_NEW_MESSAGE, record));
+        } catch (Exception e) {
+            log.warn("历史同步推送失败：{}", e.getMessage());
+        }
+        return record;
+    }
+
+    private String requireOwnDevice(String username, String deviceId) {
+        if (!StringUtils.hasText(deviceId) || !deviceId.trim().matches("^[A-Za-z0-9._-]{1,64}$")) {
+            throw new UserInvalidException("设备标识不合法");
+        }
+        String device = deviceId.trim();
+        Device registered = deviceMapper.selectOne(username, device);
+        if (registered == null || Boolean.TRUE.equals(registered.getRevoked())) {
+            throw new UserInvalidException("设备未注册或已注销");
+        }
+        return device;
     }
 
     /**

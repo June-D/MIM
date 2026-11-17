@@ -197,6 +197,40 @@ public class PreKeyManager {
         return bundles;
     }
 
+    /**
+     * 领取本账号某一台设备的预密钥包。只验签名，不把这把公钥记到账号名的信任库里。
+     */
+    public PreKeyBundle fetchOwnDevice(String deviceId) throws IdentityException {
+        if (selfUsername == null) {
+            throw new IdentityException("预密钥尚未初始化");
+        }
+        List<PreKeyBundle> bundles;
+        try {
+            ObjectRestResponse<List<PreKeyBundle>> response =
+                Request.connector(PreKeyFeign.class).fetchDevice(selfUsername, deviceId);
+            if (response == null || response.getStatus() != 200) {
+                String error = response == null ? "服务端无响应" : response.getMessage();
+                throw new IdentityException(error == null ? "获取本机设备预密钥失败" : error);
+            }
+            bundles = response.getData();
+        } catch (IdentityException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IdentityException("获取本机设备预密钥失败：" + e.getMessage());
+        }
+        if (bundles == null || bundles.isEmpty()) {
+            throw new IdentityException("本账号的设备 " + deviceId + " 还没有预密钥");
+        }
+        PreKeyBundle bundle = bundles.get(0);
+        boolean valid = DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
+            bundle.getSignedPreKeyId(), bundle.getSignedPreKeyPublic(),
+            bundle.getSignedPreKeySignature());
+        if (!valid) {
+            throw new IdentityException("本账号设备 " + deviceId + " 的预密钥签名验证失败");
+        }
+        return bundle;
+    }
+
     public PreKeyStore getPreKeyStore() {
         return preKeyStore;
     }

@@ -104,7 +104,8 @@ class ClearPersistenceTest {
                 + "delivered tinyint not null default 0,"
                 + "read_flag tinyint not null default 0,"
                 + "recalled tinyint not null default 0,"
-                + "recalled_at bigint null"
+                + "recalled_at bigint null,"
+                + "sync_from_device varchar(64) null"
                 + ")");
             statement.execute("create table if not exists t_conversation_clear ("
                 + "username varchar(64) not null,"

@@ -99,4 +99,9 @@ public class CipherMessage {
     private Boolean recalled;
 
     private Long recalledAt;
+
+    /**
+     * 哪台自己的设备把原文重新加密过来的。非空时用与该设备的会话解密。
+     */
+    private String syncFromDevice;
 }

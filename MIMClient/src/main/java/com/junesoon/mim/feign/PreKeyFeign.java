@@ -28,4 +28,11 @@ public interface PreKeyFeign extends FeignAPI {
      */
     @RequestLine("GET /prekey/{username}")
     ObjectRestResponse<List<PreKeyBundle>> fetch(@Param("username") String username);
+
+    /**
+     * 只领取一台设备的包，避免把同账号其他设备的一次性预密钥也消耗掉。
+     */
+    @RequestLine("GET /prekey/{username}?deviceId={deviceId}")
+    ObjectRestResponse<List<PreKeyBundle>> fetchDevice(@Param("username") String username,
+        @Param("deviceId") String deviceId);
 }

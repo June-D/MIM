@@ -14,7 +14,26 @@ public interface MessageService {
      */
     List<CipherMessage> send(String authenticatedUser, String fromDeviceId, List<CipherMessage> messages);
 
-    List<CipherMessage> history(String username, String peer, Long beforeId, int limit);
+    /**
+     * 会话历史。{@code deviceId} 不为空时，优先返回这台设备解得开的那一份副本。
+     */
+    List<CipherMessage> history(String username, String peer, Long beforeId, int limit,
+        String deviceId);
+
+    default List<CipherMessage> history(String username, String peer, Long beforeId, int limit) {
+        return history(username, peer, beforeId, limit, null);
+    }
+
+    /**
+     * 把已有消息的原文，换成当前设备为另一台自己的设备加密的副本。
+     * 发信人、收信人、消息 ID 以库里的原消息为准，请求体改不了。
+     */
+    List<CipherMessage> syncReplicas(String username, String fromDeviceId, List<CipherMessage> replicas);
+
+    /**
+     * 通知本账号的其他设备：这台设备需要它们转发历史。
+     */
+    void requestHistorySync(String username, String deviceId);
 
     /**
      * 本设备尚未投递的消息。

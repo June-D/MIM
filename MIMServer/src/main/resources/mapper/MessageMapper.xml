@@ -27,6 +27,7 @@
         <result column="read_flag" jdbcType="TINYINT" property="readFlag"/>
         <result column="recalled" jdbcType="TINYINT" property="recalled"/>
         <result column="recalled_at" jdbcType="BIGINT" property="recalledAt"/>
+        <result column="sync_from_device" jdbcType="VARCHAR" property="syncFromDevice"/>
     </resultMap>
 
     <sql id="Base_Column_List">
@@ -35,7 +36,7 @@
         ratchet_public, previous_chain_length, message_number,
         sender_identity_key, sender_ephemeral_key, sender_used_opk, consumed_opk_id,
         sender_key_version, recipient_key_version, client_time, server_time,
-        delivered, read_flag, recalled, recalled_at
+        delivered, read_flag, recalled, recalled_at, sync_from_device
     </sql>
 
     <insert id="insert" parameterType="com.junesoon.mim.entity.CipherMessage"
@@ -46,7 +47,7 @@
                                sender_identity_key, sender_ephemeral_key, sender_used_opk,
                                consumed_opk_id,
                                sender_key_version, recipient_key_version, client_time, server_time,
-                               delivered, read_flag, recalled)
+                               delivered, read_flag, recalled, sync_from_device)
         values (#{clientMsgId,jdbcType=VARCHAR}, #{fromUsername,jdbcType=VARCHAR},
                 #{fromDeviceId,jdbcType=VARCHAR}, #{toUsername,jdbcType=VARCHAR},
                 #{targetDeviceId,jdbcType=VARCHAR},
@@ -58,7 +59,7 @@
                 #{senderKeyVersion,jdbcType=INTEGER}, #{recipientKeyVersion,jdbcType=INTEGER},
                 #{clientTime,jdbcType=BIGINT}, #{serverTime,jdbcType=BIGINT},
                 #{delivered,jdbcType=TINYINT}, #{readFlag,jdbcType=TINYINT},
-                #{recalled,jdbcType=TINYINT})
+                #{recalled,jdbcType=TINYINT}, #{syncFromDevice,jdbcType=VARCHAR})
     </insert>
 
     <!--
@@ -95,6 +96,18 @@
         limit 1
     </select>
 
+    <!-- 当前用户参与过的原始副本。设备间转发的副本不能再当原文来源。 -->
+    <select id="selectParticipantCopy" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+          and sync_from_device is null
+          and (from_user = #{username,jdbcType=VARCHAR} or to_user = #{username,jdbcType=VARCHAR})
+        order by id asc
+        limit 1
+    </select>
+
     <!--
       历史消息：按 client_msg_id 去重，避免同一个逻辑消息因多设备副本重复出现。
       先按会话 + client_msg_id 聚出代表行（最小 id），再套 beforeId 分页，
@@ -118,19 +131,56 @@
     </select>
 
     <!--
-      本设备的未投递消息。多设备下每个设备只取发给自己那一份。
+      同一逻辑消息可能有多份密文。当前设备优先拿发给自己的那份
+      （含其他设备转发来的副本），其次拿自己发出的那份，最后才退回最早的一份。
+    -->
+    <select id="selectHistoryForDevice" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where id in (
+            select chosen from (
+                select coalesce(
+                    min(case
+                        when target_device_id = #{deviceId,jdbcType=VARCHAR}
+                         and (to_user = #{viewer,jdbcType=VARCHAR} or sync_from_device is not null)
+                        then id end),
+                    min(case
+                        when from_user = #{viewer,jdbcType=VARCHAR}
+                         and from_device_id = #{deviceId,jdbcType=VARCHAR}
+                        then id end),
+                    min(id)
+                ) as chosen
+                from t_message
+                where ((from_user = #{viewer,jdbcType=VARCHAR} and to_user = #{peer,jdbcType=VARCHAR})
+                    or (from_user = #{peer,jdbcType=VARCHAR} and to_user = #{viewer,jdbcType=VARCHAR}))
+                group by client_msg_id
+            ) picked
+        )
+        <if test="beforeId != null">
+            and id &lt; #{beforeId,jdbcType=BIGINT}
+        </if>
+        order by id desc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <!--
+      本设备的未投递消息。发给本设备的原始副本，以及别的设备转发给本设备的副本，都算。
     -->
     <select id="selectUndelivered" resultMap="BaseResultMap">
         select
         <include refid="Base_Column_List"/>
         from t_message
-        where to_user = #{toUsername,jdbcType=VARCHAR}
-          and target_device_id = #{deviceId,jdbcType=VARCHAR}
+        where target_device_id = #{deviceId,jdbcType=VARCHAR}
           and delivered = 0
+          and (
+              to_user = #{toUsername,jdbcType=VARCHAR}
+              or (from_user = #{toUsername,jdbcType=VARCHAR} and sync_from_device is not null)
+          )
           and id &gt; ifnull((
               select cleared_before_id from t_conversation_clear
               where username = #{toUsername,jdbcType=VARCHAR}
-                and peer = from_user
+                and peer = if(from_user = #{toUsername,jdbcType=VARCHAR}, to_user, from_user)
           ), 0)
         order by id asc
         limit #{limit,jdbcType=INTEGER}
@@ -145,10 +195,13 @@
     <update id="markDeliveredUpTo">
         update t_message
         set delivered = 1
-        where to_user = #{toUsername,jdbcType=VARCHAR}
-          and target_device_id = #{deviceId,jdbcType=VARCHAR}
+        where target_device_id = #{deviceId,jdbcType=VARCHAR}
           and delivered = 0
           and id &lt;= #{beforeId,jdbcType=BIGINT}
+          and (
+              to_user = #{toUsername,jdbcType=VARCHAR}
+              or (from_user = #{toUsername,jdbcType=VARCHAR} and sync_from_device is not null)
+          )
     </update>
 
     <!--

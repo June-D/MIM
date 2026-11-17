@@ -14,8 +14,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -80,9 +82,17 @@ public class PreKeyController {
     @GetMapping("/{username}")
     @RateLimit(limit = 60, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
     public ObjectRestResponse<List<PreKeyService.PreKeyBundle>> fetch(
-        @CurrentUser String self, @PathVariable String username) {
+        @CurrentUser String self, @PathVariable String username,
+        @RequestParam(value = "deviceId", required = false) String deviceId) {
+        List<PreKeyService.PreKeyBundle> bundles;
+        if (StringUtils.hasText(deviceId)) {
+            bundles = java.util.Collections.singletonList(
+                preKeyService.fetchBundle(username, deviceId));
+        } else {
+            bundles = preKeyService.fetchBundles(username);
+        }
         return new ObjectRestResponse<List<PreKeyService.PreKeyBundle>>()
-            .data(preKeyService.fetchBundles(username))
+            .data(bundles)
             .rel(true);
     }
 }

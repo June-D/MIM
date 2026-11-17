@@ -4,6 +4,7 @@ import com.junesoon.mim.components.ObjectRestResponse;
 import feign.Body;
 import feign.Param;
 import feign.RequestLine;
+import java.util.Map;
 
 /**
  * 设备管理接口。
@@ -16,7 +17,7 @@ public interface DeviceFeign extends FeignAPI {
         @Param("deviceName") String deviceName);
 
     @RequestLine("GET /device")
-    ObjectRestResponse<Object> list();
+    ObjectRestResponse<Map<String, Object>> list();
 
     @RequestLine("DELETE /device/{deviceId}")
     ObjectRestResponse<Boolean> revoke(@Param("deviceId") String deviceId);

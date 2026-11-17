@@ -1,0 +1,375 @@
+package com.junesoon.mim.service;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import com.junesoon.mim.entity.CipherMessage;
+import com.junesoon.mim.entity.Device;
+import com.junesoon.mim.exception.UserInvalidException;
+import com.junesoon.mim.mapper.ConversationClearMapper;
+import com.junesoon.mim.mapper.DeviceMapper;
+import com.junesoon.mim.mapper.MessageMapper;
+import com.junesoon.mim.mapper.UserKeyMapper;
+import com.junesoon.mim.mapper.UserMapper;
+import com.junesoon.mim.service.PushService;
+import com.junesoon.mim.service.impl.MessageServiceImpl;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.Collections;
+import java.util.List;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
+
+/**
+ * 设备间历史转发：服务端只能复制原消息的收发双方，不能改信谁发的。
+ */
+class MessageSyncTest {
+
+    private MemoryMessages messages;
+    private MessageServiceImpl service;
+
+    @BeforeEach
+    void setUp() {
+        messages = new MemoryMessages();
+        service = new MessageServiceImpl(messages, new ConversationClearMapper() {
+            @Override
+            public Long selectCursor(String username, String peer) {
+                return null;
+            }
+
+            @Override
+            public int insert(String username, String peer, long clearedBeforeId, long updatedAt) {
+                return 0;
+            }
+
+            @Override
+            public int advance(String username, String peer, long clearedBeforeId, long updatedAt) {
+                return 0;
+            }
+        }, unusedUsers(), unusedKeys(), new DeviceMapper() {
+            @Override
+            public int upsert(Device device) {
+                return 0;
+            }
+
+            @Override
+            public Device selectOne(String username, String deviceId) {
+                if (!"alice".equals(username)) {
+                    return null;
+                }
+                if (!"dev-a".equals(deviceId) && !"dev-b".equals(deviceId)) {
+                    return null;
+                }
+                Device device = new Device();
+                device.setUsername(username);
+                device.setDeviceId(deviceId);
+                device.setRevoked(false);
+                return device;
+            }
+
+            @Override
+            public List<Device> selectActiveDevices(String username) {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public int touch(String username, String deviceId, long lastSeen) {
+                return 0;
+            }
+
+            @Override
+            public int revoke(String username, String deviceId) {
+                return 0;
+            }
+
+            @Override
+            public int countActiveDevices(String username) {
+                return 0;
+            }
+        }, new PushService(null, null, null) {
+            @Override
+            public void pushToDevice(String target, String deviceId, Object notify) {
+            }
+
+            @Override
+            public void pushToUserExcept(String target, String excludedDeviceId, Object notify) {
+            }
+        });
+        ReflectionTestUtils.setField(service, "maxCiphertextBytes", 262144);
+        messages.rows.add(original());
+    }
+
+    @Test
+    @DisplayName("转发副本沿用原消息的收发双方，并记下来源设备")
+    void copyKeepsOriginalParties() {
+        List<CipherMessage> saved = service.syncReplicas("alice", "dev-a",
+            Collections.singletonList(wrap("carol")));
+        assertEquals(1, saved.size());
+        CipherMessage copy = saved.get(0);
+        assertEquals("bob", copy.getFromUsername());
+        assertEquals("alice", copy.getToUsername());
+        assertEquals("msg-sync-01", copy.getClientMsgId());
+        assertEquals("dev-b", copy.getTargetDeviceId());
+        assertEquals("dev-a", copy.getSyncFromDevice());
+        assertEquals(Long.valueOf(1_700_000_000_000L), copy.getClientTime());
+        assertEquals(wrap("carol").getCiphertext(), copy.getCiphertext());
+    }
+
+    @Test
+    @DisplayName("同一目标设备再转发一次时不新增副本")
+    void secondSyncReturnsExisting() {
+        service.syncReplicas("alice", "dev-a", Collections.singletonList(wrap("carol")));
+        service.syncReplicas("alice", "dev-a", Collections.singletonList(wrap("carol")));
+        int copies = 0;
+        for (CipherMessage row : messages.rows) {
+            if ("dev-b".equals(row.getTargetDeviceId())) {
+                copies++;
+            }
+        }
+        assertEquals(1, copies);
+    }
+
+    @Test
+    @DisplayName("不是这条消息的参与者不能转发")
+    void outsiderIsRejected() {
+        UserInvalidException error = assertThrows(UserInvalidException.class,
+            () -> service.syncReplicas("alice", "dev-a",
+                Collections.singletonList(wrap("carol", "missing-msg"))));
+        assertTrue(error.getMessage().contains("没有可同步"));
+    }
+
+    @Test
+    @DisplayName("不能转发给当前这台设备")
+    void cannotTargetCurrentDevice() {
+        CipherMessage replica = wrap("carol");
+        replica.setTargetDeviceId("dev-a");
+        assertThrows(UserInvalidException.class,
+            () -> service.syncReplicas("alice", "dev-a", Collections.singletonList(replica)));
+    }
+
+    @Test
+    @DisplayName("已撤回的原消息只同步占位，不要求新密文")
+    void recalledOriginalBecomesTombstone() {
+        messages.rows.get(0).setRecalled(true);
+        CipherMessage replica = new CipherMessage();
+        replica.setClientMsgId("msg-sync-01");
+        replica.setTargetDeviceId("dev-b");
+        CipherMessage saved = service.syncReplicas("alice", "dev-a",
+            Collections.singletonList(replica)).get(0);
+        assertEquals(Boolean.TRUE, saved.getRecalled());
+        assertNull(saved.getCiphertext());
+        assertEquals("bob", saved.getFromUsername());
+    }
+
+    private static CipherMessage original() {
+        CipherMessage message = new CipherMessage();
+        message.setId(5L);
+        message.setClientMsgId("msg-sync-01");
+        message.setFromUsername("bob");
+        message.setFromDeviceId("bob-1");
+        message.setToUsername("alice");
+        message.setTargetDeviceId("dev-a");
+        message.setAlg(MessageServiceImpl.ALGORITHM_RATCHET);
+        message.setClientTime(1_700_000_000_000L);
+        message.setRecalled(false);
+        message.setCiphertext(Base64.getEncoder().encodeToString("old".getBytes()));
+        return message;
+    }
+
+    private static CipherMessage wrap(String forgedFrom) {
+        return wrap(forgedFrom, "msg-sync-01");
+    }
+
+    private static CipherMessage wrap(String forgedFrom, String clientMsgId) {
+        CipherMessage message = new CipherMessage();
+        message.setClientMsgId(clientMsgId);
+        message.setFromUsername(forgedFrom);
+        message.setToUsername(forgedFrom);
+        message.setTargetDeviceId("dev-b");
+        message.setAlg(MessageServiceImpl.ALGORITHM_RATCHET);
+        message.setIv(Base64.getEncoder().encodeToString(new byte[12]));
+        message.setCiphertext(Base64.getEncoder().encodeToString(new byte[17]));
+        message.setRatchetPublic("ratchet-pub");
+        message.setPreviousChainLength(0);
+        message.setMessageNumber(0);
+        return message;
+    }
+
+    private static UserMapper unusedUsers() {
+        return new UserMapper() {
+            @Override
+            public int deleteByPrimaryKey(Integer id) {
+                return 0;
+            }
+
+            @Override
+            public int insert(com.junesoon.mim.entity.User record) {
+                return 0;
+            }
+
+            @Override
+            public int insertSelective(com.junesoon.mim.entity.User record) {
+                return 0;
+            }
+
+            @Override
+            public com.junesoon.mim.entity.User selectByPrimaryKey(Integer id) {
+                return null;
+            }
+
+            @Override
+            public com.junesoon.mim.entity.User selectOne(String username) {
+                return null;
+            }
+
+            @Override
+            public int updateLastLoginTime(String username, java.util.Date lastLoginTime) {
+                return 0;
+            }
+
+            @Override
+            public int updateByPrimaryKeySelective(com.junesoon.mim.entity.User record) {
+                return 0;
+            }
+
+            @Override
+            public int updateByPrimaryKey(com.junesoon.mim.entity.User record) {
+                return 0;
+            }
+        };
+    }
+
+    private static UserKeyMapper unusedKeys() {
+        return new UserKeyMapper() {
+            @Override
+            public com.junesoon.mim.entity.UserKey selectByUsername(String username) {
+                return null;
+            }
+
+            @Override
+            public com.junesoon.mim.entity.UserKey selectByDevice(String username, String deviceId) {
+                return null;
+            }
+
+            @Override
+            public List<com.junesoon.mim.entity.UserKey> selectAllByUsername(String username) {
+                return Collections.emptyList();
+            }
+
+            @Override
+            public int upsert(com.junesoon.mim.entity.UserKey key) {
+                return 0;
+            }
+        };
+    }
+
+    private static final class MemoryMessages implements MessageMapper {
+        final List<CipherMessage> rows = new ArrayList<>();
+        long seq = 10;
+
+        @Override
+        public int insert(CipherMessage message) {
+            if (message.getId() == null) {
+                message.setId(++seq);
+            }
+            rows.add(message);
+            return 1;
+        }
+
+        @Override
+        public CipherMessage selectByClientMsgId(String fromUsername, String clientMsgId,
+            String targetDeviceId) {
+            for (CipherMessage row : rows) {
+                if (fromUsername.equals(row.getFromUsername())
+                    && clientMsgId.equals(row.getClientMsgId())
+                    && targetDeviceId.equals(row.getTargetDeviceId())) {
+                    return row;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public CipherMessage selectById(Long id) {
+            return null;
+        }
+
+        @Override
+        public CipherMessage selectAnyByClientMsgId(String fromUsername, String clientMsgId) {
+            return null;
+        }
+
+        @Override
+        public CipherMessage selectParticipantCopy(String username, String clientMsgId) {
+            for (CipherMessage row : rows) {
+                if (!clientMsgId.equals(row.getClientMsgId()) || row.getSyncFromDevice() != null) {
+                    continue;
+                }
+                if (username.equals(row.getFromUsername()) || username.equals(row.getToUsername())) {
+                    return row;
+                }
+            }
+            return null;
+        }
+
+        @Override
+        public List<CipherMessage> selectHistory(String a, String b, Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
+            String deviceId, Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectUndelivered(String toUsername, String deviceId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public int markDelivered(Long id) {
+            return 0;
+        }
+
+        @Override
+        public int markDeliveredUpTo(String toUsername, String deviceId, long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public int markRead(String fromUsername, String toUsername, Long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public long countUnread(String fromUsername, String toUsername) {
+            return 0;
+        }
+
+        @Override
+        public long countUnreadAfter(String fromUsername, String toUsername, long afterId) {
+            return 0;
+        }
+
+        @Override
+        public Long maxConversationId(String a, String b) {
+            return null;
+        }
+
+        @Override
+        public int wipeConversation(String a, String b, long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public int recall(String clientMsgId, String fromUsername, long recalledAt) {
+            return 0;
+        }
+    }
+}

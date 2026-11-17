@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     `read_flag`             tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否已读',
     `recalled`              tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否已撤回',
     `recalled_at`           bigint       NULL DEFAULT NULL COMMENT '撤回时间（毫秒）',
+    `sync_from_device`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '哪台设备把原文重新加密给目标设备；空表示原始副本',
     PRIMARY KEY (`id`) USING BTREE,
     -- 同一条逻辑消息对同一目标设备只会有一份
     UNIQUE INDEX `uk_client_target` (`from_user`, `from_device_id`, `client_msg_id`, `target_device_id`) USING BTREE,

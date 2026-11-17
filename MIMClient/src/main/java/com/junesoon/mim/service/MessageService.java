@@ -72,6 +72,13 @@ public class MessageService {
     }
 
     /**
+     * 设备间同步会话的对端名。不能用账号名，否则会和「跟自己聊天」抢同一个会话槽。
+     */
+    private static String syncSlot(String deviceId) {
+        return "sync-" + deviceId;
+    }
+
+    /**
      * 解密后的消息视图。
      */
     public static final class DecryptedMessage {
@@ -373,6 +380,79 @@ public class MessageService {
         return new DecryptedMessage(first, plaintext, false);
     }
 
+    /**
+     * 把一条已有原文重新加密给自己的另一台设备。不经过普通发送接口，避免被记成一条新消息。
+     */
+    public CipherMessage wrapForOwnDevice(String targetDeviceId, String plaintext,
+        String clientMsgId, long clientTime) throws IdentityException {
+        if (targetDeviceId == null || targetDeviceId.isEmpty()) {
+            throw new IdentityException("目标设备不能为空");
+        }
+        if (plaintext == null) {
+            throw new IdentityException("没有可转发的原文");
+        }
+        String slotPeer = syncSlot(targetDeviceId);
+        synchronized (cryptoLock) {
+            PeerCipher cipher = slot(slotPeer, targetDeviceId);
+            SessionState state = cipher.sendingState();
+            if (state == null) {
+                PreKeyBundle bundle = preKeyManager.fetchOwnDevice(targetDeviceId);
+                state = createSyncSession(bundle, slotPeer);
+                cipher.setOutbound(state);
+            }
+            RatchetService.Encrypted encrypted = ratchet.encrypt(state, plaintext);
+            persistSlot(slotPeer, targetDeviceId, cipher);
+
+            CipherMessage replica = new CipherMessage();
+            replica.setClientMsgId(clientMsgId);
+            replica.setTargetDeviceId(targetDeviceId);
+            replica.setAlg(RatchetService.ALGORITHM);
+            replica.setIv(encrypted.getIv());
+            replica.setCiphertext(encrypted.getCiphertext());
+            replica.setRatchetPublic(encrypted.getHeader().getDhPublic());
+            replica.setPreviousChainLength(encrypted.getHeader().getPreviousChainLength());
+            replica.setMessageNumber(encrypted.getHeader().getMessageNumber());
+            replica.setClientTime(clientTime);
+            if (state.hasPendingHandshake()) {
+                replica.setSenderIdentityKey(state.getHandshakeSenderIdentityKey());
+                replica.setSenderEphemeralKey(state.getHandshakeSenderEphemeralKey());
+                replica.setSenderUsedOneTimePreKey(state.isHandshakeUsedOneTimePreKey());
+                replica.setConsumedOneTimePreKeyId(state.getHandshakeOneTimePreKeyId());
+            }
+            return replica;
+        }
+    }
+
+    /**
+     * 和自己另一台设备建会话。信任记在 sync-设备号上，不占用账号名的 TOFU 记录。
+     */
+    private SessionState createSyncSession(PreKeyBundle bundle, String slotPeer)
+        throws IdentityException {
+        IdentityStore.Identity identity = requireIdentity();
+        String password = currentPassword();
+        TrustStore.VerificationResult trust = keyManager.getTrustStore()
+            .verify(slotPeer, bundle.getIdentityPublicKey(), password);
+        if (!trust.isSendable()) {
+            throw new IdentityException(trust.describe());
+        }
+        if (!com.junesoon.mim.crypto.DhKeyUtil.verifySignedPreKey(bundle.getIdentityPublicKey(),
+            bundle.getSignedPreKeyId(), bundle.getSignedPreKeyPublic(),
+            bundle.getSignedPreKeySignature())) {
+            throw new IdentityException("设备预密钥签名验证失败，已中止同步");
+        }
+        RatchetService.InitiatorResult result = ratchet.initiatorSession(slotPeer,
+            identity.getPrivateKey(), identity.getPublicKeyBase64(), bundle.getIdentityPublicKey(),
+            bundle.getSignedPreKeyPublic(), bundle.getOneTimePreKeyPublic());
+        SessionState state = result.getState();
+        state.setDeviceId(bundle.getDeviceId());
+        state.setInitiator(true);
+        state.setHandshakeSenderIdentityKey(result.getSenderIdentityKey());
+        state.setHandshakeSenderEphemeralKey(result.getSenderEphemeralKey());
+        state.setHandshakeUsedOneTimePreKey(result.isUsedOneTimePreKey());
+        state.setHandshakeOneTimePreKeyId(bundle.getOneTimePreKeyId());
+        return state;
+    }
+
     // ==================== 接收 ====================
 
     /**
@@ -394,17 +474,26 @@ public class MessageService {
             return new DecryptedMessage(message, cached, false);
         }
         String self = identity.getUsername();
+        final boolean deviceSync = message.getSyncFromDevice() != null
+            && !message.getSyncFromDevice().isEmpty();
         boolean isSelf = self.equals(message.getFromUsername());
-        if (isSelf) {
+        if (isSelf && !deviceSync) {
             // 自己发出的密文是用对方的接收链加密的，本机棘轮解不开。
-            // 原文只存在于发送当时写入的本地记录里。
+            // 原文只存在于发送当时写入的本地记录里。另一台设备转来的副本不走这里。
             return new DecryptedMessage(message, "（本机未保留原文）", true);
         }
 
-        String peer = message.getFromUsername();
-        String deviceOnMessage = message.getFromDeviceId();
-        final String peerDevice = (deviceOnMessage == null || deviceOnMessage.isEmpty())
-            ? SessionStore.DEFAULT_DEVICE_ID : deviceOnMessage;
+        final String peer;
+        final String peerDevice;
+        if (deviceSync) {
+            peer = syncSlot(message.getSyncFromDevice());
+            peerDevice = message.getSyncFromDevice();
+        } else {
+            peer = message.getFromUsername();
+            String deviceOnMessage = message.getFromDeviceId();
+            peerDevice = (deviceOnMessage == null || deviceOnMessage.isEmpty())
+                ? SessionStore.DEFAULT_DEVICE_ID : deviceOnMessage;
+        }
         boolean hasHandshake = message.getSenderIdentityKey() != null
             && !message.getSenderIdentityKey().isEmpty()
             && message.getSenderEphemeralKey() != null
@@ -426,6 +515,10 @@ public class MessageService {
                     message.getPreviousChainLength(), message.getMessageNumber());
                 String plaintext = slot.open(hasHandshake, message.getSenderEphemeralKey(), header,
                     message.getIv(), message.getCiphertext(), () -> {
+                        if (deviceSync) {
+                            keyManager.assertDeviceIdentity(message.getSyncFromDevice(),
+                                message.getSenderIdentityKey());
+                        }
                         Integer opkId = prepareResponder(peer, message);
                         if (opkId != null) {
                             usedOpk[0] = opkId;

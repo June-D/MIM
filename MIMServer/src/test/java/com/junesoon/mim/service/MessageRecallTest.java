@@ -70,6 +70,17 @@ class MessageRecallTest {
         }
 
         @Override
+        public CipherMessage selectParticipantCopy(String username, String clientMsgId) {
+            return null;
+        }
+
+        @Override
+        public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
+            String deviceId, Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
         public List<CipherMessage> selectUndelivered(String toUsername, String deviceId, int limit) {
             return Collections.emptyList();
         }
