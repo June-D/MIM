@@ -127,6 +127,11 @@
         where to_user = #{toUsername,jdbcType=VARCHAR}
           and target_device_id = #{deviceId,jdbcType=VARCHAR}
           and delivered = 0
+          and id &gt; ifnull((
+              select cleared_before_id from t_conversation_clear
+              where username = #{toUsername,jdbcType=VARCHAR}
+                and peer = from_user
+          ), 0)
         order by id asc
         limit #{limit,jdbcType=INTEGER}
     </select>
@@ -149,6 +154,8 @@
     <!--
       已读标记作用于整条逻辑消息的所有设备副本：
       用户在一个设备上读了，另一个设备不应再显示未读。
+      beforeId 是读者看到的那一份副本 id，同一 client_msg_id 的其它副本 id 可能更大，
+      所以按逻辑消息标记，而不是只更新 id 不超过 beforeId 的那几行。
     -->
     <update id="markRead">
         update t_message
@@ -158,7 +165,15 @@
           and read_flag = 0
           and recalled = 0
         <if test="beforeId != null">
-          and id &lt;= #{beforeId,jdbcType=BIGINT}
+          and client_msg_id in (
+            select client_msg_id from (
+              select distinct client_msg_id
+              from t_message
+              where from_user = #{fromUsername,jdbcType=VARCHAR}
+                and to_user = #{toUsername,jdbcType=VARCHAR}
+                and id &lt;= #{beforeId,jdbcType=BIGINT}
+            ) read_ids
+          )
         </if>
     </update>
 
@@ -170,6 +185,32 @@
           and read_flag = 0
           and recalled = 0
     </select>
+
+    <select id="countUnreadAfter" resultType="java.lang.Long">
+        select count(distinct client_msg_id)
+        from t_message
+        where from_user = #{fromUsername,jdbcType=VARCHAR}
+          and to_user = #{toUsername,jdbcType=VARCHAR}
+          and read_flag = 0
+          and recalled = 0
+          and id &gt; #{afterId,jdbcType=BIGINT}
+    </select>
+
+    <select id="maxConversationId" resultType="java.lang.Long">
+        select max(id)
+        from t_message
+        where (from_user = #{a,jdbcType=VARCHAR} and to_user = #{b,jdbcType=VARCHAR})
+           or (from_user = #{b,jdbcType=VARCHAR} and to_user = #{a,jdbcType=VARCHAR})
+    </select>
+
+    <update id="wipeConversation">
+        update t_message
+        set ciphertext = null,
+            iv = null
+        where id &lt;= #{beforeId,jdbcType=BIGINT}
+          and ((from_user = #{a,jdbcType=VARCHAR} and to_user = #{b,jdbcType=VARCHAR})
+            or (from_user = #{b,jdbcType=VARCHAR} and to_user = #{a,jdbcType=VARCHAR}))
+    </update>
 
     <!--
       撤回：清空所有设备副本的密文。

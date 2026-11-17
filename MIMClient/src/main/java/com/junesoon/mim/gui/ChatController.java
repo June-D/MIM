@@ -17,6 +17,7 @@ import io.datafx.controller.flow.context.FXMLViewFlowContext;
 import io.datafx.controller.flow.context.ViewFlowContext;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.function.Consumer;
 import javafx.application.Platform;
@@ -27,6 +28,8 @@ import javafx.scene.control.Label;
 import javafx.scene.control.TextArea;
 import javafx.scene.control.Tooltip;
 import javafx.scene.input.KeyCode;
+import javafx.scene.input.MouseButton;
+import javafx.scene.input.MouseEvent;
 import javafx.scene.layout.StackPane;
 import javafx.scene.layout.VBox;
 import javafx.scene.text.Font;
@@ -50,6 +53,9 @@ public class ChatController {
 
     private static final int HISTORY_LIMIT = 50;
 
+    /** 与服务端 message.recall-window-seconds 一致。超过这个时间不再显示撤回。 */
+    private static final long RECALL_WINDOW_MS = 120_000L;
+
     /** 输入框 1 行起步，最多长到 8 行，再多就内部滚动。 */
     private static final int MIN_INPUT_LINES = 1;
     private static final int MAX_INPUT_LINES = 8;
@@ -65,6 +71,8 @@ public class ChatController {
     @FXML
     public Button safetyNumberButton;
     @FXML
+    public Button clearMessagesButton;
+    @FXML
     public Label peerAvatar;
     @FXML
     public Label peerName;
@@ -74,6 +82,8 @@ public class ChatController {
     public VBox composerBox;
 
     private JSObject js;
+    private String promptedRecallId;
+    private long promptedRecallAt;
     private ChatUser chatUser;
     private WebEngine engine;
 
@@ -107,6 +117,11 @@ public class ChatController {
         initializeEvent();
         loadHistory();
         subscribePush();
+        chatRootPane.sceneProperty().addListener((obs, oldScene, newScene) -> {
+            if (newScene != null) {
+                markReadUpToLast(loadedHistory);
+            }
+        });
     }
 
     /**
@@ -148,6 +163,8 @@ public class ChatController {
             : display.substring(0, 1).toUpperCase());
         peerAvatar.setStyle("-fx-background-color: " + colorOf(chatUser.getUsername()) + ";");
         safetyNumberButton.setOnAction(event -> showSafetyNumber());
+        clearMessagesButton.setOnAction(event -> confirmClear());
+        Tooltip.install(clearMessagesButton, new Tooltip("清除这段对话，可以选择是否连对方一起清除"));
     }
 
     private String colorOf(String name) {
@@ -198,13 +215,12 @@ public class ChatController {
         chatWebView.setContextMenuEnabled(false);
         engine = chatWebView.getEngine();
         engine.setJavaScriptEnabled(true);
+        chatWebView.addEventFilter(MouseEvent.MOUSE_CLICKED, this::recallFromClick);
         engine.getLoadWorker().stateProperty().addListener((obj, oldState, newState) -> {
             if (newState == Worker.State.SUCCEEDED) {
                 js = (JSObject) engine.executeScript("chat");
-                engine.executeScript("window.javaBridge = {};");
-                JSObject bridge = (JSObject) engine.executeScript("window.javaBridge");
-                bridge.setMember("onRecallRequest", new RecallBridge());
-                bridge.setMember("onSafetyNumberRequest", new SafetyBridge());
+                JSObject window = (JSObject) engine.executeScript("window");
+                window.setMember("javaBridge", new JsBridge());
                 renderHistoryIntoEmptyPage();
             }
         });
@@ -396,6 +412,10 @@ public class ChatController {
                 handleIncomingMessage(notify);
             } else if (type == WSClient.NOTIFY_MESSAGE_RECALLED) {
                 handleRecall(notify);
+            } else if (type == WSClient.NOTIFY_CONVERSATION_CLEARED) {
+                handleCleared(notify);
+            } else if (type == WSClient.NOTIFY_READ_RECEIPT) {
+                handleRead(notify);
             }
         };
         WSClient.getInstance().addListener(pushListener);
@@ -421,6 +441,12 @@ public class ChatController {
             loadedHistory.add(decrypted);
             updateTranscriptEmpty();
             appendRendered(decrypted);
+            if (!decrypted.isMine() && chatRootPane.getScene() != null) {
+                Long id = decrypted.getRaw().getId();
+                if (id != null) {
+                    markReadUpToLast(loadedHistory);
+                }
+            }
         });
     }
 
@@ -434,10 +460,104 @@ public class ChatController {
             return;
         }
         String clientMsgId = idValue.toString();
-        Platform.runLater(() -> {
-            if (js != null) {
-                js.call("markRecalled", clientMsgId);
+        Platform.runLater(() -> markLocalRecalled(clientMsgId));
+    }
+
+    private void handleRead(com.junesoon.mim.model.BaseNotify<?> notify) {
+        if (!(notify.getData() instanceof Map) || chatUser == null) {
+            return;
+        }
+        Map<?, ?> data = (Map<?, ?>) notify.getData();
+        Object peer = data.get("peer");
+        if (peer == null || !chatUser.getUsername().equals(String.valueOf(peer))) {
+            return;
+        }
+        Object before = data.get("beforeId");
+        if (!(before instanceof Number)) {
+            return;
+        }
+        long beforeId = ((Number) before).longValue();
+        Platform.runLater(() -> applyReadThrough(beforeId));
+    }
+
+    private void applyReadThrough(long beforeId) {
+        for (MessageService.DecryptedMessage message : loadedHistory) {
+            if (!message.isMine() || message.isRecalled() || message.getRaw() == null) {
+                continue;
             }
+            Long id = message.getRaw().getId();
+            if (id != null && id <= beforeId) {
+                message.getRaw().setReadFlag(true);
+            }
+        }
+        if (js != null) {
+            js.call("markReadThrough", beforeId);
+        }
+    }
+
+    private void handleCleared(com.junesoon.mim.model.BaseNotify<?> notify) {
+        if (!(notify.getData() instanceof Map) || chatUser == null) {
+            return;
+        }
+        Object peer = ((Map<?, ?>) notify.getData()).get("peer");
+        if (peer == null || !chatUser.getUsername().equals(String.valueOf(peer))) {
+            return;
+        }
+        Platform.runLater(this::wipeTranscript);
+    }
+
+    private void markLocalRecalled(String clientMsgId) {
+        for (MessageService.DecryptedMessage message : loadedHistory) {
+            if (clientMsgId.equals(message.getClientMsgId()) && message.getRaw() != null) {
+                message.getRaw().setRecalled(true);
+            }
+        }
+        if (js != null) {
+            js.call("markRecalled", clientMsgId);
+        }
+    }
+
+    private void wipeTranscript() {
+        loadedHistory.clear();
+        if (js != null) {
+            js.call("clear");
+        }
+        updateTranscriptEmpty();
+    }
+
+    private void confirmClear() {
+        if (chatUser == null || chatUser.getUsername() == null) {
+            return;
+        }
+        javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
+            javafx.scene.control.Alert.AlertType.CONFIRMATION);
+        alert.setTitle("清除消息");
+        alert.setHeaderText(null);
+        alert.setContentText("只清除我这边时，对方仍能看到这些消息。\n"
+            + "清除双方后，你和对方的这段对话都会被清空，且无法恢复。");
+        javafx.scene.control.ButtonType mineOnly = new javafx.scene.control.ButtonType("只清除我这边");
+        javafx.scene.control.ButtonType both = new javafx.scene.control.ButtonType("清除双方消息");
+        javafx.scene.control.ButtonType cancel = new javafx.scene.control.ButtonType(
+            "取消", javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE);
+        alert.getButtonTypes().setAll(mineOnly, both, cancel);
+        alert.showAndWait().ifPresent(button -> {
+            if (button == cancel) {
+                return;
+            }
+            boolean forBoth = button == both;
+            String peer = chatUser.getUsername();
+            new Thread(() -> {
+                try {
+                    messageService.clearConversation(peer, forBoth);
+                    Platform.runLater(() -> {
+                        if (chatUser != null && peer.equals(chatUser.getUsername())) {
+                            wipeTranscript();
+                        }
+                    });
+                } catch (IdentityException e) {
+                    Platform.runLater(() -> AlertUtil.show("清除失败", e.getMessage()));
+                }
+            }, "chat-clear").start();
         });
     }
 
@@ -497,11 +617,7 @@ public class ChatController {
         new Thread(() -> {
             try {
                 messageService.recall(clientMsgId);
-                Platform.runLater(() -> {
-                    if (js != null) {
-                        js.call("markRecalled", clientMsgId);
-                    }
-                });
+                Platform.runLater(() -> markLocalRecalled(clientMsgId));
             } catch (IdentityException e) {
                 Platform.runLater(() -> AlertUtil.show("撤回失败", e.getMessage()));
             }
@@ -568,52 +684,100 @@ public class ChatController {
         boolean mine = message.isMine();
         String labelName = mine ? "我" : chatUser.displayName();
         long timestamp = message.getTimestamp() > 0 ? message.getTimestamp() : new Date().getTime();
+        boolean canRecall = mine && !message.isRecalled() && message.getTimestamp() > 0
+            && System.currentTimeMillis() - message.getTimestamp() <= RECALL_WINDOW_MS;
+        Long serverId = message.getRaw() == null ? null : message.getRaw().getId();
         String html = HtmlUtil.of(message.getClientMsgId(), labelName, timestamp,
-            message.displayText(), !mine, message.isRecalled());
+            message.displayText(), !mine, message.isRecalled(), canRecall, message.isRead(),
+            serverId);
         js.call("append", html);
     }
 
     // ==================== JS 桥接 ====================
 
     /**
-     * 页面右键点击消息时回调。方法必须 public，Nashorn 才能反射调用。
+     * 网页里的点击到不了按钮时，用 JavaFX 的鼠标坐标在页面上反查「撤回」。
      */
-    public class RecallBridge {
-        public void onRecallRequest(String clientMsgId) {
-            if (clientMsgId == null || clientMsgId.isEmpty()) {
-                return;
-            }
-            boolean mine = false;
-            for (MessageService.DecryptedMessage message : loadedHistory) {
-                if (clientMsgId.equals(message.getClientMsgId())) {
-                    mine = message.isMine();
-                    break;
-                }
-            }
-            if (!mine) {
-                return;
-            }
-            Platform.runLater(() -> confirmRecall(clientMsgId));
+    private void recallFromClick(MouseEvent event) {
+        if (engine == null || event.getButton() != MouseButton.PRIMARY) {
+            return;
         }
+        double x = event.getX();
+        double y = event.getY();
+        Platform.runLater(() -> {
+            Object found;
+            try {
+                found = engine.executeScript(String.format(Locale.US,
+                    "chat.recallTargetAt(%f,%f)", x, y));
+            } catch (Exception ex) {
+                log.debug("定位撤回按钮失败：{}", ex.getMessage());
+                return;
+            }
+            if (found == null) {
+                return;
+            }
+            String clientMsgId = String.valueOf(found);
+            if (clientMsgId.isEmpty() || "null".equals(clientMsgId)
+                || "undefined".equals(clientMsgId)) {
+                return;
+            }
+            promptRecall(clientMsgId);
+        });
     }
 
     /**
-     * 页面点击"安全码"时回调。
+     * 暴露给页面的对象。必须挂在 window.javaBridge 上，页面才能调用
+     * javaBridge.onRecallRequest。嵌在空对象里时，这个调用到不了 Java。
      */
-    public class SafetyBridge {
+    public class JsBridge {
+        public void onRecallRequest(String clientMsgId) {
+            Platform.runLater(() -> promptRecall(clientMsgId));
+        }
+
         public void onSafetyNumberRequest(String ignored) {
             Platform.runLater(ChatController.this::showSafetyNumber);
         }
     }
 
+    private void promptRecall(String clientMsgId) {
+        if (clientMsgId == null || clientMsgId.isEmpty()) {
+            return;
+        }
+        long now = System.currentTimeMillis();
+        if (clientMsgId.equals(promptedRecallId) && now - promptedRecallAt < 800) {
+            return;
+        }
+        boolean mine = false;
+        for (MessageService.DecryptedMessage message : loadedHistory) {
+            if (clientMsgId.equals(message.getClientMsgId())) {
+                mine = message.isMine();
+                break;
+            }
+        }
+        if (!mine) {
+            return;
+        }
+        promptedRecallId = clientMsgId;
+        promptedRecallAt = now;
+        confirmRecall(clientMsgId);
+    }
+
     private void confirmRecall(String clientMsgId) {
         javafx.scene.control.Alert alert = new javafx.scene.control.Alert(
             javafx.scene.control.Alert.AlertType.CONFIRMATION);
+        if (chatWebView.getScene() != null) {
+            alert.initOwner(chatWebView.getScene().getWindow());
+        }
         alert.setTitle("撤回消息");
         alert.setHeaderText(null);
         alert.setContentText("确定撤回这条消息吗？撤回后双方都无法再看到原文。");
+        javafx.scene.control.ButtonType recall = new javafx.scene.control.ButtonType(
+            "撤回", javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
+        javafx.scene.control.ButtonType cancel = new javafx.scene.control.ButtonType(
+            "取消", javafx.scene.control.ButtonBar.ButtonData.CANCEL_CLOSE);
+        alert.getButtonTypes().setAll(recall, cancel);
         alert.showAndWait().ifPresent(button -> {
-            if (button == javafx.scene.control.ButtonType.OK) {
+            if (button == recall) {
                 onRecallClick(clientMsgId);
             }
         });

@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import com.junesoon.mim.entity.CipherMessage;
 import com.junesoon.mim.entity.UserKey;
 import com.junesoon.mim.exception.UserInvalidException;
+import com.junesoon.mim.mapper.ConversationClearMapper;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
@@ -97,6 +98,21 @@ class MessageRecallTest {
         public int recall(String clientMsgId, String fromUsername, long recalledAt) {
             recallCalled = true;
             return recallAffected;
+        }
+
+        @Override
+        public long countUnreadAfter(String fromUsername, String toUsername, long afterId) {
+            return 0;
+        }
+
+        @Override
+        public Long maxConversationId(String a, String b) {
+            return null;
+        }
+
+        @Override
+        public int wipeConversation(String a, String b, long beforeId) {
+            return 0;
         }
     }
 
@@ -212,8 +228,23 @@ class MessageRecallTest {
     @BeforeEach
     void setUp() throws Exception {
         messageMapper = new StubMessageMapper();
-        service = new MessageServiceImpl(messageMapper, new StubUserMapper(),
-            new StubUserKeyMapper(), new StubDeviceMapper(), new StubPushService());
+        service = new MessageServiceImpl(messageMapper, new ConversationClearMapper() {
+            @Override
+            public Long selectCursor(String username, String peer) {
+                return null;
+            }
+
+            @Override
+            public int insert(String username, String peer, long clearedBeforeId, long updatedAt) {
+                return 1;
+            }
+
+            @Override
+            public int advance(String username, String peer, long clearedBeforeId, long updatedAt) {
+                return 1;
+            }
+        }, new StubUserMapper(), new StubUserKeyMapper(), new StubDeviceMapper(),
+            new StubPushService());
         setField(service, "maxCiphertextBytes", 262144);
         setField(service, "recallWindowSeconds", 120L);
     }

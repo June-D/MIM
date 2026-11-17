@@ -2,6 +2,8 @@ package com.junesoon.mim.feign;
 
 import com.junesoon.mim.components.ObjectRestResponse;
 import com.junesoon.mim.model.CipherMessage;
+import com.junesoon.mim.model.ClearRequest;
+import com.junesoon.mim.model.ClearResult;
 import com.junesoon.mim.model.ReadRequest;
 import feign.Param;
 import feign.RequestLine;
@@ -41,4 +43,7 @@ public interface MessageFeign extends FeignAPI {
      */
     @RequestLine("POST /message/recall/{clientMsgId}")
     ObjectRestResponse<CipherMessage> recall(@Param("clientMsgId") String clientMsgId);
+
+    @RequestLine("POST /message/clear")
+    ObjectRestResponse<ClearResult> clear(ClearRequest request);
 }

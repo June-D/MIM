@@ -56,6 +56,8 @@ public class CommonConstants {
     public static final Integer NOTIFY_TYPE_FRIEND_ACCEPTED = 100017;
     /** 对方拒绝了我的好友申请 */
     public static final Integer NOTIFY_TYPE_FRIEND_REJECTED = 100018;
+    /** 会话消息被清除。载荷里的 peer 是接收方要清空的那个对话对象 */
+    public static final Integer NOTIFY_TYPE_CONVERSATION_CLEARED = 100019;
     /** 心跳 */
     public static final Integer NOTIFY_TYPE_PING = 100020;
     /** 心跳响应 */

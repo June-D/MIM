@@ -1,6 +1,7 @@
 package com.junesoon.mim.service;
 
 import com.junesoon.mim.entity.CipherMessage;
+import com.junesoon.mim.responses.ClearResult;
 import java.util.List;
 
 public interface MessageService {
@@ -34,4 +35,9 @@ public interface MessageService {
      * @return 撤回后的消息快照；null 表示不存在
      */
     CipherMessage recall(String username, String clientMsgId);
+
+    /**
+     * 清除与某人的对话。{@code forBoth} 为真时对方的记录也一起清掉，并抹掉服务端密文。
+     */
+    ClearResult clearConversation(String username, String peer, boolean forBoth);
 }

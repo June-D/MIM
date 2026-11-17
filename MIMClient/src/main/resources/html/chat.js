@@ -33,6 +33,13 @@ chat.append = function (html) {
         return;
     }
     content.appendChild(node);
+    var recall = node.querySelector(".recall-btn");
+    if (recall) {
+        recall.addEventListener("click", function (event) {
+            event.preventDefault();
+            chat.requestRecall(recall);
+        });
+    }
     chat.scrollToBottom();
 };
 
@@ -43,6 +50,32 @@ chat.clear = function () {
 
 chat.scrollToBottom = function () {
     window.scrollTo(0, document.body.scrollHeight);
+};
+
+/**
+ * 对方已读到 beforeId（含）为止。只改自己发出的、还在窗口里的消息。
+ */
+chat.markReadThrough = function (beforeId) {
+    var limit = Number(beforeId);
+    if (!limit) {
+        return;
+    }
+    var nodes = document.querySelectorAll(".message-item.right");
+    for (var i = 0; i < nodes.length; i++) {
+        var node = nodes[i];
+        if (node.classList.contains("recalled")) {
+            continue;
+        }
+        var serverId = Number(node.getAttribute("data-server-id"));
+        if (!serverId || serverId > limit) {
+            continue;
+        }
+        var state = node.querySelector(".read-state");
+        if (state) {
+            state.textContent = "已读";
+            state.className = "read-state read";
+        }
+    }
 };
 
 /**
@@ -67,8 +100,60 @@ chat.markRecalled = function (clientMsgId) {
 };
 
 /**
- * 右键消息：把 clientMsgId 回传给 Java 层发起撤回。
+ * 用页面坐标找出「撤回」按钮对应的消息。JavaFX 的鼠标事件经常到不了网页按钮上，
+ * 所以由 Java 把点击坐标传进来。
  */
+chat.recallTargetAt = function (x, y) {
+    var ratio = window.devicePixelRatio || 1;
+    var points = [[x, y]];
+    if (ratio !== 1) {
+        points.push([x / ratio, y / ratio]);
+        points.push([x * ratio, y * ratio]);
+    }
+    for (var i = 0; i < points.length; i++) {
+        var found = chat._recallAtPoint(points[i][0], points[i][1]);
+        if (found) {
+            return found;
+        }
+    }
+    return "";
+};
+
+chat._recallAtPoint = function (x, y) {
+    var el = document.elementFromPoint(x, y);
+    while (el && el !== document.documentElement) {
+        if (el.classList && el.classList.contains("recall-btn")) {
+            var node = el;
+            while (node && node !== document.body) {
+                if (node.getAttribute && node.getAttribute("data-id")) {
+                    return node.getAttribute("data-id");
+                }
+                node = node.parentNode;
+            }
+            return "";
+        }
+        el = el.parentNode;
+    }
+    return "";
+};
+
+/**
+ * 点「撤回」时，点中的往往是按钮里的文字，this 才是按钮本身。
+ * 从按钮往上找到带 data-id 的消息，再交给 Java。
+ */
+chat.requestRecall = function (button) {
+    var node = button ? button.parentNode : null;
+    while (node && node !== document.body) {
+        if (node.dataset && node.dataset.id) {
+            if (window.javaBridge && window.javaBridge.onRecallRequest) {
+                window.javaBridge.onRecallRequest(node.dataset.id);
+            }
+            return;
+        }
+        node = node.parentNode;
+    }
+};
+
 document.addEventListener("contextmenu", function (event) {
     var node = event.target;
     while (node && node !== document.body) {

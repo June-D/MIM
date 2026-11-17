@@ -28,18 +28,50 @@ public class HtmlUtil {
      */
     public static String of(String messageKey, String labelName, long timestamp, String content,
         boolean incoming, boolean recalled) {
+        return of(messageKey, labelName, timestamp, content, incoming, recalled, false);
+    }
+
+    /**
+     * @param canRecall 自己刚发出、还在撤回时限内的消息，显示可点击的「撤回」
+     */
+    public static String of(String messageKey, String labelName, long timestamp, String content,
+        boolean incoming, boolean recalled, boolean canRecall) {
+        return of(messageKey, labelName, timestamp, content, incoming, recalled, canRecall,
+            false, null);
+    }
+
+    /**
+     * @param read     自己发出的消息是否已被对方读过
+     * @param serverId 服务端消息 id，已读回执按它判断「读到哪一条」
+     */
+    public static String of(String messageKey, String labelName, long timestamp, String content,
+        boolean incoming, boolean recalled, boolean canRecall, boolean read, Long serverId) {
         boolean mine = !incoming;
         // 当天只显示时分，跨天带日期，减少无信息量的重复
         String time = new SimpleDateFormat(isToday(timestamp) ? "HH:mm" : "MM/dd HH:mm")
             .format(new Date(timestamp));
 
         String idAttr = messageKey == null ? "" : " data-id='" + escapeAttr(messageKey) + "'";
+        if (serverId != null && serverId > 0) {
+            idAttr += " data-server-id='" + serverId + "'";
+        }
         StringBuilder sb = new StringBuilder(256);
         sb.append("<div class=\"message-item").append(mine ? " right" : "")
             .append(recalled ? " recalled" : "").append('"').append(idAttr).append('>');
         sb.append("<div class=\"meta\">");
         sb.append("<span class=\"label-name\">").append(escape(labelName)).append("</span>");
         sb.append("<span class=\"timestamp\">").append(time).append("</span>");
+        if (mine && !recalled) {
+            sb.append("<span class=\"read-state");
+            if (read) {
+                sb.append(" read");
+            }
+            sb.append("\">").append(read ? "已读" : "未读").append("</span>");
+        }
+        if (mine && canRecall && !recalled && messageKey != null && !messageKey.isEmpty()) {
+            sb.append("<button type=\"button\" class=\"recall-btn\" "
+                + "onclick=\"chat.requestRecall(this)\">撤回</button>");
+        }
         sb.append("</div>");
         sb.append("<div class=\"bubble\">").append(escape(content)).append("</div>");
         sb.append("</div>");

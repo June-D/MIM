@@ -147,3 +147,20 @@ CREATE TABLE IF NOT EXISTS `t_friend_request` (
   CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_general_ci
   ROW_FORMAT = Dynamic COMMENT = '好友申请，同意后才成为联系人';
+
+-- ------------------------------------------------------------
+-- 会话清除点
+--
+-- 每个用户对每个对端一条。cleared_before_id 及更早的消息对该用户不可见。
+-- 双方清除时写两条，并抹掉对应密文。
+-- ------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
+    `username`           varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '执行清除的用户',
+    `peer`               varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '对话对象',
+    `cleared_before_id`  bigint      NOT NULL COMMENT '这个 id 及更早的消息不再展示',
+    `updated_at`         bigint      NOT NULL COMMENT '最近推进时间（毫秒）',
+    PRIMARY KEY (`username`, `peer`) USING BTREE
+) ENGINE = InnoDB
+  CHARACTER SET = utf8mb4
+  COLLATE = utf8mb4_general_ci
+  ROW_FORMAT = Dynamic COMMENT = '会话清除点，只增不减';

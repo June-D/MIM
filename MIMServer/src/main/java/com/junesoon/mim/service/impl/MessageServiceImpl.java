@@ -6,10 +6,12 @@ import com.junesoon.mim.entity.CipherMessage;
 import com.junesoon.mim.entity.Device;
 import com.junesoon.mim.entity.UserKey;
 import com.junesoon.mim.exception.UserInvalidException;
+import com.junesoon.mim.mapper.ConversationClearMapper;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
+import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.service.MessageService;
 import com.junesoon.mim.service.PushService;
 import com.junesoon.mim.utils.ValidationUtil;
@@ -60,6 +62,7 @@ public class MessageServiceImpl implements MessageService {
     private static final int MAX_FANOUT = 20;
 
     private final MessageMapper messageMapper;
+    private final ConversationClearMapper conversationClearMapper;
     private final UserMapper userMapper;
     private final UserKeyMapper userKeyMapper;
     private final DeviceMapper deviceMapper;
@@ -71,9 +74,11 @@ public class MessageServiceImpl implements MessageService {
     @Value("${message.recall-window-seconds:120}")
     private long recallWindowSeconds;
 
-    public MessageServiceImpl(MessageMapper messageMapper, UserMapper userMapper,
+    public MessageServiceImpl(MessageMapper messageMapper,
+        ConversationClearMapper conversationClearMapper, UserMapper userMapper,
         UserKeyMapper userKeyMapper, DeviceMapper deviceMapper, PushService pushService) {
         this.messageMapper = messageMapper;
+        this.conversationClearMapper = conversationClearMapper;
         this.userMapper = userMapper;
         this.userKeyMapper = userKeyMapper;
         this.deviceMapper = deviceMapper;
@@ -308,6 +313,10 @@ public class MessageServiceImpl implements MessageService {
         ValidationUtil.validateUsername(peer);
         int safeLimit = Math.max(1, Math.min(limit, MAX_HISTORY_LIMIT));
         List<CipherMessage> messages = messageMapper.selectHistory(username, peer, beforeId, safeLimit);
+        long cursor = clearCursor(username, peer);
+        if (cursor > 0 && messages != null) {
+            messages.removeIf(message -> message.getId() != null && message.getId() <= cursor);
+        }
         Collections.reverse(messages);
         return messages;
     }
@@ -355,7 +364,70 @@ public class MessageServiceImpl implements MessageService {
     @Override
     public long countUnread(String username, String peer) {
         ValidationUtil.validateUsername(peer);
+        long cursor = clearCursor(username, peer);
+        if (cursor > 0) {
+            return messageMapper.countUnreadAfter(peer, username, cursor);
+        }
         return messageMapper.countUnread(peer, username);
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public ClearResult clearConversation(String username, String peer, boolean forBoth) {
+        ValidationUtil.validateUsername(peer);
+        if (username.equals(peer)) {
+            throw new UserInvalidException("不能清除与自己的会话");
+        }
+        Long maxId = messageMapper.maxConversationId(username, peer);
+        long cursor = maxId == null ? 0L : maxId;
+        long now = System.currentTimeMillis();
+        advanceCursor(username, peer, cursor, now);
+        if (forBoth) {
+            advanceCursor(peer, username, cursor, now);
+            if (cursor > 0) {
+                messageMapper.wipeConversation(username, peer, cursor);
+            }
+        }
+        notifyCleared(username, peer, cursor, forBoth);
+        if (forBoth) {
+            notifyCleared(peer, username, cursor, true);
+        }
+        log.info("用户 {} 清除与 {} 的会话 forBoth={} beforeId={}", username, peer, forBoth, cursor);
+        return new ClearResult(peer, cursor, forBoth);
+    }
+
+    private long clearCursor(String username, String peer) {
+        Long cursor = conversationClearMapper.selectCursor(username, peer);
+        return cursor == null ? 0L : cursor;
+    }
+
+    /**
+     * 清除点只增不减。两个实例同时写时，后插入的一方碰到唯一键后再推进一次。
+     */
+    private void advanceCursor(String username, String peer, long cursor, long now) {
+        Long existing = conversationClearMapper.selectCursor(username, peer);
+        if (existing == null) {
+            try {
+                conversationClearMapper.insert(username, peer, cursor, now);
+                return;
+            } catch (DuplicateKeyException e) {
+                log.info("清除点并发插入，改为推进 username={} peer={}", username, peer);
+            }
+        }
+        conversationClearMapper.advance(username, peer, cursor, now);
+    }
+
+    private void notifyCleared(String target, String peer, long cursor, boolean forBoth) {
+        try {
+            Map<String, Object> payload = new LinkedHashMap<>(4);
+            payload.put("peer", peer);
+            payload.put("clearedBeforeId", cursor);
+            payload.put("forBoth", forBoth);
+            pushService.pushToUser(target,
+                BaseNotify.of(CommonConstants.NOTIFY_TYPE_CONVERSATION_CLEARED, payload));
+        } catch (Exception e) {
+            log.warn("清除通知推送失败：{}", e.getMessage());
+        }
     }
 
     @Override

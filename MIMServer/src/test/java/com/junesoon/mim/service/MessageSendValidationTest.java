@@ -10,6 +10,7 @@ import com.junesoon.mim.entity.User;
 import com.junesoon.mim.entity.UserKey;
 import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.mapper.DeviceMapper;
+import com.junesoon.mim.mapper.ConversationClearMapper;
 import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
@@ -109,6 +110,21 @@ class MessageSendValidationTest {
 
         @Override
         public int recall(String clientMsgId, String fromUsername, long recalledAt) {
+            return 0;
+        }
+
+        @Override
+        public long countUnreadAfter(String fromUsername, String toUsername, long afterId) {
+            return 0;
+        }
+
+        @Override
+        public Long maxConversationId(String a, String b) {
+            return null;
+        }
+
+        @Override
+        public int wipeConversation(String a, String b, long beforeId) {
             return 0;
         }
     }
@@ -297,8 +313,22 @@ class MessageSendValidationTest {
         messageMapper = new RecordingMessageMapper();
         keyMapper = new InMemoryUserKeyMapper();
         deviceMapper = new InMemoryDeviceMapper();
-        service = new MessageServiceImpl(messageMapper, new InMemoryUserMapper(), keyMapper,
-            deviceMapper, new NoopPushService());
+        service = new MessageServiceImpl(messageMapper, new ConversationClearMapper() {
+            @Override
+            public Long selectCursor(String username, String peer) {
+                return null;
+            }
+
+            @Override
+            public int insert(String username, String peer, long clearedBeforeId, long updatedAt) {
+                return 1;
+            }
+
+            @Override
+            public int advance(String username, String peer, long clearedBeforeId, long updatedAt) {
+                return 1;
+            }
+        }, new InMemoryUserMapper(), keyMapper, deviceMapper, new NoopPushService());
         setField(service, "maxCiphertextBytes", 262144);
         setField(service, "recallWindowSeconds", 120L);
 

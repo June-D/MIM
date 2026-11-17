@@ -3,8 +3,11 @@ package com.junesoon.mim.controller;
 import com.junesoon.mim.auth.CurrentDevice;
 import com.junesoon.mim.auth.CurrentUser;
 import com.junesoon.mim.entity.CipherMessage;
+import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.ratelimit.RateLimit;
+import com.junesoon.mim.requests.ClearRequest;
 import com.junesoon.mim.requests.ReadRequest;
+import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.MessageService;
 import java.util.List;
@@ -109,6 +112,21 @@ public class MessageController {
         @PathVariable String clientMsgId) {
         return new ObjectRestResponse<CipherMessage>()
             .data(messageService.recall(username, clientMsgId))
+            .rel(true);
+    }
+
+    /**
+     * 清除与某人的对话。forBoth 为真时对方也看不到这些消息，服务端密文一并抹掉。
+     */
+    @PostMapping("/clear")
+    @RateLimit(limit = 10, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<ClearResult> clear(@CurrentUser String username,
+        @RequestBody ClearRequest request) {
+        if (request == null || request.getPeer() == null) {
+            throw new UserInvalidException("对方不能为空");
+        }
+        return new ObjectRestResponse<ClearResult>()
+            .data(messageService.clearConversation(username, request.getPeer(), request.isForBoth()))
             .rel(true);
     }
 }

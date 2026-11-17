@@ -12,7 +12,8 @@
 body {
     margin: 0;
     padding: 16px 20px 8px 20px;
-    font-family: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", sans-serif;
+    /* JavaFX 8 的 WebKit 读 PingFang 会把中文画成乱码，只使用冬青黑体。 */
+    font-family: "Hiragino Sans GB";
     font-size: 13.5px;
     color: #2f3338;
     background: #f5f6fa;
@@ -92,6 +93,38 @@ body {
 .message-item.right.recalled .bubble {
     background: transparent;
     color: #a6acb6;
+}
+
+.recall-btn {
+    border: 0;
+    background: transparent;
+    padding: 2px 6px;
+    font-family: "Hiragino Sans GB";
+    font-size: 11px;
+    color: #8b93a7;
+    cursor: pointer;
+}
+
+.recall-btn:hover {
+    color: #c24141;
+}
+
+.message-item.recalled .recall-btn {
+    display: none;
+}
+
+.read-state {
+    font-family: "Hiragino Sans GB";
+    font-size: 11px;
+    color: #8b93a7;
+}
+
+.read-state.read {
+    color: #3b6d9a;
+}
+
+.message-item.recalled .read-state {
+    display: none;
 }
 
 /* 时间分隔线：同一天内不重复显示日期，靠 JS 判断 */

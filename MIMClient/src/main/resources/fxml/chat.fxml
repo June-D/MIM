@@ -30,6 +30,7 @@
                     <Label fx:id="e2eeBadge" styleClass="e2ee-badge" text="端到端加密"/>
                 </VBox>
                 <Region HBox.hgrow="ALWAYS"/>
+                <Button fx:id="clearMessagesButton" styleClass="btn-quiet" text="清除消息"/>
                 <Button fx:id="safetyNumberButton" styleClass="btn-quiet" text="核对安全码"/>
             </HBox>
         </top>

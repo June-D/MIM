@@ -101,6 +101,10 @@ public class MessageService {
             return Boolean.TRUE.equals(raw.getRecalled());
         }
 
+        public boolean isRead() {
+            return Boolean.TRUE.equals(raw.getReadFlag());
+        }
+
         public boolean isMine() {
             return raw.getFromUsername() != null
                 && raw.getFromUsername().equals(ApplicatonStore.getUsername());
@@ -600,6 +604,25 @@ public class MessageService {
             throw e;
         } catch (Exception e) {
             throw new IdentityException("撤回失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 清除与某人的对话。forBoth 为真时对方的记录也一起清掉。
+     */
+    public void clearConversation(String peer, boolean forBoth) throws IdentityException {
+        try {
+            ObjectRestResponse<com.junesoon.mim.model.ClearResult> response =
+                Request.connector(MessageFeign.class).clear(
+                    new com.junesoon.mim.model.ClearRequest(peer, forBoth));
+            if (response == null || response.getStatus() != 200) {
+                String error = response == null ? "服务端无响应" : response.getMessage();
+                throw new IdentityException(error == null ? "清除失败" : error);
+            }
+        } catch (IdentityException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IdentityException("清除失败：" + e.getMessage());
         }
     }
 
