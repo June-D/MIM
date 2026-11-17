@@ -73,7 +73,7 @@ jobs:
 
       - name: 测试报告
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: server-test-reports
           path: MIMServer/target/surefire-reports/
