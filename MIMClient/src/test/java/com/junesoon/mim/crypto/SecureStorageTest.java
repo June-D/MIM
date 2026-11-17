@@ -112,7 +112,7 @@ class SecureStorageTest {
             DhKeyUtil.encodePublicKey(DhKeyUtil.generateKeyPair().getPublic()), null).getState();
         store.save("alice", "bob", "device-b", state, "pw");
 
-        Path file = dir.resolve("alice__bob__device-b.session");
+        Path file = dir.resolve("alice~bob~device-b.session");
         String content = new String(Files.readAllBytes(file), "UTF-8");
         String encodedChainKey = java.util.Base64.getEncoder().encodeToString(
             state.getSendChainKey());
@@ -183,8 +183,8 @@ class SecureStorageTest {
         store.save("alice", "bob", "desktop", state, "pw");
 
         // 把 desktop 的文件改名成 mobile，AAD 不一致应当解密失败
-        Path desktopFile = dir.resolve("alice__bob__desktop.session");
-        Path mobileFile = dir.resolve("alice__bob__mobile.session");
+        Path desktopFile = dir.resolve("alice~bob~desktop.session");
+        Path mobileFile = dir.resolve("alice~bob~mobile.session");
         Files.copy(desktopFile, mobileFile);
         assertThrows(IdentityException.class, () -> store.load("alice", "bob", "mobile", "pw"));
     }

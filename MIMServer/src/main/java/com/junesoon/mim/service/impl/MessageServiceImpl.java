@@ -238,6 +238,13 @@ public class MessageServiceImpl implements MessageService {
         if (sample.getClientTime() == null || sample.getClientTime() <= 0) {
             throw new UserInvalidException("消息时间戳不合法");
         }
+        // 客户端时间会直接展示在界面上，允许少量时钟偏差，但不允许任意倒填/穿越
+        long now = System.currentTimeMillis();
+        long maxPast = now - 365L * 24 * 60 * 60 * 1000;
+        long maxFuture = now + 5L * 60 * 1000;
+        if (sample.getClientTime() < maxPast || sample.getClientTime() > maxFuture) {
+            throw new UserInvalidException("消息时间戳超出允许范围");
+        }
         if (ALGORITHM_RATCHET.equals(sample.getAlg())) {
             validateRatchetHeader(sample);
         } else {

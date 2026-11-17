@@ -399,6 +399,21 @@ class MessageSendValidationTest {
     // ==================== 结构校验 ====================
 
     @Test
+    @DisplayName("客户端时间戳偏离过大被拒绝")
+    void wildClientTimeRejected() {
+        List<CipherMessage> future = single(BOB_DEVICE_A);
+        future.get(0).setClientTime(System.currentTimeMillis() + 24L * 60 * 60 * 1000);
+        assertThrows(UserInvalidException.class,
+            () -> service.send(ALICE, ALICE_DEVICE, future));
+
+        List<CipherMessage> past = single(BOB_DEVICE_A);
+        past.get(0).setClientTime(
+            System.currentTimeMillis() - 400L * 24 * 60 * 60 * 1000);
+        assertThrows(UserInvalidException.class,
+            () -> service.send(ALICE, ALICE_DEVICE, past));
+    }
+
+    @Test
     @DisplayName("结构合法的双棘轮消息可以发送")
     void validMessageAccepted() {
         List<CipherMessage> saved = service.send(ALICE, ALICE_DEVICE, single(BOB_DEVICE_A));

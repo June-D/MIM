@@ -38,7 +38,12 @@ public class SessionStore {
      */
     public static final String DEFAULT_DEVICE_ID = "default";
 
-    private static final String SEP = "__";
+    private static final String SEP = "~";
+    /**
+     * 旧版本的分隔符。用户名/设备名允许下划线，含 {@code __} 时旧命名会歧义；
+     * 新文件统一用 {@code ~}，加载时仍兼容旧文件。
+     */
+    private static final String LEGACY_SEP = "__";
     private static final String SUFFIX = ".session";
     private static final String INBOUND_SUFFIX = ".inbound.session";
 
@@ -79,7 +84,14 @@ public class SessionStore {
         Path file = inbound ? inboundFileOf(selfUsername, peer, deviceId)
             : fileOf(selfUsername, peer, deviceId);
         if (!Files.exists(file)) {
-            return null;
+            // 兼容旧版 __ 分隔的文件名
+            Path legacy = inbound
+                ? legacyInboundFileOf(selfUsername, peer, deviceId)
+                : legacyFileOf(selfUsername, peer, deviceId);
+            if (!Files.exists(legacy)) {
+                return null;
+            }
+            file = legacy;
         }
         try {
             String content = new String(Files.readAllBytes(file), StandardCharsets.UTF_8);
@@ -163,6 +175,7 @@ public class SessionStore {
     public void delete(String selfUsername, String peer, String deviceId) {
         try {
             Files.deleteIfExists(fileOf(selfUsername, peer, deviceId));
+            Files.deleteIfExists(legacyFileOf(selfUsername, peer, deviceId));
         } catch (IOException e) {
             log.warn("删除会话文件失败：{}", e.getMessage());
         }
@@ -171,6 +184,7 @@ public class SessionStore {
     public void deleteInbound(String selfUsername, String peer, String deviceId) {
         try {
             Files.deleteIfExists(inboundFileOf(selfUsername, peer, deviceId));
+            Files.deleteIfExists(legacyInboundFileOf(selfUsername, peer, deviceId));
         } catch (IOException e) {
             log.warn("删除应答会话文件失败：{}", e.getMessage());
         }
@@ -204,34 +218,42 @@ public class SessionStore {
      * 列出本地已有会话的标识，形如 {@code peer@device}。
      */
     public List<String> listPeers(String selfUsername) {
-        List<String> peers = new ArrayList<>();
+        java.util.LinkedHashSet<String> peers = new java.util.LinkedHashSet<>();
         if (!Files.isDirectory(directory)) {
-            return peers;
+            return new ArrayList<>(peers);
         }
         String prefix = sanitize(selfUsername) + SEP;
+        String legacyPrefix = sanitize(selfUsername) + LEGACY_SEP;
         java.io.File[] files = directory.toFile().listFiles();
         if (files == null) {
-            return peers;
+            return new ArrayList<>(peers);
         }
         for (java.io.File file : files) {
             String name = file.getName();
             // 应答链单独放在 *.inbound.session，不能当成另一台设备
-            if (name.endsWith(INBOUND_SUFFIX)) {
+            if (name.endsWith(INBOUND_SUFFIX) || !name.endsWith(SUFFIX)) {
                 continue;
             }
-            if (!name.startsWith(prefix) || !name.endsWith(SUFFIX)) {
+            String middle = name.substring(0, name.length() - SUFFIX.length());
+            if (middle.startsWith(prefix)) {
+                String[] parts = middle.substring(prefix.length()).split(SEP, -1);
+                if (parts.length == 2) {
+                    peers.add(parts[0] + "@" + parts[1]);
+                }
                 continue;
             }
-            String middle = name.substring(prefix.length(), name.length() - SUFFIX.length());
-            String[] parts = middle.split(SEP);
-            if (parts.length == 2) {
-                peers.add(parts[0] + "@" + parts[1]);
-            } else {
-                // 兼容单设备时期的文件名（只有 peer）
-                peers.add(middle + "@default");
+            // 旧版 __ 命名：尽力解析，避免升级后旧会话完全消失
+            if (middle.startsWith(legacyPrefix)) {
+                String rest = middle.substring(legacyPrefix.length());
+                String[] parts = rest.split(LEGACY_SEP);
+                if (parts.length == 2) {
+                    peers.add(parts[0] + "@" + parts[1]);
+                } else {
+                    peers.add(rest + "@default");
+                }
             }
         }
-        return peers;
+        return new ArrayList<>(peers);
     }
 
     private Path fileOf(String selfUsername, String peer, String deviceId) {
@@ -240,10 +262,22 @@ public class SessionStore {
             + sanitize(device) + SUFFIX);
     }
 
+    private Path legacyFileOf(String selfUsername, String peer, String deviceId) {
+        String device = deviceId == null || deviceId.isEmpty() ? "default" : deviceId;
+        return directory.resolve(sanitize(selfUsername) + LEGACY_SEP + sanitize(peer)
+            + LEGACY_SEP + sanitize(device) + SUFFIX);
+    }
+
     private Path inboundFileOf(String selfUsername, String peer, String deviceId) {
         String device = deviceId == null || deviceId.isEmpty() ? "default" : deviceId;
         return directory.resolve(sanitize(selfUsername) + SEP + sanitize(peer) + SEP
             + sanitize(device) + INBOUND_SUFFIX);
+    }
+
+    private Path legacyInboundFileOf(String selfUsername, String peer, String deviceId) {
+        String device = deviceId == null || deviceId.isEmpty() ? "default" : deviceId;
+        return directory.resolve(sanitize(selfUsername) + LEGACY_SEP + sanitize(peer)
+            + LEGACY_SEP + sanitize(device) + INBOUND_SUFFIX);
     }
 
     /**
