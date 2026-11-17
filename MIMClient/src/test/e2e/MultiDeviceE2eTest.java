@@ -238,14 +238,9 @@ public final class MultiDeviceE2eTest {
     private static void register(String username) throws Exception {
         String body = "{\"username\":\"" + username + "\",\"password\":\""
             + base64(PASSWORD) + "\"}";
-        // 注册接口按 IP 限流（5 次/分钟）。连续跑多次回归时可能撞上窗口，
-        // 这里明确等待后重试一次，而不是让脚本因限流而"假失败"。
+        // 注册接口按 IP 限流（5 次/分钟）。verify.sh 和 CI 会在每个脚本前清掉计数，
+        // 这里不再等待重试，避免一次回归被拖到 80 秒以上。
         String response = httpPost(BASE + "/register/token", null, null, body);
-        if (response.contains("42901")) {
-            System.out.println("  (注册触发限流，等待 20 秒后重试)");
-            Thread.sleep(20_000L);
-            response = httpPost(BASE + "/register/token", null, null, body);
-        }
         requireOk(response, "注册");
     }
 

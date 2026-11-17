@@ -182,17 +182,26 @@ jobs:
           mvn -B -q compile
           mvn -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/client-cp.txt
 
+      - name: 安装 redis-cli
+        run: sudo apt-get update && sudo apt-get install -y redis-tools
+
       - name: 跑端到端回归
         working-directory: MIMClient
         run: |
           CP="target/classes:$(cat /tmp/client-cp.txt)"
-          # 逐个运行 src/test/e2e 下的脚本，包名从源码 package 声明推导
+          # 逐个运行 src/test/e2e 下的脚本，包名从源码 package 声明推导。
+          # 每个脚本前清掉注册限流，避免两个脚本连着注册超过 5 次/分钟。
           mkdir -p /tmp/e2e
           FAILED=0
           for E2E_FILE in src/test/e2e/*.java; do
             [ -f "$E2E_FILE" ] || continue
             E2E_NAME="$(basename "$E2E_FILE" .java)"
             echo "--- ${E2E_NAME} ---"
+            redis-cli --scan --pattern 'mim:ratelimit:*' | while IFS= read -r key; do
+              if [ -n "$key" ]; then
+                redis-cli del "$key" >/dev/null || true
+              fi
+            done
             javac -encoding UTF-8 -cp "$CP" -d /tmp/e2e "$E2E_FILE"
             PKG="$(sed -n 's/^package \([a-zA-Z0-9_.]*\);.*/\1/p' "$E2E_FILE" | head -1)"
             java -cp "/tmp/e2e:$CP" "${PKG}.${E2E_NAME}" || FAILED=1

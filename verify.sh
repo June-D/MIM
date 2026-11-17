@@ -172,8 +172,18 @@ if [ "$RUN_E2E" -eq 1 ]; then
   if [ "$PREFLIGHT_OK" -eq 0 ]; then
     fail "端到端前置检查未通过（跳过执行）"
   else
-    # 清掉历史限流计数：端到端会连续注册多个账号，跨轮次会撞上 5 次/分钟的限制
-    redis-cli --scan --pattern "mim:ratelimit:*" 2>/dev/null | xargs -r redis-cli del >/dev/null 2>&1
+    # 清掉注册限流计数。macOS 的 xargs 没有 -r，所以按行删除。
+    # 每个脚本前都清一次：两个脚本各注册两个账号，连着跑会超过 5 次/分钟。
+    clear_rate_limits() {
+      if ! command -v redis-cli >/dev/null 2>&1; then
+        return 0
+      fi
+      redis-cli --scan --pattern "mim:ratelimit:*" 2>/dev/null | while IFS= read -r key; do
+        if [ -n "$key" ]; then
+          redis-cli del "$key" >/dev/null 2>&1 || true
+        fi
+      done
+    }
 
     # 编译并运行端到端脚本：它们不在 Maven 默认测试路径内，需要手动编译。
     # 包路径按实际目录推导，避免把类名写死在脚本里。
@@ -183,6 +193,7 @@ if [ "$RUN_E2E" -eq 1 ]; then
       [ -f "$E2E_FILE" ] || continue
       E2E_NAME="$(basename "$E2E_FILE" .java)"
       echo "--- ${E2E_NAME} ---"
+      clear_rate_limits
       (
         cd "$CLIENT_DIR" || exit 1
         export JAVA_HOME="$CLIENT_JH"
