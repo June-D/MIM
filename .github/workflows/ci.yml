@@ -187,6 +187,7 @@ jobs:
         run: |
           CP="target/classes:$(cat /tmp/client-cp.txt)"
           # 逐个运行 src/test/e2e 下的脚本，包名从源码 package 声明推导
+          mkdir -p /tmp/e2e
           FAILED=0
           for E2E_FILE in src/test/e2e/*.java; do
             [ -f "$E2E_FILE" ] || continue
