@@ -376,6 +376,17 @@ public class PreKeyManager {
         return new TrustChangedException(peer, issues, result.describe());
     }
 
+    /**
+     * 用新口令重新加密本设备预密钥文件。
+     */
+    public synchronized void changePassword(String oldPassword, String newPassword)
+        throws IdentityException {
+        if (selfUsername == null || selfDeviceId == null) {
+            throw new IdentityException("预密钥尚未初始化");
+        }
+        preKeyStore.changePassword(selfUsername, selfDeviceId, oldPassword, newPassword);
+    }
+
     public void reset() {
         preKeyStore.clear();
         selfUsername = null;

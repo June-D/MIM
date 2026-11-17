@@ -4,6 +4,8 @@ import com.junesoon.mim.components.ObjectRestResponse;
 import com.junesoon.mim.model.ChatContact;
 import com.junesoon.mim.model.UserInfo;
 import com.junesoon.mim.model.JwtAuthenticationRequest;
+import com.junesoon.mim.model.PasswordChangeRequest;
+import com.junesoon.mim.model.PasswordChangeResult;
 import feign.Headers;
 import feign.Param;
 import feign.RequestLine;
@@ -32,6 +34,12 @@ public interface LoginFeign extends FeignAPI {
 
     @RequestLine("GET /user/info")
     ObjectRestResponse<UserInfo> getInfo();
+
+    /**
+     * 修改登录密码。成功后返回当前设备的新令牌。
+     */
+    @RequestLine("POST /user/password")
+    ObjectRestResponse<PasswordChangeResult> changePassword(PasswordChangeRequest request);
 
     @RequestLine("GET /chat/contacts")
     List<ChatContact> getChatContacts();

@@ -177,6 +177,30 @@ public class SessionStore {
     }
 
     /**
+     * 用新口令重新加密所有会话文件（改密时调用）。
+     */
+    public void changePassword(String selfUsername, String oldPassword, String newPassword)
+        throws IdentityException {
+        for (String entry : listPeers(selfUsername)) {
+            String peer = entry;
+            String device = DEFAULT_DEVICE_ID;
+            int at = entry.lastIndexOf('@');
+            if (at > 0) {
+                peer = entry.substring(0, at);
+                device = entry.substring(at + 1);
+            }
+            SessionState outbound = load(selfUsername, peer, device, oldPassword);
+            if (outbound != null) {
+                save(selfUsername, peer, device, outbound, newPassword);
+            }
+            SessionState inbound = loadInbound(selfUsername, peer, device, oldPassword);
+            if (inbound != null) {
+                saveInbound(selfUsername, peer, device, inbound, newPassword);
+            }
+        }
+    }
+
+    /**
      * 列出本地已有会话的标识，形如 {@code peer@device}。
      */
     public List<String> listPeers(String selfUsername) {

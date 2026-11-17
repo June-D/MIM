@@ -354,12 +354,79 @@ public class MainController {
             new javafx.scene.control.MenuItem("本机设备安全码");
         deviceCode.setOnAction(e -> showOwnDeviceCode());
 
+        javafx.scene.control.MenuItem changePassword =
+            new javafx.scene.control.MenuItem("修改登录密码");
+        changePassword.setOnAction(e -> showChangePasswordDialog());
+
         javafx.scene.control.MenuItem logout =
             new javafx.scene.control.MenuItem("退出登录");
         logout.setOnAction(e -> confirmLogout("退出登录", false));
 
-        menu.getItems().addAll(deviceCode, switchAccount, logout);
+        menu.getItems().addAll(deviceCode, changePassword, switchAccount, logout);
         menu.show(accountMenuButton, event.getScreenX(), event.getScreenY());
+    }
+
+    /**
+     * 修改登录密码：服务端校验并让其它设备下线，本地用新口令重新加密密钥。
+     */
+    private void showChangePasswordDialog() {
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+            new javafx.scene.control.Dialog<>();
+        dialog.setTitle("修改登录密码");
+        dialog.setHeaderText("修改后其它设备需要重新登录；本机将用新口令重新加密本地密钥。");
+
+        javafx.scene.control.PasswordField oldField =
+            new javafx.scene.control.PasswordField();
+        javafx.scene.control.PasswordField newField =
+            new javafx.scene.control.PasswordField();
+        javafx.scene.control.PasswordField confirmField =
+            new javafx.scene.control.PasswordField();
+        oldField.setPromptText("当前密码");
+        newField.setPromptText("新密码（至少 6 位）");
+        confirmField.setPromptText("再次输入新密码");
+
+        javafx.scene.layout.GridPane grid = new javafx.scene.layout.GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+        grid.add(new javafx.scene.control.Label("当前密码"), 0, 0);
+        grid.add(oldField, 1, 0);
+        grid.add(new javafx.scene.control.Label("新密码"), 0, 1);
+        grid.add(newField, 1, 1);
+        grid.add(new javafx.scene.control.Label("确认新密码"), 0, 2);
+        grid.add(confirmField, 1, 2);
+        dialog.getDialogPane().setContent(grid);
+        dialog.getDialogPane().getButtonTypes().addAll(
+            javafx.scene.control.ButtonType.OK, javafx.scene.control.ButtonType.CANCEL);
+
+        java.util.Optional<javafx.scene.control.ButtonType> result = dialog.showAndWait();
+        if (!result.isPresent() || result.get() != javafx.scene.control.ButtonType.OK) {
+            return;
+        }
+        String oldPassword = oldField.getText();
+        String newPassword = newField.getText();
+        String confirm = confirmField.getText();
+        if (newPassword == null || newPassword.length() < 6) {
+            AlertUtil.show("不能修改", "新密码至少 6 位。");
+            return;
+        }
+        if (!newPassword.equals(confirm)) {
+            AlertUtil.show("不能修改", "两次输入的新密码不一致。");
+            return;
+        }
+        if (newPassword.equals(oldPassword)) {
+            AlertUtil.show("不能修改", "新密码不能与当前密码相同。");
+            return;
+        }
+        new Thread(() -> {
+            try {
+                com.junesoon.mim.service.PasswordChangeService.change(oldPassword, newPassword);
+                Platform.runLater(() -> AlertUtil.show("修改成功",
+                    "登录密码已更新；其它设备需要重新登录。"));
+            } catch (Exception e) {
+                log.error("修改密码失败", e);
+                Platform.runLater(() -> AlertUtil.show("修改失败", String.valueOf(e.getMessage())));
+            }
+        }, "password-change").start();
     }
 
     /**

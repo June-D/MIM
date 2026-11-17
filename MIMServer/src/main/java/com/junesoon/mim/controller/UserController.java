@@ -1,12 +1,18 @@
 package com.junesoon.mim.controller;
 
+import com.junesoon.mim.auth.CurrentDevice;
 import com.junesoon.mim.auth.CurrentUser;
 import com.junesoon.mim.entity.UserInfo;
+import com.junesoon.mim.ratelimit.RateLimit;
+import com.junesoon.mim.requests.PasswordChangeRequest;
 import com.junesoon.mim.responses.ObjectRestResponse;
+import com.junesoon.mim.responses.PasswordChangeResult;
+import com.junesoon.mim.service.PasswordService;
 import com.junesoon.mim.service.UserService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -22,9 +28,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserService userService;
+    private final PasswordService passwordService;
 
-    public UserController(UserService userService) {
+    public UserController(UserService userService, PasswordService passwordService) {
         this.userService = userService;
+        this.passwordService = passwordService;
     }
 
     @GetMapping("/info")
@@ -38,5 +46,18 @@ public class UserController {
     @PostMapping("/heartbeat")
     public ObjectRestResponse<Boolean> heartbeat(@CurrentUser String username) {
         return new ObjectRestResponse<Boolean>().data(userService.heartbeat(username)).rel(true);
+    }
+
+    /**
+     * 修改登录密码。成功后该用户所有设备的旧 JWT 失效，当前设备拿到新令牌。
+     */
+    @PostMapping("/password")
+    @RateLimit(limit = 5, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<PasswordChangeResult> changePassword(@CurrentUser String username,
+        @CurrentDevice String deviceId, @RequestBody PasswordChangeRequest request)
+        throws Exception {
+        PasswordChangeResult result = passwordService.change(username, deviceId, request);
+        log.info("用户 {} 设备 {} 修改了登录密码", username, deviceId);
+        return new ObjectRestResponse<PasswordChangeResult>().data(result).rel(true);
     }
 }

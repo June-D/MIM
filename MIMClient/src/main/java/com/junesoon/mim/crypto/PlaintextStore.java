@@ -111,6 +111,21 @@ public final class PlaintextStore {
         }
     }
 
+    /**
+     * 用新口令重新加密本地明文（改密时调用）。
+     */
+    public void changePassword(String newPassword) throws IdentityException {
+        if (username == null) {
+            return;
+        }
+        this.password = newPassword;
+        try {
+            save();
+        } catch (Exception e) {
+            throw new IdentityException("重新加密本地明文失败：" + e.getMessage());
+        }
+    }
+
     private void save() throws Exception {
         StringBuilder body = new StringBuilder();
         for (Map.Entry<String, String> entry : texts.entrySet()) {

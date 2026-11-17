@@ -92,6 +92,11 @@ class MessageSyncTest {
             }
 
             @Override
+            public int bumpAllTokenVersions(String username) {
+                return 0;
+            }
+
+            @Override
             public int countActiveDevices(String username) {
                 return 0;
             }

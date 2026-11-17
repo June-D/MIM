@@ -156,6 +156,16 @@ public class OwnDeviceTrust {
         return new LinkedHashMap<>(pinned);
     }
 
+    /**
+     * 用新口令重新加密本机设备信任清单（改密时调用）。
+     */
+    public void changePassword(String newPassword) throws IdentityException {
+        if (selfUsername == null) {
+            throw new IdentityException("本机设备信任清单未初始化");
+        }
+        persist(newPassword);
+    }
+
     public void reset() {
         pinned.clear();
         selfUsername = null;

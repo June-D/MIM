@@ -220,6 +220,55 @@ public class IdentityStore {
     }
 
     /**
+     * 用新口令重新加密并保存已有身份。私钥本身不变，只更换本地密封口令。
+     */
+    public void saveExisting(Identity identity, String username, String deviceId, String password)
+        throws IdentityException {
+        if (identity == null || identity.getPrivateKey() == null) {
+            throw new IdentityException("本地身份密钥为空，无法重新加密");
+        }
+        try {
+            byte[] pkcs8 = identity.getPrivateKey().getEncoded();
+            byte[] salt = new byte[SALT_BYTES];
+            RANDOM.nextBytes(salt);
+            byte[] nonce = new byte[GCM_NONCE_BYTES];
+            RANDOM.nextBytes(nonce);
+
+            byte[] wrappingKey = deriveWrappingKey(password, salt);
+            byte[] encrypted;
+            try {
+                Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+                cipher.init(Cipher.ENCRYPT_MODE, new SecretKeySpec(wrappingKey, "AES"),
+                    new GCMParameterSpec(GCM_TAG_BITS, nonce));
+                cipher.updateAAD(aad(username, deviceId));
+                encrypted = cipher.doFinal(pkcs8);
+            } finally {
+                Hkdf.wipe(wrappingKey);
+                Hkdf.wipe(pkcs8);
+            }
+
+            String content = "username=" + username + "\n"
+                + "device=" + deviceId + "\n"
+                + "version=" + identity.getVersion() + "\n"
+                + "salt=" + Base64.getEncoder().encodeToString(salt) + "\n"
+                + "nonce=" + Base64.getEncoder().encodeToString(nonce) + "\n"
+                + "privateKey=" + Base64.getEncoder().encodeToString(encrypted) + "\n"
+                + "publicKey=" + identity.getPublicKeyBase64() + "\n"
+                + "fingerprint=" + identity.getFingerprint() + "\n";
+
+            Files.createDirectories(directory);
+            Path file = fileOf(username, deviceId);
+            Path temp = Files.createTempFile(directory, "identity-", ".tmp");
+            Files.write(temp, content.getBytes(StandardCharsets.UTF_8));
+            restrictPermissions(temp);
+            Files.move(temp, file, java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        } catch (Exception e) {
+            throw new IdentityException("重新加密本地身份密钥失败：" + e.getMessage());
+        }
+    }
+
+    /**
      * 服务器上已有更高版本的公钥时，说明用户在其他设备换过钥。
      * 这里只做提示，不自动覆盖本地私钥。
      */

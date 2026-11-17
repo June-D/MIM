@@ -119,6 +119,11 @@ class KeyServiceTest {
         }
 
         @Override
+        public int bumpAllTokenVersions(String username) {
+            return registered.size();
+        }
+
+        @Override
         public int countActiveDevices(String username) {
             return 0;
         }

@@ -7,6 +7,7 @@ import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.ratelimit.RateLimit;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.DeviceService;
+import com.junesoon.mim.websocket.SessionRegistry;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -32,9 +33,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class DeviceController {
 
     private final DeviceService deviceService;
+    private final SessionRegistry sessionRegistry;
 
-    public DeviceController(DeviceService deviceService) {
+    public DeviceController(DeviceService deviceService, SessionRegistry sessionRegistry) {
         this.deviceService = deviceService;
+        this.sessionRegistry = sessionRegistry;
     }
 
     /**
@@ -87,6 +90,8 @@ public class DeviceController {
     public ObjectRestResponse<Boolean> revoke(@CurrentUser String username,
         @PathVariable String deviceId) {
         deviceService.revoke(username, deviceId);
+        // 注销后立即踢掉该设备在本实例上的长连接，避免它继续收到推送
+        sessionRegistry.closeDevice(username, deviceId);
         return new ObjectRestResponse<Boolean>().data(true).rel(true);
     }
 }

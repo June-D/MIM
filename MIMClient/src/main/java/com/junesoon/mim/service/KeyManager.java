@@ -190,6 +190,19 @@ public class KeyManager {
         throw new IdentityException("同步来源不是本账号的设备");
     }
 
+    /**
+     * 用新口令重新加密本机身份、信任库与设备授权清单。
+     */
+    public synchronized void changePassword(String newPassword) throws IdentityException {
+        IdentityStore.Identity current = identity;
+        if (current == null) {
+            throw new IdentityException("本地身份密钥尚未初始化");
+        }
+        identityStore.saveExisting(current, current.getUsername(), deviceId(), newPassword);
+        trustStore.changePassword(newPassword);
+        ownDeviceTrust.changePassword(newPassword);
+    }
+
     public void reset() {
         identity = null;
         trustStore.reset();

@@ -223,6 +223,17 @@ public class MessageService {
         }
     }
 
+    /**
+     * 用新口令重新加密本地会话与明文缓存。
+     */
+    public void changePassword(String oldPassword, String newPassword) throws IdentityException {
+        synchronized (cryptoLock) {
+            String self = requireIdentity().getUsername();
+            sessionStore.changePassword(self, oldPassword, newPassword);
+            plaintextStore.changePassword(newPassword);
+        }
+    }
+
     public void reset() {
         synchronized (cryptoLock) {
             sessions.clear();

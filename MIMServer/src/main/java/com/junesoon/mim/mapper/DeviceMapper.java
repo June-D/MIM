@@ -33,5 +33,10 @@ public interface DeviceMapper {
     int bumpTokenVersion(@Param("username") String username,
         @Param("deviceId") String deviceId);
 
+    /**
+     * 自增该用户所有设备的令牌版本（改密时调用）。
+     */
+    int bumpAllTokenVersions(@Param("username") String username);
+
     int countActiveDevices(@Param("username") String username);
 }

@@ -246,6 +246,17 @@ public class PreKeyStore {
         oneTimeKeys.clear();
     }
 
+    /**
+     * 用新口令重新加密预密钥文件（改密时调用）。
+     */
+    public void changePassword(String selfUsername, String deviceId, String oldPassword,
+        String newPassword) throws IdentityException {
+        if (!load(selfUsername, deviceId, oldPassword)) {
+            return;
+        }
+        save(selfUsername, deviceId, newPassword);
+    }
+
     // ==================== 持久化 ====================
 
     /**

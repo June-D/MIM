@@ -115,6 +115,31 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
         return response.substring(idx + 8, response.indexOf('"', idx + 8));
     }
 
+    /**
+     * 注册并携带设备头登录，得到绑定到该设备的 JWT。
+     */
+    private String registerAndLoginBound(String username, String deviceId) throws Exception {
+        Map<String, String> body = new HashMap<>();
+        body.put("username", username);
+        body.put("password", base64Password());
+
+        mockMvc.perform(post("/register/token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isOk());
+
+        MvcResult login = mockMvc.perform(post("/login/token")
+                .header("X-Device-Id", deviceId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(body)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(200))
+            .andReturn();
+        String response = login.getResponse().getContentAsString(StandardCharsets.UTF_8);
+        int idx = response.indexOf("\"data\":\"");
+        return response.substring(idx + 8, response.indexOf('"', idx + 8));
+    }
+
     private static String p256PublicKey() throws Exception {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
         generator.initialize(new ECGenParameterSpec("secp256r1"));
@@ -444,6 +469,56 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
 
         mockMvc.perform(get("/device").header("Authorization", "Bearer " + token))
             .andExpect(jsonPath("$.data.count").value(1));
+    }
+
+    @Test
+    @DisplayName("修改密码后旧令牌立即失效，新令牌与新密码可用")
+    void passwordChangeRevokesOldTokens() throws Exception {
+        String username = "alice-pw";
+        String device = "dev-pw";
+        String oldToken = registerAndLoginBound(username, device);
+        registerDevice(oldToken, device);
+
+        String newPassword = Base64.getEncoder().encodeToString(
+            "newpass1234".getBytes(StandardCharsets.UTF_8));
+        Map<String, String> change = new HashMap<>();
+        change.put("oldPassword", base64Password());
+        change.put("newPassword", newPassword);
+        MvcResult changed = mockMvc.perform(post("/user/password")
+                .header("Authorization", "Bearer " + oldToken)
+                .header("X-Device-Id", device)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(change)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(200))
+            .andExpect(jsonPath("$.data.token").isNotEmpty())
+            .andReturn();
+        String newToken = objectMapper.readTree(
+                changed.getResponse().getContentAsString(StandardCharsets.UTF_8))
+            .path("data").path("token").asText();
+
+        mockMvc.perform(get("/user/info").header("Authorization", "Bearer " + oldToken))
+            .andExpect(status().isUnauthorized());
+        mockMvc.perform(get("/user/info").header("Authorization", "Bearer " + newToken))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.username").value(username));
+
+        Map<String, String> login = new HashMap<>();
+        login.put("username", username);
+        login.put("password", newPassword);
+        mockMvc.perform(post("/login/token")
+                .header("X-Device-Id", device)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(login)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(200));
+
+        login.put("password", base64Password());
+        mockMvc.perform(post("/login/token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(login)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(40001));
     }
 
     @Test

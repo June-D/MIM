@@ -215,6 +215,19 @@ class PreKeyServiceTest {
         }
 
         @Override
+        public int bumpAllTokenVersions(String username) {
+            int affected = 0;
+            for (Device device : devices.values()) {
+                if (device.getUsername().equals(username)) {
+                    device.setTokenVersion(
+                        (device.getTokenVersion() == null ? 0 : device.getTokenVersion()) + 1);
+                    affected++;
+                }
+            }
+            return affected;
+        }
+
+        @Override
         public int countActiveDevices(String username) {
             int count = 0;
             for (Device d : devices.values()) {

@@ -399,6 +399,16 @@ public class TrustStore {
         return new LinkedHashMap<>(pinned);
     }
 
+    /**
+     * 用新口令重新加密信任库（改密时调用）。
+     */
+    public void changePassword(String newPassword) throws IdentityException {
+        if (selfUsername == null) {
+            throw new IdentityException("信任库未初始化");
+        }
+        persist(newPassword);
+    }
+
     public void reset() {
         pinned.clear();
         legacy.clear();

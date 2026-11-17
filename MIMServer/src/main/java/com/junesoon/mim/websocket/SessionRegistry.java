@@ -9,6 +9,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
 
@@ -180,6 +181,46 @@ public class SessionRegistry {
     public int countLocalDeviceSessions(String username, String deviceId) {
         Set<WebSocketSession> targets = sessionsByDevice.get(key(username, deviceId));
         return targets == null ? 0 : targets.size();
+    }
+
+    /**
+     * 关闭某用户在本实例上的所有连接（改密时调用）。
+     */
+    public void closeUser(String username) {
+        String prefix = username + SEPARATOR;
+        for (java.util.Map.Entry<String, Set<WebSocketSession>> entry
+            : sessionsByDevice.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            Set<WebSocketSession> sessions = sessionsByDevice.remove(entry.getKey());
+            closeAll(sessions);
+        }
+    }
+
+    /**
+     * 关闭某台设备的连接（注销设备时调用）。
+     */
+    public void closeDevice(String username, String deviceId) {
+        closeAll(sessionsByDevice.remove(key(username, deviceId)));
+    }
+
+    private void closeAll(Set<WebSocketSession> sessions) {
+        if (sessions == null) {
+            return;
+        }
+        for (WebSocketSession session : sessions) {
+            if (session == null) {
+                continue;
+            }
+            try {
+                if (session.isOpen()) {
+                    session.close(CloseStatus.POLICY_VIOLATION);
+                }
+            } catch (IOException e) {
+                log.debug("关闭 WebSocket 连接失败：{}", e.getMessage());
+            }
+        }
     }
 
     private int countUserSessions(String username) {
