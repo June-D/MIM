@@ -118,7 +118,8 @@ public class MessageController {
     @PostMapping("/read")
     public ObjectRestResponse<Integer> read(@CurrentUser String username,
         @RequestBody ReadRequest request) {
-        int affected = messageService.markRead(username, request.getPeer(), request.getBeforeId());
+        int affected = messageService.markRead(username, request.getPeer(), request.getBeforeId(),
+            request.getTags());
         return new ObjectRestResponse<Integer>().data(affected).rel(true);
     }
 
@@ -126,8 +127,11 @@ public class MessageController {
      * 未读数（按逻辑消息计数，多设备副本不重复统计）。
      */
     @GetMapping("/unread/{peer}")
-    public ObjectRestResponse<Long> unread(@CurrentUser String username, @PathVariable String peer) {
-        return new ObjectRestResponse<Long>().data(messageService.countUnread(username, peer)).rel(true);
+    public ObjectRestResponse<Long> unread(@CurrentUser String username, @PathVariable String peer,
+        @RequestParam(value = "tags", required = false) String tags) {
+        return new ObjectRestResponse<Long>()
+            .data(messageService.countUnread(username, peer, splitTags(tags)))
+            .rel(true);
     }
 
     /**
@@ -155,7 +159,8 @@ public class MessageController {
             throw new UserInvalidException("对方不能为空");
         }
         return new ObjectRestResponse<ClearResult>()
-            .data(messageService.clearConversation(username, request.getPeer(), request.isForBoth()))
+            .data(messageService.clearConversation(username, request.getPeer(),
+                request.isForBoth(), request.getTags()))
             .rel(true);
     }
 

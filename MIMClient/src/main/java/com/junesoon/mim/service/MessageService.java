@@ -981,6 +981,14 @@ public class MessageService {
      * <p>历史同步把它加密转发给本账号的其它设备，那些设备才有权撤回同一条消息；
      * 服务端始终只保存哈希。
      */
+    /**
+     * 本机持有的、与该对端的会话标签。供历史同步把标签带到其它设备，
+     * 让服务端不必再用盲引用定位原消息。
+     */
+    public java.util.List<String> conversationTags(String peer) {
+        return plaintextStore.getConversationTags(peer);
+    }
+
     public String recallTokenFor(String peer, String clientMsgId) {
         return plaintextStore.getRecallToken(peer, clientMsgId);
     }
@@ -1265,7 +1273,8 @@ public class MessageService {
 
     public void markRead(String peer, Long beforeId) {
         try {
-            Request.connector(MessageFeign.class).read(new ReadRequest(peer, beforeId));
+            Request.connector(MessageFeign.class).read(new ReadRequest(peer, beforeId,
+                plaintextStore.getConversationTags(peer)));
         } catch (Exception e) {
             log.debug("标记已读失败：{}", e.getMessage());
         }
@@ -1273,7 +1282,9 @@ public class MessageService {
 
     public long unread(String peer) {
         try {
-            ObjectRestResponse<Long> response = Request.connector(MessageFeign.class).unread(peer);
+            String tags = String.join(",", plaintextStore.getConversationTags(peer));
+            ObjectRestResponse<Long> response =
+                Request.connector(MessageFeign.class).unread(peer, tags);
             return (response == null || response.getData() == null) ? 0L : response.getData();
         } catch (Exception e) {
             return 0L;
@@ -1311,7 +1322,8 @@ public class MessageService {
         try {
             ObjectRestResponse<com.junesoon.mim.model.ClearResult> response =
                 Request.connector(MessageFeign.class).clear(
-                    new com.junesoon.mim.model.ClearRequest(peer, forBoth));
+                    new com.junesoon.mim.model.ClearRequest(peer, forBoth,
+                        plaintextStore.getConversationTags(peer)));
             if (response == null || response.getStatus() != 200) {
                 String error = response == null ? "服务端无响应" : response.getMessage();
                 throw new IdentityException(error == null ? "清除失败" : error);

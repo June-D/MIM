@@ -273,6 +273,12 @@ public final class HistorySync {
                 ? SyncEnvelope.pack(recallToken, text) : text;
             CipherMessage replica = MessageService.getInstance().wrapForOwnDevice(
                 targetDeviceId, payload, message.getClientMsgId(), message.getTimestamp(), bundle);
+            java.util.List<String> tags =
+                MessageService.getInstance().conversationTags(conversationPeer);
+            if (!tags.isEmpty()) {
+                // 同步副本属于同一会话：带上标签，服务端才能按标签找到原消息。
+                replica.setConversationTag(tags.get(0));
+            }
 
             // 用本机身份私钥签住「原消息归属 + 内容」，接收端验签后以这些字段为准。
             // 否则被攻破的服务端可以把任意历史内容挂到任意联系人名下。

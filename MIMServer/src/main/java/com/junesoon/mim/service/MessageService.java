@@ -51,9 +51,23 @@ public interface MessageService {
 
     int markDeliveredTo(String username, String deviceId, long beforeId);
 
-    int markRead(String username, String peer, Long beforeId);
+    /**
+     * 标记已读。{@code tags} 为客户端持有的会话标签，非空时一并按标签标记。
+     */
+    int markRead(String username, String peer, Long beforeId, List<String> tags);
 
-    long countUnread(String username, String peer);
+    default int markRead(String username, String peer, Long beforeId) {
+        return markRead(username, peer, beforeId, null);
+    }
+
+    /**
+     * 未读数。{@code tags} 非空时额外按标签统计（不依赖盲引用）。
+     */
+    long countUnread(String username, String peer, List<String> tags);
+
+    default long countUnread(String username, String peer) {
+        return countUnread(username, peer, null);
+    }
 
     /**
      * 撤回自己发出的消息（按 clientMsgId 撤回所有设备副本）。
@@ -72,5 +86,14 @@ public interface MessageService {
     /**
      * 清除与某人的对话。{@code forBoth} 为真时对方的记录也一起清掉，并抹掉服务端密文。
      */
-    ClearResult clearConversation(String username, String peer, boolean forBoth);
+    /**
+     * 清除会话。{@code tags} 非空时同时按标签写入清除点并抹除密文，
+     * 这样未投递查询不必再从盲引用反推会话对象。
+     */
+    ClearResult clearConversation(String username, String peer, boolean forBoth,
+        List<String> tags);
+
+    default ClearResult clearConversation(String username, String peer, boolean forBoth) {
+        return clearConversation(username, peer, forBoth, null);
+    }
 }

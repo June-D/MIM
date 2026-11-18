@@ -171,6 +171,22 @@
     </select>
 
     <!--
+      按会话标签取原消息（跨设备同步用）。
+      标签是双方共享的随机值，知道标签即视为会话参与者；
+      仍限定同步副本本身不能是原消息。
+    -->
+    <select id="selectParticipantCopyByTag" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+          and conversation_tag = #{tag,jdbcType=VARCHAR}
+          and sync_from_device is null
+        order by id asc
+        limit 1
+    </select>
+
+    <!--
       历史消息：按 client_msg_id 去重，避免同一个逻辑消息因多设备副本重复出现。
       先按会话 + client_msg_id 聚出代表行（最小 id），再套 beforeId 分页，
       这样「代表行 id」与分页游标在同一坐标系里，不会漏消息或重复。
@@ -297,12 +313,20 @@
               to_user = #{toUsername,jdbcType=VARCHAR}
               or (from_user = #{toUsername,jdbcType=VARCHAR} and sync_from_device is not null)
           )
-          and id &gt; ifnull((
-              select cleared_before_id from t_conversation_clear
-              where username = #{toUsername,jdbcType=VARCHAR}
-                and peer = if(from_user = #{toUsername,jdbcType=VARCHAR},
-                              to_user, if(from_ref is not null, from_ref, from_user))
-          ), 0)
+          and id &gt; greatest(
+              ifnull((
+                  select cleared_before_id from t_conversation_clear
+                  where username = #{toUsername,jdbcType=VARCHAR}
+                    and peer = if(from_user = #{toUsername,jdbcType=VARCHAR},
+                                  to_user, if(from_ref is not null, from_ref, from_user))
+              ), 0),
+              ifnull((
+                  select cleared_before_id from t_conversation_clear
+                  where username = #{toUsername,jdbcType=VARCHAR}
+                    and peer = if(conversation_tag is not null,
+                                  concat('tag:', conversation_tag), null)
+              ), 0)
+          )
         order by id asc
         limit #{limit,jdbcType=INTEGER}
     </select>
@@ -397,6 +421,69 @@
           and recalled = 0
     </select>
 
+    <update id="markReadByTags">
+        update t_message
+        set read_flag = 1
+        where to_user = #{toUsername,jdbcType=VARCHAR}
+          and conversation_tag in
+          <foreach collection="tags" item="tag" open="(" separator="," close=")">
+              #{tag,jdbcType=VARCHAR}
+          </foreach>
+          and read_flag = 0
+          and recalled = 0
+        <if test="beforeId != null">
+          and client_msg_id in (
+            select client_msg_id from (
+              select distinct client_msg_id
+              from t_message
+              where to_user = #{toUsername,jdbcType=VARCHAR}
+                and conversation_tag in
+                <foreach collection="tags" item="tag" open="(" separator="," close=")">
+                    #{tag,jdbcType=VARCHAR}
+                </foreach>
+                and id &lt;= #{beforeId,jdbcType=BIGINT}
+            ) read_ids
+          )
+        </if>
+    </update>
+
+    <!--
+      双写期未读数：盲引用与标签可能命中同一条逻辑消息，
+      必须放在一条 SQL 里 union 后 distinct，否则会被重复计数。
+    -->
+    <select id="countUnreadByRefOrTags" resultType="java.lang.Long">
+        select count(distinct client_msg_id)
+        from t_message
+        where to_user = #{toUsername,jdbcType=VARCHAR}
+          and read_flag = 0
+          and recalled = 0
+          and (
+              from_ref = #{fromRef,jdbcType=VARCHAR}
+              or conversation_tag in
+              <foreach collection="tags" item="tag" open="(" separator="," close=")">
+                  #{tag,jdbcType=VARCHAR}
+              </foreach>
+          )
+        <if test="afterId != null">
+          and id &gt; #{afterId,jdbcType=BIGINT}
+        </if>
+    </select>
+
+    <select id="countUnreadByTags" resultType="java.lang.Long">
+        select count(distinct client_msg_id)
+        from t_message
+        where to_user = #{toUsername,jdbcType=VARCHAR}
+          and conversation_tag in
+          <foreach collection="tags" item="tag" open="(" separator="," close=")">
+              #{tag,jdbcType=VARCHAR}
+          </foreach>
+          and read_flag = 0
+          and recalled = 0
+        <if test="afterId != null">
+          and id &gt; #{afterId,jdbcType=BIGINT}
+        </if>
+    </select>
+
     <select id="countUnreadByRef" resultType="java.lang.Long">
         select count(distinct client_msg_id)
         from t_message
@@ -447,6 +534,28 @@
         where id &lt;= #{beforeId,jdbcType=BIGINT}
           and ((from_user = #{a,jdbcType=VARCHAR} and to_user = #{b,jdbcType=VARCHAR})
             or (from_user = #{b,jdbcType=VARCHAR} and to_user = #{a,jdbcType=VARCHAR}))
+    </update>
+
+    <select id="maxTagConversationId" resultType="java.lang.Long">
+        select max(id)
+        from t_message
+        where conversation_tag in
+        <foreach collection="tags" item="tag" open="(" separator="," close=")">
+            #{tag,jdbcType=VARCHAR}
+        </foreach>
+          and to_user in (#{viewer,jdbcType=VARCHAR}, #{peer,jdbcType=VARCHAR})
+    </select>
+
+    <update id="wipeTagConversation">
+        update t_message
+        set ciphertext = null,
+            iv = null
+        where id &lt;= #{beforeId,jdbcType=BIGINT}
+          and to_user in (#{viewer,jdbcType=VARCHAR}, #{peer,jdbcType=VARCHAR})
+          and conversation_tag in
+          <foreach collection="tags" item="tag" open="(" separator="," close=")">
+              #{tag,jdbcType=VARCHAR}
+          </foreach>
     </update>
 
     <update id="wipeRefConversation">

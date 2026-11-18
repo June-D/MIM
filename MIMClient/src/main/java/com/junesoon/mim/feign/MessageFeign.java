@@ -36,8 +36,8 @@ public interface MessageFeign extends FeignAPI {
     @RequestLine("POST /message/read")
     ObjectRestResponse<Integer> read(ReadRequest request);
 
-    @RequestLine("GET /message/unread/{peer}")
-    ObjectRestResponse<Long> unread(@Param("peer") String peer);
+    @RequestLine("GET /message/unread/{peer}?tags={tags}")
+    ObjectRestResponse<Long> unread(@Param("peer") String peer, @Param("tags") String tags);
 
     /**
      * 撤回自己发送的消息（按 clientMsgId 撤回所有设备副本）。

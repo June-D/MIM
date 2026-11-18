@@ -774,4 +774,86 @@ class MapperIntegrationTest extends IntegrationTestBase {
         assertTrue(messageMapper.selectUndelivered(BOB, DEVICE_A, 100).isEmpty(),
             "引用维度的清除点应过滤掉 sealed 收件消息");
     }
+
+    @Test
+    @DisplayName("未投递查询用会话标签匹配清除点（无 from_ref 也能过滤）")
+    void undeliveredHonoursTagClearCursor() {
+        CipherMessage received = message(null, null, BOB, DEVICE_A, "msg-tag-clear", 0);
+        received.setSealed(true);
+        received.setSessionId("session-tag");
+        received.setConversationTag(TAG_ONE);
+        messageMapper.insert(received);
+        long id = received.getId();
+
+        conversationClearMapper.insert(BOB, "tag:" + TAG_ONE, id, System.currentTimeMillis());
+
+        assertTrue(messageMapper.selectUndelivered(BOB, DEVICE_A, 100).isEmpty(),
+            "标签维度的清除点应在拿不到 from_ref 时生效");
+    }
+
+    @Test
+    @DisplayName("会话标签的未读统计与已读标记按标签生效，不串到别的会话")
+    void tagUnreadAndRead() {
+        insertTagged("msg-tag-unread-01", TAG_ONE);
+        insertTagged("msg-tag-unread-02", TAG_TWO);
+
+        assertEquals(1L, messageMapper.countUnreadByTags(
+            Collections.singletonList(TAG_ONE), BOB, null));
+        assertEquals(1, messageMapper.markReadByTags(
+            Collections.singletonList(TAG_ONE), BOB, null));
+        assertEquals(0L, messageMapper.countUnreadByTags(
+            Collections.singletonList(TAG_ONE), BOB, null));
+        assertEquals(1L, messageMapper.countUnreadByTags(
+            Collections.singletonList(TAG_TWO), BOB, null), "其它会话不受影响");
+    }
+
+    @Test
+    @DisplayName("会话标签的清除点取最大 id，并按标签抹除密文")
+    void tagClearCursorAndWipe() {
+        insertTagged("msg-tag-wipe-01", TAG_ONE);
+        insertTagged("msg-tag-wipe-02", TAG_ONE);
+
+        Long max = messageMapper.maxTagConversationId(
+            Collections.singletonList(TAG_ONE), BOB, ALICE);
+        assertNotNull(max);
+        assertEquals(2, messageMapper.wipeTagConversation(
+            Collections.singletonList(TAG_ONE), BOB, ALICE, max));
+
+        CipherMessage wiped = messageMapper.selectByClientMsgId("msg-tag-wipe-01", DEVICE_A);
+        assertNull(wiped.getCiphertext(), "清除应抹掉密文");
+    }
+
+    @Test
+    @DisplayName("会话标签可定位原消息，供跨设备同步使用")
+    void participantCopyByTag() {
+        insertTagged("msg-tag-sync-01", TAG_ONE);
+
+        CipherMessage original = messageMapper.selectParticipantCopyByTag("msg-tag-sync-01",
+            TAG_ONE);
+        assertNotNull(original);
+        assertEquals("msg-tag-sync-01", original.getClientMsgId());
+
+        assertNull(messageMapper.selectParticipantCopyByTag("msg-tag-sync-01", TAG_TWO),
+            "错误标签不能取到原消息");
+    }
+
+    @Test
+    @DisplayName("双写期未读数对同一逻辑消息只算一次")
+    void unreadDedupesRefAndTag() {
+        CipherMessage both = sealedMessage("msg-dedupe-01", BOB, DEVICE_A, REF_ALICE);
+        both.setConversationTag(TAG_ONE);
+        messageMapper.insert(both);
+
+        assertEquals(1L, messageMapper.countUnreadByRefOrTags(REF_ALICE,
+            Collections.singletonList(TAG_ONE), BOB, null),
+            "盲引用与标签命中同一条消息时不能算两次");
+    }
+
+    private void insertTagged(String clientMsgId, String tag) {
+        CipherMessage tagged = message(ALICE, DEVICE_A, BOB, DEVICE_A, clientMsgId, 0);
+        tagged.setSealed(true);
+        tagged.setSessionId("session-tag");
+        tagged.setConversationTag(tag);
+        messageMapper.insert(tagged);
+    }
 }

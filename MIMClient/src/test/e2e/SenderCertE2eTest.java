@@ -176,6 +176,24 @@ public final class SenderCertE2eTest {
         check("服务端可按会话标签返回历史", tagHistory.contains(clientMsgId));
         check("历史响应不回传会话标签", !tagHistory.contains("\"conversationTag\""));
 
+        // ---- 未读/已读/清除按标签工作 ----
+        String unread = httpGet(BASE + "/message/unread/" + alice + "?tags=" + conversationTag,
+            bobToken, bobDevice);
+        check("按标签统计未读为 1", unread.contains("\"data\":1"));
+        requireOk(httpPost(BASE + "/message/read", bobToken, bobDevice,
+            "{\"peer\":\"" + alice + "\",\"beforeId\":999999999,\"tags\":[\""
+                + conversationTag + "\"]}"), "按标签标记已读");
+        String unreadAfter = httpGet(BASE + "/message/unread/" + alice + "?tags="
+            + conversationTag, bobToken, bobDevice);
+        check("按标签标记已读后未读归零", unreadAfter.contains("\"data\":0"));
+
+        requireOk(httpPost(BASE + "/message/clear", bobToken, bobDevice,
+            "{\"peer\":\"" + alice + "\",\"forBoth\":false,\"tags\":[\""
+                + conversationTag + "\"]}"), "按标签清除会话");
+        String cleared = httpGet(BASE + "/message/history/" + alice + "?limit=50&tags="
+            + conversationTag, bobToken, bobDevice);
+        check("按标签清除后历史为空", !cleared.contains(clientMsgId));
+
         System.out.println();
         System.out.println("通过 " + passed + " 项，失败 " + failed + " 项");
         if (failed > 0) {

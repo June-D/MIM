@@ -556,12 +556,16 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
-    public int markRead(String username, String peer, Long beforeId) {
+    public int markRead(String username, String peer, Long beforeId, List<String> tags) {
         ValidationUtil.validateUsername(peer);
         int affected = messageMapper.markRead(peer, username, beforeId);
         if (metadataRefsEnabled()) {
             // sealed 收件消息的 from_user 为 NULL，按对方盲引用单独标记一次。
             affected += messageMapper.markReadByRef(userRef(peer), username, beforeId);
+        }
+        List<String> safeTags = normalizeTags(tags);
+        if (!safeTags.isEmpty()) {
+            affected += messageMapper.markReadByTags(safeTags, username, beforeId);
         }
         if (affected > 0) {
             Map<String, Object> receipt = new LinkedHashMap<>(2);
@@ -577,14 +581,20 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
-    public long countUnread(String username, String peer) {
+    public long countUnread(String username, String peer, List<String> tags) {
         ValidationUtil.validateUsername(peer);
         long cursor = clearCursor(username, peer);
         long count = cursor > 0
             ? messageMapper.countUnreadAfter(peer, username, cursor)
             : messageMapper.countUnread(peer, username);
-        if (metadataRefsEnabled()) {
-            String refPeer = userRef(peer);
+        List<String> safeTags = normalizeTags(tags);
+        String refPeer = metadataRefsEnabled() ? userRef(peer) : null;
+        if (!safeTags.isEmpty()) {
+            // 双写期：盲引用与标签可能同时命中同一条消息，必须合并去重，
+            // 不能把两次统计相加。
+            count += messageMapper.countUnreadByRefOrTags(refPeer, safeTags, username,
+                cursor > 0 ? cursor : null);
+        } else if (refPeer != null) {
             count += cursor > 0
                 ? messageMapper.countUnreadAfterByRef(refPeer, username, cursor)
                 : messageMapper.countUnreadByRef(refPeer, username);
@@ -594,11 +604,13 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public ClearResult clearConversation(String username, String peer, boolean forBoth) {
+    public ClearResult clearConversation(String username, String peer, boolean forBoth,
+        List<String> tags) {
         ValidationUtil.validateUsername(peer);
         if (username.equals(peer)) {
             throw new UserInvalidException("不能清除与自己的会话");
         }
+        List<String> safeTags = normalizeTags(tags);
         Long maxId = messageMapper.maxConversationId(username, peer);
         String refUsername = null;
         String refPeer = null;
@@ -608,6 +620,9 @@ public class MessageServiceImpl implements MessageService {
             maxId = max(maxId, messageMapper.maxRefConversationId(refUsername, peer));
             maxId = max(maxId, messageMapper.maxRefConversationId(refPeer, username));
         }
+        if (!safeTags.isEmpty()) {
+            maxId = max(maxId, messageMapper.maxTagConversationId(safeTags, username, peer));
+        }
         long cursor = maxId == null ? 0L : maxId;
         long now = System.currentTimeMillis();
         advanceCursor(username, peer, cursor, now);
@@ -615,6 +630,10 @@ public class MessageServiceImpl implements MessageService {
             // 未投递消息的 SQL 用 from_user 反推会话对象；sealed 收件消息的
             // from_user 是盲引用，因此额外维护一条引用维度的清除点。
             advanceCursor(username, refPeer, cursor, now);
+        }
+        for (String tag : safeTags) {
+            // 标签维度的清除点：未投递查询在拿不到 from_ref 时用它过滤。
+            advanceCursor(username, "tag:" + tag, cursor, now);
         }
         if (forBoth) {
             advanceCursor(peer, username, cursor, now);
@@ -626,6 +645,12 @@ public class MessageServiceImpl implements MessageService {
                 if (refUsername != null) {
                     messageMapper.wipeRefConversation(refUsername, peer, cursor);
                     messageMapper.wipeRefConversation(refPeer, username, cursor);
+                }
+                if (!safeTags.isEmpty()) {
+                    messageMapper.wipeTagConversation(safeTags, username, peer, cursor);
+                    for (String tag : safeTags) {
+                        advanceCursor(peer, "tag:" + tag, cursor, now);
+                    }
                 }
             }
         }
@@ -820,6 +845,11 @@ public class MessageServiceImpl implements MessageService {
         String refUsername = metadataRefsEnabled() ? userRef(username) : null;
         CipherMessage original =
             messageMapper.selectParticipantCopy(replica.getClientMsgId(), username, refUsername);
+        if (original == null && StringUtils.hasText(replica.getConversationTag())) {
+            // 停写盲引用后，同步副本靠客户端共享的标签找到原消息。
+            original = messageMapper.selectParticipantCopyByTag(replica.getClientMsgId(),
+                replica.getConversationTag());
+        }
         if (original == null) {
             throw new UserInvalidException("没有可同步的原消息");
         }

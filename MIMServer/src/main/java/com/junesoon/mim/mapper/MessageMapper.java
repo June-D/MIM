@@ -65,6 +65,35 @@ public interface MessageMapper {
      * 按会话标签查历史（不透明标签，双方共享）。
      * to_user 限定在会话双方，避免标签被复用后串到别的会话。
      */
+    /**
+     * 按会话标签取原消息（跨设备同步的授权依据）。
+     */
+    CipherMessage selectParticipantCopyByTag(@Param("clientMsgId") String clientMsgId,
+        @Param("tag") String tag);
+
+    /**
+     * 标签会话的已读 / 未读 / 清除点相关操作。
+     */
+    int markReadByTags(@Param("tags") List<String> tags,
+        @Param("toUsername") String toUsername, @Param("beforeId") Long beforeId);
+
+    /**
+     * 双写期未读数：盲引用与标签命中同一逻辑消息时只算一次。
+     */
+    long countUnreadByRefOrTags(@Param("fromRef") String fromRef,
+        @Param("tags") List<String> tags, @Param("toUsername") String toUsername,
+        @Param("afterId") Long afterId);
+
+    long countUnreadByTags(@Param("tags") List<String> tags,
+        @Param("toUsername") String toUsername, @Param("afterId") Long afterId);
+
+    Long maxTagConversationId(@Param("tags") List<String> tags,
+        @Param("viewer") String viewer, @Param("peer") String peer);
+
+    int wipeTagConversation(@Param("tags") List<String> tags,
+        @Param("viewer") String viewer, @Param("peer") String peer,
+        @Param("beforeId") long beforeId);
+
     List<CipherMessage> selectTagHistory(@Param("tags") List<String> tags,
         @Param("viewer") String viewer, @Param("peer") String peer,
         @Param("beforeId") Long beforeId, @Param("limit") int limit);

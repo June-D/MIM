@@ -106,6 +106,38 @@ class MessageRecallTest {
         }
 
         @Override
+        public CipherMessage selectParticipantCopyByTag(String clientMsgId, String tag) {
+            return null;
+        }
+
+        @Override
+        public int markReadByTags(List<String> tags, String toUsername, Long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public long countUnreadByRefOrTags(String fromRef, List<String> tags, String toUsername,
+            Long afterId) {
+            return 0;
+        }
+
+        @Override
+        public long countUnreadByTags(List<String> tags, String toUsername, Long afterId) {
+            return 0;
+        }
+
+        @Override
+        public Long maxTagConversationId(List<String> tags, String viewer, String peer) {
+            return null;
+        }
+
+        @Override
+        public int wipeTagConversation(List<String> tags, String viewer, String peer,
+            long beforeId) {
+            return 0;
+        }
+
+        @Override
         public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
             Long beforeId, int limit) {
             // 标签查询由 MapperIntegrationTest 用真实 MySQL 覆盖；

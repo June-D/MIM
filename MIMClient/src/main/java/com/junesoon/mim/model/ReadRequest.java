@@ -1,5 +1,6 @@
 package com.junesoon.mim.model;
 
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -15,4 +16,7 @@ public class ReadRequest {
     private String peer;
 
     private Long beforeId;
+
+    /** 会话标签。服务端按标签标记已读，不再依赖盲引用。 */
+    private List<String> tags;
 }

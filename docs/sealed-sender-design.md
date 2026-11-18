@@ -326,7 +326,7 @@ UNIQUE KEY uk_client_target (client_msg_id, target_device_id)
 
 ### 验证
 
-- 服务端 222 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
+- 服务端 227 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
   未读、token 撤回、Phase 1 存量行兼容与清除点过滤；
 - 客户端 128 项：`recallToken` 落盘、撤回与证书两类信封、证书验签与公钥固定；
 - e2e 多设备 30 项：新增「响应不回显撤回凭证」「缺 token 撤回 sealed 被拒」与
@@ -411,13 +411,15 @@ Phase 1.5 消除的是**持久化**发送者元数据。首次联系与桥接消
   收信端解密后加密存本地，之后两个方向的每条消息都带上该标签。
 - 服务端：`t_message.conversation_tag` + `(tag, id)`、`(tag, to_user, id)` 索引；
   标签用 `@JsonProperty(WRITE_ONLY)`，请求可带、响应绝不回显（旧客户端安全）。
-- 当前阶段（双写）：历史同时按标签与盲引用查询并按 clientMsgId 去重；
-  未读/已读/清除/未投递/跨设备同步仍走盲引用，因此**尚未获得隐私收益**。
-- 切换顺序（每一步都可独立回滚）：
-  1. 未读/已读按标签；
-  2. 清除与未投递改按「标签游标」（`t_conversation_clear.peer = 'tag:'+tag`）；
-  3. 跨设备同步的 `selectParticipantCopy` 支持按标签取原消息；
-  4. 停止写 `from_ref`，所有查询切到标签；
+- 当前阶段（双写）：历史/未读/已读/清除/未投递/跨设备同步**都已支持标签**，
+  但 `from_ref` 仍在写，两条查询路径并存：
+  - 未读用 `countUnreadByRefOrTags` 合并去重，避免同一条消息算两次；
+  - 清除同时写 `tag:<tag>` 清除点，未投递用
+    `greatest(引用游标, 标签游标)` 过滤；
+  - 同步用 `selectParticipantCopyByTag` 在引用路径失配时兜底。
+  因此**尚未获得隐私收益**，只完成了切换所需的全部查询路径。
+- 剩余切换：
+  4. 停止写 `from_ref`（新消息只写标签）；
   5. 保留 `idx_ref_*` 一段时间用于回滚，之后单独清理。
 - 风险：标签只存在本地，本机数据被清后该会话的历史会少一段；
   切换前保留盲引用正是为了兜住这种情况。标签被错误复用时，
