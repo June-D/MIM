@@ -21,13 +21,13 @@ import org.springframework.util.StringUtils;
 @Order
 public class SecurityStartupChecker implements CommandLineRunner {
 
-    @Value("${spring.redis.password:}")
+    @Value("${spring.data.redis.password:}")
     private String redisPassword;
 
-    @Value("${spring.redis.host:127.0.0.1}")
+    @Value("${spring.data.redis.host:127.0.0.1}")
     private String redisHost;
 
-    @Value("${spring.redis.ssl:false}")
+    @Value("${spring.data.redis.ssl.enabled:false}")
     private boolean redisSsl;
 
     @Value("${mim.redis.require-secure:false}")

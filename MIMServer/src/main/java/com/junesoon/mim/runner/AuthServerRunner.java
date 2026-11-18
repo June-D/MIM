@@ -6,7 +6,7 @@ import com.junesoon.mim.jwt.RsaKeyHelper;
 import com.junesoon.mim.service.RsaKeyService;
 import com.junesoon.mim.utils.MasterKeyCrypto;
 import java.util.Map;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Configuration;

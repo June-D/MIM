@@ -3,7 +3,7 @@ package com.junesoon.mim.exception;
 import com.junesoon.mim.constant.CommonConstants;
 import com.junesoon.mim.ratelimit.RateLimitExceededException;
 import com.junesoon.mim.responses.BaseResponse;
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.web.bind.annotation.ControllerAdvice;

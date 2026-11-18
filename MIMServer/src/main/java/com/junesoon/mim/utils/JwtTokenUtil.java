@@ -3,7 +3,7 @@ package com.junesoon.mim.utils;
 import com.junesoon.mim.config.KeyConfiguration;
 import com.junesoon.mim.jwt.JWTHelper;
 import com.junesoon.mim.jwt.JWTInfo;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 

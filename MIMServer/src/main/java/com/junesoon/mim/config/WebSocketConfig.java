@@ -2,7 +2,7 @@ package com.junesoon.mim.config;
 
 import com.junesoon.mim.interceptor.WebcocketInterceptor;
 import com.junesoon.mim.websocket.WebSocketServer;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.socket.config.annotation.EnableWebSocket;
 import org.springframework.web.socket.config.annotation.WebSocketConfigurer;

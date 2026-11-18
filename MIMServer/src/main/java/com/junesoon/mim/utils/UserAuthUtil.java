@@ -6,7 +6,7 @@ import com.junesoon.mim.jwt.JWTHelper;
 import com.junesoon.mim.jwt.JWTInfo;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.SignatureException;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.util.StringUtils;
 

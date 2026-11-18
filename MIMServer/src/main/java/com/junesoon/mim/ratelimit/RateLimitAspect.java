@@ -2,7 +2,7 @@ package com.junesoon.mim.ratelimit;
 
 import com.junesoon.mim.auth.CurrentUser;
 import com.junesoon.mim.utils.UserAuthUtil;
-import javax.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
 import org.aspectj.lang.annotation.Around;

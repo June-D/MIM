@@ -4,7 +4,7 @@ import com.junesoon.mim.entity.RsaKey;
 import com.junesoon.mim.mapper.RsaKeyMapper;
 import com.junesoon.mim.service.RsaKeyService;
 import com.junesoon.mim.utils.MasterKeyCrypto;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import org.springframework.stereotype.Service;
 
 @Service

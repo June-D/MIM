@@ -19,7 +19,7 @@ import com.junesoon.mim.utils.TotpVerifier;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;

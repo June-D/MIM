@@ -8,10 +8,10 @@
     <url>http://maven.apache.org</url>
 
     <properties>
-        <java.version>1.8</java.version>
+        <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
-        <spring-boot.version>2.7.18</spring-boot.version>
+        <spring-boot.version>3.3.5</spring-boot.version>
         <jjwt.version>0.11.5</jjwt.version>
     </properties>
 
@@ -43,17 +43,16 @@
         <dependency>
             <groupId>org.mybatis.spring.boot</groupId>
             <artifactId>mybatis-spring-boot-starter</artifactId>
-            <version>2.3.1</version>
+            <version>3.0.3</version>
         </dependency>
         <dependency>
             <groupId>com.alibaba</groupId>
-            <artifactId>druid-spring-boot-starter</artifactId>
-            <version>1.2.20</version>
+            <artifactId>druid-spring-boot-3-starter</artifactId>
+            <version>1.2.23</version>
         </dependency>
         <dependency>
-            <groupId>mysql</groupId>
-            <artifactId>mysql-connector-java</artifactId>
-            <version>8.0.33</version>
+            <groupId>com.mysql</groupId>
+            <artifactId>mysql-connector-j</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
@@ -77,11 +76,11 @@
             <version>${jjwt.version}</version>
             <scope>runtime</scope>
         </dependency>
-        <!-- 邮件找回密码。直接依赖 JavaMail，避免引入整套 Spring Mail 自动配置。 -->
+        <!-- 邮件找回密码。直接依赖 Jakarta Mail，避免引入整套 Spring Mail 自动配置。 -->
         <dependency>
             <groupId>com.sun.mail</groupId>
-            <artifactId>javax.mail</artifactId>
-            <version>1.6.2</version>
+            <artifactId>jakarta.mail</artifactId>
+            <version>2.0.1</version>
         </dependency>
         <dependency>
             <groupId>joda-time</groupId>
@@ -101,7 +100,7 @@
         </dependency>
         <!--
           集成测试用：提供 @SpringBootTest、MockMvc、AssertJ。
-          注意 spring-boot-starter-test 2.7.x 自带 JUnit 5.8；
+          注意 spring-boot-starter-test 3.3.x 自带 JUnit 5.10；
           与上面显式声明的 5.10.2 并存时以 5.10.2 为准（依赖管理不覆盖显式版本）。
         -->
         <dependency>
@@ -136,8 +135,11 @@
                 <artifactId>maven-compiler-plugin</artifactId>
                 <version>3.8.1</version>
                 <configuration>
-                    <source>1.8</source>
-                    <target>1.8</target>
+                    <release>17</release>
+                    <parameters>true</parameters>
+                    <compilerArgs>
+                        <arg>-parameters</arg>
+                    </compilerArgs>
                     <encoding>UTF-8</encoding>
                 </configuration>
             </plugin>

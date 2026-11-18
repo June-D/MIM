@@ -7,7 +7,7 @@
 #   ./verify.sh --e2e        额外跑端到端回归（需要可连接的 MySQL/Redis）
 #
 # 环境要求：
-#   MIM_SERVER_JAVA_HOME  服务端 JDK 8（Corretto 等，无需 JavaFX）
+#   MIM_SERVER_JAVA_HOME  服务端 JDK 17（无需 JavaFX）
 #   MIM_CLIENT_JAVA_HOME  客户端 JDK 8（必须带 JavaFX，如 Zulu FX 8）
 #
 # 未设置 JAVA_HOME 时脚本会尝试常见路径，找不到则明确报错而不是静默跳过。
@@ -68,10 +68,11 @@ pick_java_home() {
 }
 
 SERVER_JH="$(pick_java_home "${MIM_SERVER_JAVA_HOME:-}" \
-  "$HOME/Library/Java/JavaVirtualMachines/corretto-1.8.0_472/Contents/Home" \
-  "/Library/Java/JavaVirtualMachines/1.8.0.jdk/Contents/Home" \
-  "/usr/lib/jvm/java-8-openjdk-amd64" \
-  "/usr/lib/jvm/zulu8")" || SERVER_JH=""
+  "/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home" \
+  "$HOME/Library/Java/JavaVirtualMachines/temurin-17.jdk/Contents/Home" \
+  "$HOME/Library/Java/JavaVirtualMachines/ms-17.0.17/Contents/Home" \
+  "/usr/lib/jvm/java-17-openjdk-amd64" \
+  "/usr/lib/jvm/temurin-17")" || SERVER_JH=""
 
 CLIENT_JH="$(pick_java_home "${MIM_CLIENT_JAVA_HOME:-}" \
   "$HOME/jdk/zulu8.98.0.111-ca-fx-jdk8.0.512-macosx_aarch64/Contents/Home" \
@@ -80,7 +81,7 @@ CLIENT_JH="$(pick_java_home "${MIM_CLIENT_JAVA_HOME:-}" \
 
 MISSING_JAVA=0
 if [ -z "$SERVER_JH" ]; then
-  fail "找不到服务端 JDK 8，请设置 MIM_SERVER_JAVA_HOME"
+  fail "找不到服务端 JDK 17，请设置 MIM_SERVER_JAVA_HOME"
   MISSING_JAVA=1
 else
   ok "服务端 JDK：${SERVER_JH}（$("$SERVER_JH/bin/java" -version 2>&1 | head -1)）"

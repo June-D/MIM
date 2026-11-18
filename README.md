@@ -277,7 +277,9 @@ WebSocket 只在握手时校验 JWT；服务端每分钟关闭一次已过期的
 
 ### 依赖
 
-- JDK 8（客户端需**带 JavaFX** 的 JDK 8，如 Zulu FX 8；Corretto 8 不含 JavaFX）
+- 服务端 **JDK 17**（无需 JavaFX）
+- 客户端 **JDK 8**（需**带 JavaFX**，如 Zulu FX 8；Corretto 8 不含 JavaFX）
+- Maven 3.6.3+（服务端 Boot 3 插件的最低版本）
 - MySQL 8 / Redis 5+
 
 ```bash
@@ -321,6 +323,7 @@ ALTER TABLE t_friend_request CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_ge
 ### 启动服务端
 
 ```bash
+export JAVA_HOME=/path/to/jdk-17
 export MIM_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_core?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8"
 export MIM_DB_USERNAME=root
 export MIM_DB_PASSWORD=
@@ -333,6 +336,9 @@ export MIM_REDIS_REQUIRE_SECURE=false
 export MIM_MASTER_KEY=
 mvn spring-boot:run
 ```
+
+> 服务端需要 JDK 17 与 Maven 3.6.3+；客户端仍需带 JavaFX 的 JDK 8。
+> 两个 JDK 可以并存，分别通过 `JAVA_HOME` / `MIM_CLIENT_JAVA_HOME` 指定。
 
 > `MIM_MASTER_KEY` 是 JWT RSA 私钥的静态加密密钥（Base64 32 字节）。
 > 配置后请务必备份；丢失或错误会导致服务端拒绝启动，且不会静默换钥。
@@ -623,6 +629,10 @@ mvn test
 82. `MIM_MASTER_KEY` / `MIM_EMAIL_KEY` 支持从文件读取
     （`MIM_MASTER_KEY_FILE` / `MIM_EMAIL_KEY_FILE`），便于 Docker/K8s
     Secret 或 Vault 挂载；环境变量优先。
+83. 服务端迁移到 **Spring Boot 3.3.5 + Java 17**：`javax` → `jakarta`、
+    Tomcat 10.1、Druid Boot3 starter、MyBatis 3.0.3、MySQL Connector/J；
+    编译开启 `-parameters`（Spring 6 解析未显式命名的路径参数所需）。
+    客户端仍为 JavaFX 8，两个 JDK 并存。
 
 ## 仍需处理
 
@@ -633,8 +643,8 @@ mvn test
   或使用 KMS，并备份主密钥。同时拿到数据库与主密钥仍可解密。
 - 旧版未绑定设备的 JWT 默认仍兼容；客户端全部升级后可设
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
-- Boot 2.7.18 已结束 OSS 支持，后续建议整体迁移到 Boot 3 + Java 17；
-  这会同时带来 `javax` → `jakarta` 的改造。
+- 服务端已迁移到 Boot 3.3.5 + Java 17；客户端仍为 JavaFX 8，
+  CI/部署需要同时准备两个 JDK。
 - 跨设备历史仍受上面那条限制：没有原文的消息补不回来。
 
 ## 许可证

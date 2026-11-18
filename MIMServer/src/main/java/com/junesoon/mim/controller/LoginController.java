@@ -8,7 +8,7 @@ import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.AuthService;
 import com.junesoon.mim.service.DeviceService;
-import javax.annotation.Resource;
+import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.RequestBody;
