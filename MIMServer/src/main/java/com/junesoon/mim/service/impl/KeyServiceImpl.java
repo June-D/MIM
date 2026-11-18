@@ -4,6 +4,7 @@ import com.junesoon.mim.entity.UserKey;
 import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
+import com.junesoon.mim.requests.KeyCapabilities;
 import com.junesoon.mim.responses.KeyBundle;
 import com.junesoon.mim.service.KeyService;
 import com.junesoon.mim.service.PasswordVerifier;
@@ -51,12 +52,15 @@ public class KeyServiceImpl implements KeyService {
     @Override
     public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
         String password) {
-        return upload(username, deviceId, publicKey, algorithm, password, null, null);
+        return upload(username, deviceId, publicKey, algorithm, password, null);
     }
 
     @Override
     public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
-        String password, Boolean supportsPadding, Boolean supportsRecallToken) {
+        String password, KeyCapabilities capabilities) {
+        Boolean supportsPadding = capabilities == null ? null : capabilities.padding();
+        Boolean supportsRecallToken = capabilities == null ? null : capabilities.recallToken();
+        Boolean supportsSenderCert = capabilities == null ? null : capabilities.senderCert();
         ValidationUtil.validateUsername(username);
         String device = StringUtils.hasText(deviceId)
             ? deviceId.trim() : UserKey.DEFAULT_DEVICE_ID;
@@ -86,6 +90,7 @@ public class KeyServiceImpl implements KeyService {
 
         boolean padding = Boolean.TRUE.equals(supportsPadding);
         boolean recallToken = Boolean.TRUE.equals(supportsRecallToken);
+        boolean senderCert = Boolean.TRUE.equals(supportsSenderCert);
         String fingerprint = fingerprint(keyBytes);
         UserKey existing = userKeyMapper.selectByDevice(username, device);
         if (existing != null && fingerprint.equals(existing.getFingerprint())) {
@@ -95,13 +100,15 @@ public class KeyServiceImpl implements KeyService {
             boolean paddingChanged = capabilityChanged(existing.getSupportsPadding(), padding);
             boolean recallChanged = capabilityChanged(existing.getSupportsRecallToken(),
                 recallToken);
-            if (paddingChanged || recallChanged) {
+            boolean certChanged = capabilityChanged(existing.getSupportsSenderCert(), senderCert);
+            if (paddingChanged || recallChanged || certChanged) {
                 if (!passwordVerifier.matches(username, password)) {
                     throw new UserInvalidException("修改填充能力需要验证当前密码");
                 }
                 existing.setSupportsPadding(declaredCapability(supportsPadding, padding));
                 existing.setSupportsRecallToken(declaredCapability(supportsRecallToken,
                     recallToken));
+                existing.setSupportsSenderCert(declaredCapability(supportsSenderCert, senderCert));
                 existing.setUpdTime(new Date());
                 userKeyMapper.upsert(existing);
             }
@@ -122,6 +129,7 @@ public class KeyServiceImpl implements KeyService {
         key.setFingerprint(fingerprint);
         key.setSupportsPadding(padding);
         key.setSupportsRecallToken(recallToken);
+        key.setSupportsSenderCert(senderCert);
         key.setUpdTime(new Date());
         if (existing == null) {
             key.setCrtTime(new Date());
@@ -216,6 +224,7 @@ public class KeyServiceImpl implements KeyService {
         bundle.setFingerprint(key.getFingerprint());
         bundle.setSupportsPadding(Boolean.TRUE.equals(key.getSupportsPadding()));
         bundle.setSupportsRecallToken(Boolean.TRUE.equals(key.getSupportsRecallToken()));
+        bundle.setSupportsSenderCert(Boolean.TRUE.equals(key.getSupportsSenderCert()));
         return bundle;
     }
 }

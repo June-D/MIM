@@ -28,4 +28,10 @@ public class KeyUploadRequest {
      * 旧客户端不上报，按 false 处理，只会收到纯文本副本。
      */
     private Boolean supportsRecallToken;
+
+    /**
+     * 本设备能否解析首条消息里的发送者证书（Phase 2b）。
+     * 旧客户端不上报，按 false 处理。
+     */
+    private Boolean supportsSenderCert;
 }

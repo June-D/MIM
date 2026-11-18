@@ -11,6 +11,7 @@ import com.junesoon.mim.entity.UserKey;
 import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
+import com.junesoon.mim.requests.KeyCapabilities;
 import com.junesoon.mim.responses.KeyBundle;
 import com.junesoon.mim.service.impl.KeyServiceImpl;
 import java.security.KeyPair;
@@ -183,10 +184,12 @@ class KeyServiceTest {
     @DisplayName("能力位随公钥上传保存并在返回包里可见")
     void capabilityRoundTrip() throws Exception {
         KeyBundle bundle = service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw",
-            Boolean.TRUE, Boolean.TRUE);
+            KeyCapabilities.of(Boolean.TRUE, Boolean.TRUE, Boolean.TRUE));
         assertTrue(bundle.getSupportsPadding());
         assertTrue(bundle.getSupportsRecallToken(),
             "跨设备撤回能力必须回传给客户端，否则同步副本永远不带凭证");
+        assertTrue(bundle.getSupportsSenderCert(),
+            "证书能力必须回传，否则首条消息永远走明文发送者格式");
         assertTrue(service.get("alice", DEVICE).getSupportsRecallToken());
     }
 
@@ -194,7 +197,8 @@ class KeyServiceTest {
     @DisplayName("旧客户端重登未上报能力位时降级为 false，且不涨版本")
     void capabilitiesDowngradeWhenNotDeclared() throws Exception {
         String key = realP256PublicKey();
-        service.upload("alice", DEVICE, key, "EC-P256", "pw", Boolean.TRUE, Boolean.TRUE);
+        service.upload("alice", DEVICE, key, "EC-P256", "pw",
+            KeyCapabilities.of(Boolean.TRUE, Boolean.TRUE, Boolean.TRUE));
         KeyBundle legacy = service.upload("alice", DEVICE, key, "EC-P256", "pw");
         assertFalse(Boolean.TRUE.equals(legacy.getSupportsRecallToken()));
         assertFalse(Boolean.TRUE.equals(legacy.getSupportsPadding()));
@@ -205,10 +209,11 @@ class KeyServiceTest {
     @DisplayName("修改能力位需要验证当前密码")
     void capabilityChangeRequiresPassword() throws Exception {
         String key = realP256PublicKey();
-        service.upload("alice", DEVICE, key, "EC-P256", "pw", Boolean.FALSE, Boolean.FALSE);
+        service.upload("alice", DEVICE, key, "EC-P256", "pw",
+            KeyCapabilities.of(Boolean.FALSE, Boolean.FALSE, Boolean.FALSE));
         assertThrows(UserInvalidException.class,
             () -> service.upload("alice", DEVICE, key, "EC-P256", "wrong",
-                Boolean.TRUE, Boolean.TRUE),
+                KeyCapabilities.of(Boolean.TRUE, Boolean.TRUE, Boolean.TRUE)),
             "仅凭被盗 JWT 不能把设备标成支持新能力");
     }
 

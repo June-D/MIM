@@ -521,10 +521,11 @@ class MessageSendValidationTest {
     }
 
     @Test
-    @DisplayName("sealed 消息不落库握手参数，桥接期消息仍然保留")
-    void sealedDropsHandshakeParams() throws Exception {
+    @DisplayName("握手参数按请求落库：sealed 首条消息也要保留，投递后才由 mapper 擦除")
+    void handshakeParamsSurviveUntilDelivery() throws Exception {
         enableSealedSender();
 
+        // 首条 sealed 消息必须带参数，否则收信端无法离线建出会话
         CipherMessage sealed = replica(BOB_DEVICE_A);
         sealed.setSealed(true);
         sealed.setSessionId("session-abcdef12");
@@ -536,27 +537,20 @@ class MessageSendValidationTest {
 
         CipherMessage stored = service.send(ALICE, ALICE_DEVICE,
             Collections.singletonList(sealed)).get(0);
-        assertNull(stored.getSenderIdentityKey(),
-            "身份公钥可与公钥目录 join 出用户名，sealed 行不能落库");
-        assertNull(stored.getSenderEphemeralKey());
-        assertNull(stored.getConsumedOneTimePreKeyId());
-        assertNull(stored.getRecipientSignedPreKeyId());
-        assertFalse(Boolean.TRUE.equals(stored.getSenderUsedOneTimePreKey()));
+        assertEquals(ALICE + "-key-" + ALICE_DEVICE, stored.getSenderIdentityKey(),
+            "首条 sealed 消息必须保留握手参数");
+        assertEquals(Integer.valueOf(7), stored.getConsumedOneTimePreKeyId());
+        assertEquals(Boolean.TRUE, stored.getSenderUsedOneTimePreKey());
+        assertNull(stored.getFromUsername(), "但发送者列仍必须是 NULL");
 
-        // 桥接期消息（未 sealed）必须保留参数，否则对端永远建不出会话
+        // 桥接期消息同样保留（收信端首次建链要用）
         CipherMessage bridge = replica(BOB_DEVICE_A);
         bridge.setClientMsgId("client-msg-0002");
         bridge.setSenderIdentityKey(ALICE + "-key-" + ALICE_DEVICE);
         bridge.setSenderEphemeralKey("ZXBoZW1lcmFs");
-        bridge.setSenderUsedOneTimePreKey(Boolean.TRUE);
-        bridge.setConsumedOneTimePreKeyId(7);
-        bridge.setRecipientSignedPreKeyId(3);
-
         CipherMessage bridgeStored = service.send(ALICE, ALICE_DEVICE,
             Collections.singletonList(bridge)).get(0);
         assertEquals(ALICE + "-key-" + ALICE_DEVICE, bridgeStored.getSenderIdentityKey());
-        assertEquals(Integer.valueOf(7), bridgeStored.getConsumedOneTimePreKeyId());
-        assertEquals(Boolean.TRUE, bridgeStored.getSenderUsedOneTimePreKey());
     }
 
     @Test

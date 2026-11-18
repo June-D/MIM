@@ -281,13 +281,29 @@
 
     <update id="markDelivered">
         update t_message
-        set delivered = 1
+        set delivered = 1,
+            sender_identity_key = null,
+            sender_ephemeral_key = null,
+            sender_used_opk = 0,
+            consumed_opk_id = null,
+            recipient_spk_id = null
         where id = #{id,jdbcType=BIGINT}
     </update>
 
+    <!--
+      投递确认同时擦除握手参数。
+      首条消息必须带身份公钥/临时公钥/OPK 编号，收信端才能离线建出会话；
+      但 sender_identity_key 可与 t_user_key.public_key join 出用户名。
+      收信设备确认收到后这些参数不再需要，立刻清空，让长期数据只剩盲引用。
+    -->
     <update id="markDeliveredUpTo">
         update t_message
-        set delivered = 1
+        set delivered = 1,
+            sender_identity_key = null,
+            sender_ephemeral_key = null,
+            sender_used_opk = 0,
+            consumed_opk_id = null,
+            recipient_spk_id = null
         where target_device_id = #{deviceId,jdbcType=VARCHAR}
           and delivered = 0
           and id &lt;= #{beforeId,jdbcType=BIGINT}

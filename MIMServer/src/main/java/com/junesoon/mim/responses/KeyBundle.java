@@ -33,4 +33,10 @@ public class KeyBundle {
      * 只有声明支持的目标设备才会收到带凭证的副本，旧客户端保持纯文本。
      */
     private Boolean supportsRecallToken;
+
+    /**
+     * 该设备能否解析首条消息里的发送者证书。只有声明支持的目标设备
+     * 才会收到带证书的 sealed 首条消息。
+     */
+    private Boolean supportsSenderCert;
 }

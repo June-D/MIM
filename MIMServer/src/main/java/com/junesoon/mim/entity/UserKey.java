@@ -51,6 +51,12 @@ public class UserKey implements Serializable {
      */
     private Boolean supportsRecallToken;
 
+    /**
+     * 客户端能否解析首条消息里的发送者证书（Phase 2b）。
+     * 旧客户端不上报，按 false 处理，继续收明文发送者格式。
+     */
+    private Boolean supportsSenderCert;
+
     private Date crtTime;
 
     private Date updTime;

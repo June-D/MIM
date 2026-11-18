@@ -59,11 +59,12 @@ public interface PreKeyService {
         private final Integer oneTimePreKeyId;
         private final String oneTimePreKeyPublic;
         private final Boolean supportsRecallToken;
+        private final Boolean supportsSenderCert;
 
         public PreKeyBundle(String username, String deviceId, String identityPublicKey,
             Integer identityKeyVersion, Integer signedPreKeyId, String signedPreKeyPublic,
             String signedPreKeySignature, Integer oneTimePreKeyId, String oneTimePreKeyPublic,
-            Boolean supportsRecallToken) {
+            Boolean supportsRecallToken, Boolean supportsSenderCert) {
             this.username = username;
             this.deviceId = deviceId;
             this.identityPublicKey = identityPublicKey;
@@ -74,6 +75,7 @@ public interface PreKeyService {
             this.oneTimePreKeyId = oneTimePreKeyId;
             this.oneTimePreKeyPublic = oneTimePreKeyPublic;
             this.supportsRecallToken = supportsRecallToken;
+            this.supportsSenderCert = supportsSenderCert;
         }
 
         public String getUsername() {
@@ -122,6 +124,14 @@ public interface PreKeyService {
          */
         public Boolean getSupportsRecallToken() {
             return supportsRecallToken;
+        }
+
+        /**
+         * 该设备能否解析首条消息里的发送者证书（Phase 2b）。
+         * 未声明能力的旧客户端为 false，继续收明文发送者格式。
+         */
+        public Boolean getSupportsSenderCert() {
+            return supportsSenderCert;
         }
     }
 }

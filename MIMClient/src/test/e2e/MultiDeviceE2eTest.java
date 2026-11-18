@@ -98,6 +98,12 @@ public final class MultiDeviceE2eTest {
         }
         check("两台设备的预密钥包都声明支持跨设备撤回凭证", allRecallToken);
 
+        boolean allSenderCert = true;
+        for (PreKeyBundleView bundle : bundles) {
+            allSenderCert &= bundle.supportsSenderCert;
+        }
+        check("两台设备都声明支持首条消息发送者证书", allSenderCert);
+
         // ---- alice 为每个设备各建会话并加密 ----
         RatchetService ratchet = new RatchetService();
         TrustStore aliceTrust = new TrustStore(workDir.resolve("trust-alice"));
@@ -353,6 +359,7 @@ public final class MultiDeviceE2eTest {
         Integer oneTimePreKeyId;
         String oneTimePreKeyPublic;
         boolean supportsRecallToken;
+        boolean supportsSenderCert;
     }
 
     private static final class CipherMessageView {
@@ -392,7 +399,8 @@ public final class MultiDeviceE2eTest {
         throws Exception {
         String body = "{\"publicKey\":\"" + publicKey
             + "\",\"algorithm\":\"EC-P256\",\"password\":\"" + base64(PASSWORD)
-            + "\",\"supportsPadding\":true,\"supportsRecallToken\":true}";
+            + "\",\"supportsPadding\":true,\"supportsRecallToken\":true"
+            + ",\"supportsSenderCert\":true}";
         requireOk(httpPost(BASE + "/key", token, deviceId, body), "上传身份公钥");
     }
 
@@ -439,6 +447,7 @@ public final class MultiDeviceE2eTest {
                 view.oneTimePreKeyPublic = strOrNull(block, "\"oneTimePreKeyPublic\":\"");
             }
             view.supportsRecallToken = block.contains("\"supportsRecallToken\":true");
+            view.supportsSenderCert = block.contains("\"supportsSenderCert\":true");
             bundles.add(view);
         }
         return bundles;

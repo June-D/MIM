@@ -209,13 +209,14 @@ class MapperIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
-    @DisplayName("能力位持久化：跨设备撤回声明可读回，缺省为 false")
+    @DisplayName("能力位持久化：撤回凭证与发送者证书声明可读回，缺省为 false")
     void userKeyCapabilitiesPersist() {
         registerDevice(BOB, DEVICE_A);
         registerDevice(BOB, DEVICE_B);
         UserKey modern = userKey(BOB, DEVICE_A, "key-modern");
         modern.setSupportsPadding(true);
         modern.setSupportsRecallToken(true);
+        modern.setSupportsSenderCert(true);
         userKeyMapper.upsert(modern);
         userKeyMapper.upsert(userKey(BOB, DEVICE_B, "key-legacy"));
 
@@ -223,6 +224,8 @@ class MapperIntegrationTest extends IntegrationTestBase {
         assertTrue(Boolean.TRUE.equals(stored.getSupportsPadding()));
         assertTrue(Boolean.TRUE.equals(stored.getSupportsRecallToken()),
             "跨设备撤回能力必须能读回，否则同步副本不会带凭证");
+        assertTrue(Boolean.TRUE.equals(stored.getSupportsSenderCert()),
+            "证书能力必须能读回，否则首条消息不会走新格式");
 
         UserKey legacy = userKeyMapper.selectByDevice(BOB, DEVICE_B);
         assertFalse(Boolean.TRUE.equals(legacy.getSupportsRecallToken()),
@@ -479,6 +482,32 @@ class MapperIntegrationTest extends IntegrationTestBase {
         assertTrue(messageMapper.selectUndelivered(BOB, DEVICE_A, 100).isEmpty());
         assertEquals(1, messageMapper.selectUndelivered(BOB, DEVICE_B, 100).size(),
             "另一台设备的队列不应被动过");
+    }
+
+    @Test
+    @DisplayName("投递确认后擦除握手参数与身份公钥，保留内容与盲引用")
+    void markDeliveredWipesHandshakeParams() {
+        // 首条 sealed 消息必须带握手参数，收信端才能离线建会话；
+        // 投递确认后这些参数应立即消失，避免用公钥目录 join 出用户名。
+        CipherMessage first = sealedMessage("msg-first-01", BOB, DEVICE_A, REF_ALICE);
+        first.setSenderIdentityKey("alice-identity-key");
+        first.setSenderEphemeralKey("alice-ephemeral-key");
+        first.setSenderUsedOneTimePreKey(Boolean.TRUE);
+        first.setConsumedOneTimePreKeyId(7);
+        first.setRecipientSignedPreKeyId(3);
+        messageMapper.insert(first);
+
+        messageMapper.markDeliveredUpTo(BOB, DEVICE_A, Long.MAX_VALUE);
+
+        CipherMessage stored = messageMapper.selectByClientMsgId("msg-first-01", DEVICE_A);
+        assertEquals(Boolean.TRUE, stored.getDelivered());
+        assertNull(stored.getSenderIdentityKey(), "投递后身份公钥必须擦除");
+        assertNull(stored.getSenderEphemeralKey(), "临时公钥必须擦除");
+        assertNull(stored.getConsumedOneTimePreKeyId());
+        assertNull(stored.getRecipientSignedPreKeyId());
+        assertFalse(Boolean.TRUE.equals(stored.getSenderUsedOneTimePreKey()));
+        assertNotNull(stored.getCiphertext(), "擦除的是握手参数，不是消息内容");
+        assertEquals(REF_ALICE, stored.getFromRef(), "盲引用必须保留，历史查询还要用");
     }
 
     @Test

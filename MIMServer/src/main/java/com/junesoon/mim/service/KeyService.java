@@ -1,6 +1,7 @@
 package com.junesoon.mim.service;
 
 import com.junesoon.mim.responses.KeyBundle;
+import com.junesoon.mim.requests.KeyCapabilities;
 import java.util.List;
 
 public interface KeyService {
@@ -12,12 +13,10 @@ public interface KeyService {
         String password);
 
     /**
-     * 带能力协商的上传。两个能力位为空都按 false 处理：
-     * supportsPadding 表示能否接收填充消息，supportsRecallToken
-     * 表示能否在设备间同步副本里接收加密的撤回凭证。
+     * 带能力协商的上传。能力位未声明都按 false 处理，旧客户端行为不变。
      */
     KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
-        String password, Boolean supportsPadding, Boolean supportsRecallToken);
+        String password, KeyCapabilities capabilities);
 
     /**
      * 取指定设备（缺省为 default）的公钥。

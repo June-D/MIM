@@ -33,4 +33,10 @@ public class KeyBundle {
      * 该设备是否支持消息长度填充。旧客户端为 false。
      */
     private Boolean supportsPadding;
+
+    /**
+     * 该设备能否解析首条消息里的发送者证书（Phase 2b）。
+     * 旧客户端为 false，发送端会退回明文发送者格式。
+     */
+    private Boolean supportsSenderCert;
 }

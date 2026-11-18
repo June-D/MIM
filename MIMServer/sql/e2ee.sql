@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS `t_user_key` (
     `fingerprint` varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '公钥 SHA-256 指纹，供线下核验',
     `supports_padding` tinyint(1) NOT NULL DEFAULT 0 COMMENT '客户端是否支持消息长度填充',
     `supports_recall_token` tinyint(1) NOT NULL DEFAULT 0 COMMENT '客户端能否接收加密的撤回凭证（自己设备间同步）',
+    `supports_sender_cert` tinyint(1) NOT NULL DEFAULT 0 COMMENT '客户端能否解析首条消息里的发送者证书',
     `crt_time`    datetime     NULL DEFAULT NULL COMMENT '创建时间',
     `upd_time`    datetime     NULL DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`username`, `device_id`) USING BTREE
@@ -294,3 +295,13 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 -- ALTER TABLE `t_user_key`
 --     ADD COLUMN `supports_recall_token` tinyint(1) NOT NULL DEFAULT 0
 --         COMMENT '客户端能否接收加密的撤回凭证（自己设备间同步）';
+
+-- ------------------------------------------------------------
+-- 从旧版本升级（取消注释后执行）：Phase 2b 首条消息发送者证书
+--
+-- 只有声明该能力的目标设备才会收到「证书信封」格式的首条消息；
+-- 未声明（旧客户端）继续收明文发送者格式，行为不变。
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_user_key`
+--     ADD COLUMN `supports_sender_cert` tinyint(1) NOT NULL DEFAULT 0
+--         COMMENT '客户端能否解析首条消息里的发送者证书';

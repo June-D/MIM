@@ -12,6 +12,8 @@ import com.junesoon.mim.crypto.PeerCipher;
 import com.junesoon.mim.crypto.PlaintextStore;
 import com.junesoon.mim.crypto.PreKeyStore;
 import com.junesoon.mim.crypto.RatchetService;
+import com.junesoon.mim.crypto.SenderCertEnvelope;
+import com.junesoon.mim.crypto.SenderCertVerifier;
 import com.junesoon.mim.crypto.SessionState;
 import com.junesoon.mim.crypto.SessionStore;
 import com.junesoon.mim.crypto.SyncEnvelope;
@@ -22,6 +24,7 @@ import com.junesoon.mim.feign.MessageFeign;
 import com.junesoon.mim.model.CipherMessage;
 import com.junesoon.mim.model.PreKeyBundle;
 import com.junesoon.mim.model.ReadRequest;
+import com.junesoon.mim.model.SenderCertificateView;
 import java.security.PrivateKey;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -63,6 +66,12 @@ public class MessageService {
     private final RatchetService ratchet = new RatchetService();
     private final SessionStore sessionStore = new SessionStore();
     private final PlaintextStore plaintextStore = new PlaintextStore();
+
+    /**
+     * 首条消息的发送者证书（Phase 2b）。服务端未启用时所有方法返回 null，
+     * 发送路径自动退回明文发送者格式。
+     */
+    private final SenderCertService senderCertService = SenderCertService.getInstance();
 
     /**
      * 会话缓存。key 为 {@code peer@deviceId}。每个设备槽里可以同时有我方发起链和对方发起链。
@@ -457,6 +466,16 @@ public class MessageService {
             }
         }
 
+        // 证书预取放在 cryptoLock 外：Feign 调用可能很慢，
+        // 不能让它阻塞所有会话的加解密。24 小时有效期内只请求一次。
+        com.junesoon.mim.model.SenderCertificateView prefetchedCert = null;
+        for (com.junesoon.mim.model.KeyBundle device : devices) {
+            if (Boolean.TRUE.equals(device.getSupportsSenderCert())) {
+                prefetchedCert = senderCertService.certificate();
+                break;
+            }
+        }
+
         for (com.junesoon.mim.model.KeyBundle device : devices) {
             String deviceId = device.getDeviceId();
             if (deviceId == null || deviceId.isEmpty()) {
@@ -488,8 +507,26 @@ public class MessageService {
                 }
                 boolean sealed = state.isSessionIdConfirmed();
 
+                // Phase 2b：还没确认会话时，如果对端设备声明支持证书，
+                // 就把服务端签发的证书放进密文里，让服务端不必落库 from_user。
+                // 拿不到证书（功能未启用/服务端旧版本）时自动退回明文发送者格式。
+                com.junesoon.mim.model.SenderCertificateView cert =
+                    sealed ? null : prefetchedCert;
+                if (cert != null && !Boolean.TRUE.equals(device.getSupportsSenderCert())) {
+                    cert = null;
+                }
+
                 boolean padding = Boolean.TRUE.equals(device.getSupportsPadding());
                 String payload = padding ? MessagePadding.pad(plaintext) : plaintext;
+                if (cert != null) {
+                    String packed = SenderCertEnvelope.pack(cert, payload);
+                    if (packed == null) {
+                        cert = null;
+                    } else {
+                        payload = packed;
+                    }
+                }
+                boolean sealedWire = sealed || cert != null;
                 RatchetService.Encrypted encrypted = ratchet.encrypt(state, payload);
                 persistSlot(peer, deviceId, slot);
                 log.info("发送到 {}/{}：序号={} 发送链长度={}",
@@ -499,11 +536,11 @@ public class MessageService {
                 CipherMessage replica = new CipherMessage();
                 replica.setClientMsgId(clientMsgId);
                 replica.setRecallToken(recallToken);
-                replica.setFromUsername(sealed ? null : self);
-                replica.setFromDeviceId(sealed ? null : keyManager.deviceId());
+                replica.setFromUsername(sealedWire ? null : self);
+                replica.setFromDeviceId(sealedWire ? null : keyManager.deviceId());
                 replica.setToUsername(peer);
                 replica.setTargetDeviceId(deviceId);
-                replica.setSealed(sealed);
+                replica.setSealed(sealedWire);
                 replica.setSessionId(state.getSessionId());
                 replica.setAlg(RatchetService.ALGORITHM);
                 replica.setIv(encrypted.getIv());
@@ -723,9 +760,9 @@ public class MessageService {
                 return new DecryptedMessage(message, "（本机未保留原文）", true);
             }
             if (ref == null) {
-                log.warn("sealed 消息 {} 找不到会话 {}", message.getClientMsgId(),
-                    message.getSessionId());
-                return new DecryptedMessage(message, "[此消息无法解密]", true);
+                // 首条消息：对端身份写在密文里的证书信封中，必须先解出来。
+                // 解不出证书一律按失败处理，绝不猜测发送者。
+                return decryptFirstContact(message);
             }
             peer = ref.peer;
             peerDevice = ref.deviceId;
@@ -1032,6 +1069,114 @@ public class MessageService {
             state.setSessionIdConfirmed(true);
         }
         return state;
+    }
+
+    /**
+     * 首条 sealed 消息的临时会话槽名。解出证书后会被真正的 peer/device 取代。
+     */
+    private static final String PENDING_PEER = "\u0000first-contact";
+
+    private static final String PENDING_DEVICE = "default";
+
+    /**
+     * 解密「首条 sealed 消息」（Phase 2b）。
+     *
+     * <p>这条消息没有 from_user，客户端也还没有 sessionId 索引，因此顺序是：
+     * 先用消息里的 X3DH 参数建临时应答链解出正文 → 拆证书信封 →
+     * 验签并绑定身份公钥 → 按 TOFU 校验设备公钥 → 才把会话落到真正的对端槽位。
+     *
+     * <p>任何一步失败都返回不可解密：绝不能因为「看起来像某个联系人」就归属过去。
+     */
+    private DecryptedMessage decryptFirstContact(CipherMessage message) {
+        IdentityStore.Identity identity = keyManager.getIdentity();
+        if (identity == null) {
+            return new DecryptedMessage(message, "[未解锁本地密钥，无法解密]", true);
+        }
+        if (message.getSenderIdentityKey() == null || message.getSenderEphemeralKey() == null
+            || message.getRatchetPublic() == null || message.getPreviousChainLength() == null
+            || message.getMessageNumber() == null) {
+            return new DecryptedMessage(message, "[此消息无法解密]", true);
+        }
+        try {
+            Integer opkId = requireResponderOneTimePreKey(message);
+            RatchetService.Header header = new RatchetService.Header(message.getRatchetPublic(),
+                message.getPreviousChainLength(), message.getMessageNumber());
+            PeerCipher trial = new PeerCipher(ratchet);
+            String raw = trial.open(true, message.getSenderEphemeralKey(), header,
+                message.getIv(), message.getCiphertext(),
+                () -> buildResponderSession(PENDING_PEER, PENDING_DEVICE, message));
+
+            SenderCertEnvelope.Parsed parsed = SenderCertEnvelope.unpack(raw);
+            if (parsed == null) {
+                throw new IdentityException("首条 sealed 消息缺少发送者证书");
+            }
+            SenderCertificateView certificate = parsed.getCertificate();
+            if (!SenderCertVerifier.matchesHandshake(certificate,
+                message.getSenderIdentityKey())) {
+                throw new IdentityException("发送者证书与握手身份公钥不一致");
+            }
+            if (!SenderCertVerifier.verify(certificate, senderCertService.pinnedPublicKey())) {
+                throw new IdentityException("发送者证书验签失败");
+            }
+            TrustStore.VerificationResult trust = keyManager.getTrustStore().verify(
+                certificate.getUsername(), certificate.getDeviceId(),
+                certificate.getIdentityKey(), currentPassword());
+            if (!trust.isSendable()) {
+                throw new IdentityException(trust.describe());
+            }
+
+            String peer = certificate.getUsername();
+            String peerDevice = normalizeDevice(certificate.getDeviceId());
+            SessionState opened = trial.getInbound();
+            if (opened == null) {
+                throw new IdentityException("首条消息没有建立会话");
+            }
+            opened.setDeviceId(peerDevice);
+            PeerCipher slot = slot(peer, peerDevice);
+            slot.setInbound(opened);
+            persistSlot(peer, peerDevice, slot);
+
+            if (opkId != null) {
+                consumeResponderOneTimePreKey(opkId, identity.getUsername());
+            }
+            String text = parsed.getText();
+            if (Boolean.TRUE.equals(message.getPadding())) {
+                text = MessagePadding.strip(text);
+            }
+            plaintextStore.put(cacheKey(peer, peerDevice, message.getClientMsgId()), text);
+            log.info("首条 sealed 消息已按证书归属到 {}/{}", peer, peerDevice);
+            return new DecryptedMessage(message, text, false);
+        } catch (Exception e) {
+            log.warn("首条 sealed 消息解密失败：{}", e.getMessage());
+            return new DecryptedMessage(message, "[此消息无法解密]", true);
+        }
+    }
+
+    /**
+     * 应答侧一次性预密钥的只读校验。信任校验要等证书解出来之后才做，
+     * 所以这里不能复用 prepareResponder。
+     */
+    private Integer requireResponderOneTimePreKey(CipherMessage message)
+        throws IdentityException {
+        if (!Boolean.TRUE.equals(message.getSenderUsedOneTimePreKey())) {
+            return null;
+        }
+        Integer id = message.getConsumedOneTimePreKeyId();
+        if (id == null || preKeyManager.getPreKeyStore().peekOneTimePreKey(id) == null) {
+            throw new IdentityException("对方使用了本地不存在的一次性预密钥 id=" + id);
+        }
+        return id;
+    }
+
+    private void consumeResponderOneTimePreKey(Integer id, String self) {
+        preKeyManager.getPreKeyStore().consumeOneTimePreKey(id);
+        try {
+            String password = currentPassword();
+            preKeyManager.getPreKeyStore().save(self, keyManager.deviceId(), password);
+            preKeyManager.replenishIfNeeded(password);
+        } catch (IdentityException e) {
+            log.warn("一次性预密钥保存失败：{}", e.getMessage());
+        }
     }
 
     public List<DecryptedMessage> decryptAll(List<CipherMessage> raw) {

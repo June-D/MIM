@@ -256,9 +256,11 @@ UNIQUE KEY uk_client_target (client_msg_id, target_device_id)
 - 撤回：`selectOwnedCopy` 接受用户名或盲引用；消息有 `recall_token_hash` 时
   必须提交匹配的 `recallToken`，只用 `recallByToken` 更新；
   没有哈希的旧消息回退到 `recallBySender`。
-- 握手参数只落在桥接期消息：sealed 行的 `sender_identity_key` /
-  `sender_ephemeral_key` / `consumed_opk_id` / `recipient_spk_id` 一律写 NULL。
-  身份公钥可 join `t_user_key.public_key` 反查用户名，落库会抵消盲引用的意义。
+- 握手参数的生命周期：按请求落库（首条消息必须带），
+  `markDeliveredUpTo` 在标记已投递的同一条 UPDATE 里把
+  `sender_identity_key` / `sender_ephemeral_key` / `consumed_opk_id` /
+  `recipient_spk_id` 清空。身份公钥可 join `t_user_key.public_key`
+  反查用户名，因此不能长期保留；已建立会话的新客户端也不再发送这些字段。
 
 ### 客户端
 
@@ -316,18 +318,18 @@ UNIQUE KEY uk_client_target (client_msg_id, target_device_id)
 - 这是「数据库发送者列无明文、无固定索引」，不是提交匿名：服务端提交时
   仍从 JWT 知道发送者，盲引用也可被持有服务端密钥者关联。
 - 数据库中与发送者相关的列只剩：盲引用（需服务端密钥才能关联）、
-  密钥版本号、客户端时间。sealed 行不保存身份公钥与握手参数，
-  因此不能用「公钥目录 join」反查用户名。
+  密钥版本号、客户端时间。握手参数只在投递前存在，确认投递后即被清空，
+  因此长期数据不能用「公钥目录 join」反查用户名。
 - 撤回凭证保存在发送端本地；另一台设备只有在历史同步时收到信封才有凭证，
   本机数据丢失或从未同步的设备只能走旧版兼容撤回路径。
 - 首次联系与桥接消息仍是旧格式，发送者可见，直到 Phase 2 的令牌/证书体系。
 
 ### 验证
 
-- 服务端 217 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
+- 服务端 218 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
   未读、token 撤回、Phase 1 存量行兼容与清除点过滤；
-- 客户端 112 项：`recallToken` 落盘、凭证信封格式与请求体改动；
-- e2e 多设备 29 项：新增「响应不回显撤回凭证」「缺 token 撤回 sealed 被拒」与
+- 客户端 123 项：`recallToken` 落盘、撤回与证书两类信封、证书验签与公钥固定；
+- e2e 多设备 30 项：新增「响应不回显撤回凭证」「缺 token 撤回 sealed 被拒」与
   「预密钥包声明支持跨设备撤回凭证」，
   WebSocket 13 项不受影响。
 
@@ -369,22 +371,34 @@ Phase 1.5 消除的是**持久化**发送者元数据。首次联系与桥接消
 - 实现在 `SenderCertServiceImpl`：密钥存 `t_rsa_key`
   （`MIM:AUTH:SENDER-CERT:PRI/PUB`，主密钥加密），与 JWT 密钥分离，
   首次使用时惰性生成；有效期 24 小时。
-- 验签用的规范化串见 `SenderCertificate.canonical()`，
-  客户端必须逐字节复现（2b 落地时再实现）。
+- 验签用的规范化串见 `SenderCertificate.canonical()`；
+  客户端 `SenderCertificateView.canonical()` 必须与它逐字节一致
+  （客户端 `SenderCertVerifierTest` 用真实 RSA 签名覆盖这条契约）。
 - 测试：`SenderCertServiceTest` 5 项（签名可验、篡改三类字段被拒、
   有效期 24h、关闭时不产生密钥、密钥只生成一次）；
   `HttpApiIntegrationTest` 1 项（默认关闭返回未启用）。
 - 此步不改变消息格式，也不宣称匿名。
 
-**2b：首条消息 sealed**
-- 发送端把证书放进 `SyncEnvelope` 同款信封（换魔数），随 X3DH 密文提交；
+**2b（已落地，默认关闭）：首条消息 sealed**
+- 发送端把证书放进 `SenderCertEnvelope`，随 X3DH 密文提交；
   服务端对首条消息也写 `sealed=1`、`from_ref`，`from_user` 为 NULL。
-- 接收端拆信封 → 验证书 → 用证书里的 `username/deviceId` 还原对端，
-  再走现有 TOFU/安全码校验；验签失败一律按不可信处理，不猜发送者。
+- 接收端顺序固定：先用握手参数建临时应答链解密 → 拆信封 →
+  证书验签（`SenderCertVerifier`）→ 校验证书身份公钥与握手参数一致 →
+  按 TOFU 校验设备公钥 → 才把会话落到真实 peer/device 槽位。
+  任一步失败都按不可解密处理，绝不猜发送者。
+- 信任锚：`ServerCertPin` 首次拉取 `/cert/key` 即固定到
+  `~/.mim/server-cert.pub`（公钥是公开信息，明文存储）；之后服务端换钥
+  一律保留旧值并告警，新证书会验签失败。
 - 兼容：只有对端设备声明 `supportsSenderCert` 时才走新格式，
   否则保持明文发送者；`from_ref` 历史查询已就绪，不需要改 SQL。
-- 风险：收信端若丢失会话且没有桥接参数，将无法解密该消息；这与
-  现有「会话丢失即不可解」一致，需在 UI 明确提示。
+- 握手参数的生命周期：首条消息必须带，`markDeliveredUpTo` 在确认投递时
+  连同身份公钥一起清空，长期数据只剩盲引用。
+- 已实现文件：`crypto/SenderCertEnvelope`、`crypto/SenderCertVerifier`、
+  `crypto/ServerCertPin`、`service/SenderCertService`；
+  发送与解密接在 `MessageService.send` / `decryptFirstContact`。
+- **未验证项**：e2e 的副本是手工拼装的，不走客户端发送路径，
+  因此 2b 的双向收发尚未在真实界面上跑过；上线前必须人工验证
+  首次联系、TOFU 弹窗、会话丢失提示三条路径。
 
 **2c：匿名提交（暂缓）**
 - `/message` 增加不带 JWT 的通道，用令牌认证；服务端只校验签名与未消费。

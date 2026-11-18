@@ -207,7 +207,8 @@ public class PreKeyServiceImpl implements PreKeyService {
             signed.getPreKeyId(), signed.getPublicKey(), signed.getSignature(),
             oneTime == null ? null : oneTime.getPreKeyId(),
             oneTime == null ? null : oneTime.getPublicKey(),
-            Boolean.TRUE.equals(identity.getSupportsRecallToken()));
+            Boolean.TRUE.equals(identity.getSupportsRecallToken()),
+            Boolean.TRUE.equals(identity.getSupportsSenderCert()));
     }
 
     @Override
