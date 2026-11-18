@@ -177,14 +177,18 @@ jobs:
           nohup java -cp "target/classes:$(cat /tmp/cp.txt)" \
             com.junesoon.mim.MIMServerStarter > /tmp/server.log 2>&1 &
           for i in $(seq 1 60); do
-            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/user/info || true)
-            if [ "$code" = "401" ]; then
-              echo "服务端已就绪（未认证接口返回 401，符合预期）"
-              break
+            if grep -q "Started MIMServerStarter" /tmp/server.log; then
+              code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/user/info || true)
+              if [ "$code" = "401" ]; then
+                echo "服务端已就绪（未认证接口返回 401，符合预期）"
+                break
+              fi
             fi
             sleep 1
           done
           grep -q "Started MIMServerStarter" /tmp/server.log || { cat /tmp/server.log; exit 1; }
+          code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/user/info || true)
+          [ "$code" = "401" ] || { cat /tmp/server.log; exit 1; }
 
       - name: 编译客户端
         working-directory: MIMClient
