@@ -42,7 +42,7 @@ jobs:
           --health-retries=20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 JDK 17
         uses: actions/setup-java@v5
@@ -87,7 +87,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 客户端源码直接使用 javafx.*，JavaFX 8 是随 JDK 分发的。
       # 因此这里不装 Temurin，而是用带 JavaFX 的 Zulu FX 8（jdk+fx）。
@@ -136,7 +136,7 @@ jobs:
           --health-retries=20
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # 端到端步骤要编译客户端主源码，同样需要带 JavaFX 的 JDK 8；
       # 服务端需要 JDK 17，两个 JDK 并存。
