@@ -3,6 +3,7 @@ package com.junesoon.mim.gui;
 import com.junesoon.mim.components.ApplicatonStore;
 import com.junesoon.mim.crypto.Hkdf;
 import com.junesoon.mim.crypto.IdentityException;
+import com.junesoon.mim.crypto.SafetyNumber;
 import com.junesoon.mim.crypto.TrustChangedException;
 import com.junesoon.mim.crypto.TrustStore;
 import com.junesoon.mim.model.ChatUser;
@@ -197,6 +198,9 @@ public class ChatController {
             return;
         }
         StringBuilder body = new StringBuilder("请逐台核对以下设备的安全码：\n\n");
+        com.junesoon.mim.crypto.IdentityStore.Identity ownIdentity =
+            KeyManager.getInstance().getIdentity();
+        String ownKey = ownIdentity == null ? null : ownIdentity.getPublicKeyBase64();
         for (java.util.Map.Entry<String, String> entry : pinned.entrySet()) {
             String fingerprint;
             try {
@@ -207,10 +211,19 @@ public class ChatController {
                 continue;
             }
             body.append("设备 ").append(entry.getKey()).append('\n')
-                .append(TrustStore.shortFingerprint(fingerprint)).append("\n\n");
+                .append("指纹：").append(TrustStore.shortFingerprint(fingerprint)).append('\n');
+            if (ownKey != null) {
+                try {
+                    body.append("安全码（双方应相同）：\n")
+                        .append(SafetyNumber.of(ownKey, entry.getValue())).append('\n');
+                } catch (IllegalArgumentException e) {
+                    log.warn("计算安全码失败：{}", e.getMessage());
+                }
+            }
+            body.append('\n');
         }
         body.append("请通过面对面或电话等其他渠道与对方核对。\n")
-            .append("任何一台设备的指纹不一致，都应立即停止沟通。");
+            .append("任何一台设备的指纹或安全码不一致，都应立即停止沟通。");
         AlertUtil.show("与 " + chatUser.displayName() + " 的安全码", body.toString());
     }
 
