@@ -714,11 +714,15 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 93. 客户端 dependencyManagement/打包插件从 Spring Boot 2.3.7 升到 **2.7.18**
     （客户端仍是 JavaFX 8，不引入 Boot 运行时）；依赖版本与 CVE 面同步收敛，
     104 项测试与 e2e 通过。
+94. 新增 **sealed sender / 元数据最小化设计草案**（`docs/sealed-sender-design.md`）：
+    明确 Phase 1 会话 ID 方案、Phase 2 匿名令牌/发送者证书、兼容/回滚与测试计划；
+    当前仅设计，未改变消息行为。
 
 ## 仍需处理
 
 - 消息长度填充只隐藏精确长度，服务端仍可见粗粒度长度、发送时间、参与者与设备。
-  sealed sender、cover traffic 等需要更大的协议改造。
+  sealed sender/cover traffic 的设计草案见
+  [docs/sealed-sender-design.md](docs/sealed-sender-design.md)（Phase 1 会话 ID 方案待实现）。
 - 新设备首次信任仍依赖人工核对指纹/60 位安全码，这是 TOFU 的固有局限。
 - 邮箱找回密码仍依赖用户填写真实邮箱与 SMTP；恢复码已支持登录、关闭 2FA
   和重置密码，但仍需用户提前离线保存。
