@@ -48,11 +48,17 @@ public class SecurityStartupChecker implements CommandLineRunner {
     @Value("${mim.security.email-key-file:}")
     private String emailKeyFile;
 
+    @Value("${mim.security.email-key-command:}")
+    private String emailKeyCommand;
+
     @Value("${mim.security.master-key:}")
     private String masterKey;
 
     @Value("${mim.security.master-key-file:}")
     private String masterKeyFile;
+
+    @Value("${mim.security.master-key-command:}")
+    private String masterKeyCommand;
 
     @Value("${mim.auth.require-device-binding:false}")
     private boolean requireDeviceBinding;
@@ -85,14 +91,17 @@ public class SecurityStartupChecker implements CommandLineRunner {
             log.warn("安全自检：已信任 X-Forwarded-For。请确认前置代理会覆盖客户端自带的"
                 + "转发头，且只允许可信代理访问服务端。");
         }
-        if (!StringUtils.hasText(emailKey) && !StringUtils.hasText(emailKeyFile)) {
-            log.warn("安全自检：未配置 MIM_EMAIL_KEY / MIM_EMAIL_KEY_FILE，"
-                + "邮箱与 TOTP 密钥的加密密钥将从 JWT 私钥派生。"
+        if (!StringUtils.hasText(emailKey) && !StringUtils.hasText(emailKeyFile)
+            && !StringUtils.hasText(emailKeyCommand)) {
+            log.warn("安全自检：未配置 MIM_EMAIL_KEY / MIM_EMAIL_KEY_FILE / "
+                + "MIM_EMAIL_KEY_COMMAND，邮箱与 TOTP 密钥的加密密钥将从 JWT 私钥派生。"
                 + "生产环境建议配置独立的 32 字节 Base64 密钥。");
         }
-        if (!StringUtils.hasText(masterKey) && !StringUtils.hasText(masterKeyFile)) {
-            log.warn("安全自检：未配置 MIM_MASTER_KEY / MIM_MASTER_KEY_FILE，"
-                + "新生成的 JWT 私钥将明文存储；若数据库中已有加密密钥则会拒绝启动。");
+        if (!StringUtils.hasText(masterKey) && !StringUtils.hasText(masterKeyFile)
+            && !StringUtils.hasText(masterKeyCommand)) {
+            log.warn("安全自检：未配置 MIM_MASTER_KEY / MIM_MASTER_KEY_FILE / "
+                + "MIM_MASTER_KEY_COMMAND，新生成的 JWT 私钥将明文存储；"
+                + "若数据库中已有加密密钥则会拒绝启动。");
         }
         if (!requireDeviceBinding) {
             log.warn("安全自检：仍允许未绑定设备的旧 JWT。客户端全部升级后，"

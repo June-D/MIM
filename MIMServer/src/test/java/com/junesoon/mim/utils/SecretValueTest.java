@@ -25,6 +25,21 @@ class SecretValueTest {
     }
 
     @Test
+    @DisplayName("外部命令作为 Secret Manager 读取方式，内联/文件优先")
+    void commandFallback(@TempDir Path dir) throws Exception {
+        Path keyFile = dir.resolve("key");
+        Files.write(keyFile, "from-file\n".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals("from-command", SecretValue.load("", "", "printf 'from-command\\n'"));
+        assertEquals("inline", SecretValue.load("inline", "", "printf 'from-command'"));
+        assertEquals("from-file", SecretValue.load("", keyFile.toString(),
+            "printf 'from-command'"));
+        assertNull(SecretValue.load("", "", ""));
+        assertThrows(IllegalStateException.class,
+            () -> SecretValue.load("", "", "exit 7"));
+    }
+
+    @Test
     @DisplayName("密钥文件不可读时明确失败，而不是静默降级")
     void unreadableFileFails(@TempDir Path dir) {
         assertThrows(IllegalStateException.class,

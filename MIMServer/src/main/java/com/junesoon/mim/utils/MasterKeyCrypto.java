@@ -40,12 +40,19 @@ public class MasterKeyCrypto {
     @Value("${mim.security.master-key-previous-file:}")
     private String previousKeyFile;
 
+    @Value("${mim.security.master-key-command:}")
+    private String configuredKeyCommand;
+
+    @Value("${mim.security.master-key-previous-command:}")
+    private String previousKeyCommand;
+
     private volatile byte[] cachedKey;
 
     private volatile byte[] cachedPreviousKey;
 
     public boolean isEnabled() {
-        return StringUtils.hasText(SecretValue.load(configuredKey, configuredKeyFile));
+        return StringUtils.hasText(
+            SecretValue.load(configuredKey, configuredKeyFile, configuredKeyCommand));
     }
 
     public String encrypt(String name, String plaintext) {
@@ -152,7 +159,7 @@ public class MasterKeyCrypto {
                 return cachedKey;
             }
             byte[] decoded = Base64.getDecoder().decode(
-                SecretValue.load(configuredKey, configuredKeyFile).trim());
+                SecretValue.load(configuredKey, configuredKeyFile, configuredKeyCommand).trim());
             if (decoded.length != 32) {
                 throw new IllegalStateException("MIM_MASTER_KEY 必须是 32 字节的 Base64");
             }
@@ -162,7 +169,8 @@ public class MasterKeyCrypto {
     }
 
     private byte[] previousKeyOrNull() {
-        if (!StringUtils.hasText(SecretValue.load(previousKey, previousKeyFile))) {
+        if (!StringUtils.hasText(
+            SecretValue.load(previousKey, previousKeyFile, previousKeyCommand))) {
             return null;
         }
         byte[] key = cachedPreviousKey;
@@ -174,7 +182,7 @@ public class MasterKeyCrypto {
                 return cachedPreviousKey;
             }
             byte[] decoded = Base64.getDecoder().decode(
-                SecretValue.load(previousKey, previousKeyFile).trim());
+                SecretValue.load(previousKey, previousKeyFile, previousKeyCommand).trim());
             if (decoded.length != 32) {
                 throw new IllegalStateException(
                     "MIM_MASTER_KEY_PREVIOUS 必须是 32 字节的 Base64");

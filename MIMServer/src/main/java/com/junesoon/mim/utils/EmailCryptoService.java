@@ -47,6 +47,12 @@ public class EmailCryptoService {
     @Value("${mim.security.email-key-previous-file:}")
     private String previousKeyFile;
 
+    @Value("${mim.security.email-key-command:}")
+    private String configuredKeyCommand;
+
+    @Value("${mim.security.email-key-previous-command:}")
+    private String previousKeyCommand;
+
     private volatile byte[] cachedKey;
 
     private volatile byte[] cachedPreviousKey;
@@ -98,8 +104,10 @@ public class EmailCryptoService {
      * 是否需要在启动时扫描并重加密旧数据。
      */
     public boolean rotationConfigured() {
-        return StringUtils.hasText(SecretValue.load(configuredKey, configuredKeyFile))
-            || StringUtils.hasText(SecretValue.load(previousKey, previousKeyFile));
+        return StringUtils.hasText(
+                SecretValue.load(configuredKey, configuredKeyFile, configuredKeyCommand))
+            || StringUtils.hasText(
+                SecretValue.load(previousKey, previousKeyFile, previousKeyCommand));
     }
 
     /**
@@ -234,7 +242,8 @@ public class EmailCryptoService {
             if (cachedKey != null) {
                 return cachedKey;
             }
-            String configured = SecretValue.load(configuredKey, configuredKeyFile);
+            String configured = SecretValue.load(configuredKey, configuredKeyFile,
+                configuredKeyCommand);
             if (configured != null && !configured.trim().isEmpty()) {
                 byte[] decoded = Base64.getDecoder().decode(configured.trim());
                 if (decoded.length != 32) {
@@ -252,7 +261,8 @@ public class EmailCryptoService {
     }
 
     private byte[] previousKeyOrNull() {
-        if (!StringUtils.hasText(SecretValue.load(previousKey, previousKeyFile))) {
+        if (!StringUtils.hasText(
+            SecretValue.load(previousKey, previousKeyFile, previousKeyCommand))) {
             return null;
         }
         byte[] key = cachedPreviousKey;
@@ -264,7 +274,7 @@ public class EmailCryptoService {
                 return cachedPreviousKey;
             }
             byte[] decoded = Base64.getDecoder().decode(
-                SecretValue.load(previousKey, previousKeyFile).trim());
+                SecretValue.load(previousKey, previousKeyFile, previousKeyCommand).trim());
             if (decoded.length != 32) {
                 throw new IllegalStateException(
                     "MIM_EMAIL_KEY_PREVIOUS 必须是 32 字节的 Base64");

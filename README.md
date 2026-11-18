@@ -366,8 +366,17 @@ mvn spring-boot:run
 
 ### 邮箱 / TOTP 密钥
 
+密钥来源优先级：`MIM_EMAIL_KEY` > `MIM_EMAIL_KEY_FILE` > `MIM_EMAIL_KEY_COMMAND`。
+外部命令适合 Vault/AWS/GCP Secret Manager；启动读取时执行一次（15 秒超时），
+stdout 必须是 Base64 32 字节，命令输出不会写入日志：
+
+```bash
+export MIM_EMAIL_KEY_COMMAND='vault kv get -field=key secret/mim/email'
+export MIM_EMAIL_KEY_PREVIOUS_COMMAND='vault kv get -field=key secret/mim/email-old'
+```
+
 1. 生成新的 32 字节 Base64 密钥，设置：
-   `MIM_EMAIL_KEY=<新> MIM_EMAIL_KEY_PREVIOUS=<旧>`（也支持 `*_FILE`）。
+   `MIM_EMAIL_KEY=<新> MIM_EMAIL_KEY_PREVIOUS=<旧>`（也支持 `*_FILE` / `*_COMMAND`）。
 2. 重启服务端。`EmailKeyRotation` 会用当前密钥解密旧数据并重加密，
    日志出现「邮箱/TOTP 密钥轮换完成」。旧密钥仍可读，但新写入全部用新钥。
 3. 确认账号的 2FA 登录正常后，移除 `MIM_EMAIL_KEY_PREVIOUS`，再次重启。
@@ -382,6 +391,8 @@ mvn spring-boot:run
 2. `AuthServerRunner` 会先用旧钥解出 JWT RSA 私钥，再用新钥重加密
    `t_rsa_key`；**RSA 签名密钥本身不变**，已签发 JWT 不受影响。
 3. 确认登录正常后移除 `MIM_MASTER_KEY_PREVIOUS`，再次重启。
+
+主密钥同样支持 `MIM_MASTER_KEY_COMMAND` / `MIM_MASTER_KEY_PREVIOUS_COMMAND`。
 
 ### 备份
 
@@ -688,6 +699,8 @@ mvn test
 87. 密钥轮换与备份：`MIM_MASTER_KEY` / `MIM_EMAIL_KEY` 支持
     `_PREVIOUS` 双读；启动时自动把旧 JWT 密钥和旧邮箱/TOTP 密文重加密为新钥，
     并附轮换步骤与备份/恢复演练清单。主密钥轮换不改变 RSA 签名密钥。
+88. 密钥支持从外部命令读取（`MIM_*_KEY_COMMAND`），stdout 为 Base64 32 字节，
+    可直接对接 Vault/AWS/GCP CLI；优先级为内联 > 文件 > 命令，命令输出不写日志。
 
 ## 仍需处理
 
