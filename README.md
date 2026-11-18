@@ -49,7 +49,8 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
    - `MIMClient/src/main/java/com/junesoon/mim/service/HistorySync.java` 与
      `MIMClient/src/main/java/com/junesoon/mim/crypto/SyncEnvelope.java`（跨设备撤回归属这条链路）
    - `MIMServer/sql/e2ee.sql` 末尾的升级补丁
-2. **Phase 2（下一步）**：匿名令牌 + 发送者证书，覆盖首次联系；见设计文档第 7 节。
+2. **Phase 2（下一步）**：按第 11 节拆成 2a 证书签发/验证 → 2b 首条消息 sealed
+   → 2c 匿名提交（需单独评审，先不做）；见设计文档第 7、11 节。
 3. **运维收尾**：KMS SDK 直连（目前只有 CLI 命令桥接）、真实 SMTP、TOFU 人工核对流程。
 4. **长期迁移**：客户端 JavaFX 8/Boot 2.7 BOM 暂不升级；服务端保持 Java 17。
 
@@ -899,8 +900,8 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
 - 服务端已迁移到 Boot 3.5.16 + Java 17；客户端仍为 JavaFX 8，
   CI/部署需要同时准备两个 JDK。
-- **Phase 2（未做）**：匿名令牌 + 发送者证书，覆盖首次联系；见
-  [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 7 节。
+- **Phase 2（未做）**：发送者证书 + 首条消息 sealed + 匿名提交，分 2a/2b/2c
+  三步交付；见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 11 节。
 - KMS 目前只有外部命令桥接（Vault/AWS/GCP CLI），尚未接 SDK；生产 SMTP
   仍需真实邮件服务器。
 - 跨设备历史仍受上面那条限制：没有原文的消息补不回来。
