@@ -92,7 +92,8 @@ public final class SenderCertE2eTest {
 
         // ---- 首条消息：真实双棘轮 + 证书信封 ----
         String plaintext = "首条 sealed 消息";
-        String payload = SenderCertEnvelope.pack(cert, plaintext);
+        String conversationTag = "tagE2EAAAAAAAAAAAAAAAAAAAA1";
+        String payload = SenderCertEnvelope.pack(cert, conversationTag, plaintext);
         RatchetService ratchet = new RatchetService();
         RatchetService.InitiatorResult init = ratchet.initiatorSession(bob, 
             aliceIdentity.getPrivateKey(), aliceIdentity.getPublicKeyBase64(),
@@ -112,6 +113,7 @@ public final class SenderCertE2eTest {
             + "\"previousChainLength\":" + encrypted.getHeader().getPreviousChainLength() + ","
             + "\"messageNumber\":" + encrypted.getHeader().getMessageNumber() + ","
             + "\"clientTime\":" + System.currentTimeMillis() + ","
+            + "\"conversationTag\":\"" + conversationTag + "\","
             + "\"sealed\":true,\"sessionId\":\"session-cert-01\","
             + "\"senderIdentityKey\":\"" + aliceIdentity.getPublicKeyBase64() + "\","
             + "\"senderEphemeralKey\":\"" + init.getSenderEphemeralKey() + "\","
@@ -154,6 +156,8 @@ public final class SenderCertE2eTest {
         check("收信端解出证书与正文",
             parsed != null && plaintext.equals(parsed.getText())
                 && alice.equals(parsed.getCertificate().getUsername()));
+        check("收信端从信封学到会话标签",
+            parsed != null && conversationTag.equals(parsed.getConversationTag()));
 
         // ---- 投递确认后握手参数被擦除，且历史仍可查 ----
         String deliveredId = lastNumberOrNull(inbox, "\"id\":");
@@ -165,6 +169,12 @@ public final class SenderCertE2eTest {
         check("投递后握手参数已从历史中擦除",
             !history.contains("\"senderIdentityKey\":\"")
                 && !history.contains("\"senderEphemeralKey\":\""));
+
+        // ---- 按会话标签查历史：不依赖从用户名推导的盲引用 ----
+        String tagHistory = httpGet(BASE + "/message/history/" + alice
+            + "?limit=50&tags=" + conversationTag, bobToken, bobDevice);
+        check("服务端可按会话标签返回历史", tagHistory.contains(clientMsgId));
+        check("历史响应不回传会话标签", !tagHistory.contains("\"conversationTag\""));
 
         System.out.println();
         System.out.println("通过 " + passed + " 项，失败 " + failed + " 项");

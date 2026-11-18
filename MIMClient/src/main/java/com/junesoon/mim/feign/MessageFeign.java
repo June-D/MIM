@@ -22,9 +22,10 @@ public interface MessageFeign extends FeignAPI {
     @RequestLine("POST /message")
     ObjectRestResponse<List<CipherMessage>> send(List<CipherMessage> messages);
 
-    @RequestLine("GET /message/history/{peer}?beforeId={beforeId}&limit={limit}")
+    @RequestLine("GET /message/history/{peer}?beforeId={beforeId}&limit={limit}&tags={tags}")
     ObjectRestResponse<List<CipherMessage>> history(@Param("peer") String peer,
-        @Param("beforeId") Long beforeId, @Param("limit") int limit);
+        @Param("beforeId") Long beforeId, @Param("limit") int limit,
+        @Param("tags") String tags);
 
     @RequestLine("GET /message/undelivered?limit={limit}")
     ObjectRestResponse<List<CipherMessage>> undelivered(@Param("limit") int limit);

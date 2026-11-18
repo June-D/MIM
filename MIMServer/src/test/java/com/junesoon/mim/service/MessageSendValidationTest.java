@@ -117,6 +117,14 @@ class MessageSendValidationTest {
         }
 
         @Override
+        public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
+            Long beforeId, int limit) {
+            // 标签查询由 MapperIntegrationTest 用真实 MySQL 覆盖；
+            // 这些单测只关心旧路径，返回空列表即可。
+            return java.util.Collections.emptyList();
+        }
+
+        @Override
         public List<CipherMessage> selectUndelivered(String toUsername, String deviceId, int limit) {
             return Collections.emptyList();
         }
@@ -518,6 +526,24 @@ class MessageSendValidationTest {
         assertEquals(64, stored.getRecallTokenHash().length());
         assertFalse(stored.getRecallTokenHash().contains("3q2+7w"),
             "数据库里只能出现哈希，不能出现原始 token");
+    }
+
+    @Test
+    @DisplayName("会话标签落库；非法标签被丢弃而不阻断发送")
+    void conversationTagStored() {
+        CipherMessage tagged = replica(BOB_DEVICE_A);
+        tagged.setClientMsgId("client-tag-0001");
+        tagged.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
+        CipherMessage stored = service.send(ALICE, ALICE_DEVICE,
+            Collections.singletonList(tagged)).get(0);
+        assertEquals("tagAAAAAAAAAAAAAAAAAAAAAAAA1", stored.getConversationTag());
+
+        CipherMessage bad = replica(BOB_DEVICE_A);
+        bad.setClientMsgId("client-tag-0002");
+        bad.setConversationTag("bad tag!");
+        CipherMessage badStored = service.send(ALICE, ALICE_DEVICE,
+            Collections.singletonList(bad)).get(0);
+        assertNull(badStored.getConversationTag(), "非法标签不能落库，也不能阻断消息");
     }
 
     @Test

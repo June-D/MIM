@@ -34,6 +34,15 @@ public final class SenderCertEnvelope {
     }
 
     public static String pack(SenderCertificateView certificate, String payload) {
+        return pack(certificate, null, payload);
+    }
+
+    /**
+     * 打包。{@code conversationTag} 是双方共享的会话标签；为空时信封保持 7 段，
+     * 收信端按旧格式处理。
+     */
+    public static String pack(SenderCertificateView certificate, String conversationTag,
+        String payload) {
         if (certificate == null || payload == null) {
             return null;
         }
@@ -46,6 +55,9 @@ public final class SenderCertEnvelope {
         sb.append(certificate.getExpiresAt()).append(FIELD_SEP);
         sb.append(certificate.getKeyId()).append(FIELD_SEP);
         sb.append(certificate.getSignature());
+        if (conversationTag != null && !conversationTag.isEmpty()) {
+            sb.append(FIELD_SEP).append(conversationTag);
+        }
         sb.append(BODY_SEP);
         sb.append(payload);
         return sb.toString();
@@ -68,7 +80,7 @@ public final class SenderCertEnvelope {
         }
         String[] fields = text.substring(MAGIC.length(), bodyStart).split(
             String.valueOf(FIELD_SEP), -1);
-        if (fields.length != 7) {
+        if (fields.length != 7 && fields.length != 8) {
             return null;
         }
         if (fields[0].isEmpty() || fields[0].length() > MAX_ID_LENGTH
@@ -90,7 +102,8 @@ public final class SenderCertEnvelope {
         certificate.setExpiresAt(expiresAt);
         certificate.setKeyId(fields[5]);
         certificate.setSignature(fields[6]);
-        return new Parsed(certificate, text.substring(bodyStart + 1));
+        String conversationTag = fields.length == 8 && !fields[7].isEmpty() ? fields[7] : null;
+        return new Parsed(certificate, conversationTag, text.substring(bodyStart + 1));
     }
 
     private static Long parseLong(String value) {
@@ -106,15 +119,21 @@ public final class SenderCertEnvelope {
      */
     public static final class Parsed {
         private final SenderCertificateView certificate;
+        private final String conversationTag;
         private final String text;
 
-        public Parsed(SenderCertificateView certificate, String text) {
+        public Parsed(SenderCertificateView certificate, String conversationTag, String text) {
             this.certificate = certificate;
+            this.conversationTag = conversationTag;
             this.text = text;
         }
 
         public SenderCertificateView getCertificate() {
             return certificate;
+        }
+
+        public String getConversationTag() {
+            return conversationTag;
         }
 
         public String getText() {

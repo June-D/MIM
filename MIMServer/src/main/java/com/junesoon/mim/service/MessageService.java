@@ -16,12 +16,19 @@ public interface MessageService {
 
     /**
      * 会话历史。{@code deviceId} 不为空时，优先返回这台设备解得开的那一份副本。
+     * {@code tags} 是客户端持有的会话标签，非空时额外按标签查询
+     * （双写期与盲引用查询并存，结果按 clientMsgId 去重）。
      */
     List<CipherMessage> history(String username, String peer, Long beforeId, int limit,
-        String deviceId);
+        String deviceId, List<String> tags);
+
+    default List<CipherMessage> history(String username, String peer, Long beforeId, int limit,
+        String deviceId) {
+        return history(username, peer, beforeId, limit, deviceId, null);
+    }
 
     default List<CipherMessage> history(String username, String peer, Long beforeId, int limit) {
-        return history(username, peer, beforeId, limit, null);
+        return history(username, peer, beforeId, limit, null, null);
     }
 
     /**

@@ -9,6 +9,7 @@
         <result column="from_device_id" jdbcType="VARCHAR" property="fromDeviceId"/>
         <result column="from_ref" jdbcType="VARCHAR" property="fromRef"/>
         <result column="from_device_ref" jdbcType="VARCHAR" property="fromDeviceRef"/>
+        <result column="conversation_tag" jdbcType="VARCHAR" property="conversationTag"/>
         <result column="to_user" jdbcType="VARCHAR" property="toUsername"/>
         <result column="target_device_id" jdbcType="VARCHAR" property="targetDeviceId"/>
         <result column="alg" jdbcType="VARCHAR" property="alg"/>
@@ -43,7 +44,7 @@
 
     <sql id="Base_Column_List">
         id, client_msg_id, from_user, from_device_id, from_ref, from_device_ref,
-        to_user, target_device_id,
+        conversation_tag, to_user, target_device_id,
         alg, iv, ciphertext,
         ratchet_public, previous_chain_length, message_number,
         sender_identity_key, sender_ephemeral_key, sender_used_opk, consumed_opk_id,
@@ -57,7 +58,7 @@
     <insert id="insert" parameterType="com.junesoon.mim.entity.CipherMessage"
             useGeneratedKeys="true" keyProperty="id">
         insert into t_message (client_msg_id, from_user, from_device_id, from_ref, from_device_ref,
-                               to_user, target_device_id,
+                               conversation_tag, to_user, target_device_id,
                                alg, iv, ciphertext,
                                ratchet_public, previous_chain_length, message_number,
                                sender_identity_key, sender_ephemeral_key, sender_used_opk,
@@ -68,7 +69,8 @@
                                sync_signature)
         values (#{clientMsgId,jdbcType=VARCHAR}, #{fromUsername,jdbcType=VARCHAR},
                 #{fromDeviceId,jdbcType=VARCHAR}, #{fromRef,jdbcType=VARCHAR},
-                #{fromDeviceRef,jdbcType=VARCHAR}, #{toUsername,jdbcType=VARCHAR},
+                #{fromDeviceRef,jdbcType=VARCHAR}, #{conversationTag,jdbcType=VARCHAR},
+                #{toUsername,jdbcType=VARCHAR},
                 #{targetDeviceId,jdbcType=VARCHAR},
                 #{alg,jdbcType=VARCHAR}, #{iv,jdbcType=VARCHAR}, #{ciphertext,jdbcType=LONGVARCHAR},
                 #{ratchetPublic,jdbcType=VARCHAR}, #{previousChainLength,jdbcType=INTEGER},
@@ -87,6 +89,32 @@
                 #{syncOriginalFrom,jdbcType=VARCHAR}, #{syncOriginalTo,jdbcType=VARCHAR},
                 #{syncOriginalDevice,jdbcType=VARCHAR}, #{syncSignature,jdbcType=LONGVARCHAR})
     </insert>
+
+    <!--
+      按会话标签查历史（Phase 2c 前置）。
+      标签由客户端生成、双方共享，服务端只当不透明值；因此这里不需要
+      from_ref，也无法从标签反推用户名。
+      to_user 限定在会话双方，防止标签被错误复用后跨会话串消息。
+    -->
+    <select id="selectTagHistory" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where id in (
+            select min(t.id) from t_message t
+            where t.conversation_tag in
+            <foreach collection="tags" item="tag" open="(" separator="," close=")">
+                #{tag,jdbcType=VARCHAR}
+            </foreach>
+              and t.to_user in (#{viewer,jdbcType=VARCHAR}, #{peer,jdbcType=VARCHAR})
+            group by t.client_msg_id
+        )
+        <if test="beforeId != null">
+            and id &lt; #{beforeId,jdbcType=BIGINT}
+        </if>
+        order by id desc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
 
     <!--
       幂等查询：同一条逻辑消息对同一目标设备只应该有一份。

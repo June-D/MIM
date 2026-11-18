@@ -11,6 +11,7 @@ import com.junesoon.mim.requests.RecallRequest;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.MessageService;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -53,6 +54,9 @@ public class MessageController {
 
     /**
      * 与某人的历史消息，按 id 倒序翻页（返回时已转为时间正序，且已按 clientMsgId 去重）。
+     *
+     * <p>{@code tags} 是客户端持有的会话标签（逗号分隔，可多个）。提供后
+     * 服务端额外按标签查询，因此不再依赖「从用户名推导的盲引用」。
      */
     @GetMapping("/history/{peer}")
     @RateLimit(limit = 120, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
@@ -60,10 +64,29 @@ public class MessageController {
         @CurrentDevice String deviceId,
         @PathVariable String peer,
         @RequestParam(value = "beforeId", required = false) Long beforeId,
-        @RequestParam(value = "limit", defaultValue = "50") int limit) {
+        @RequestParam(value = "limit", defaultValue = "50") int limit,
+        @RequestParam(value = "tags", required = false) String tags) {
         return new ObjectRestResponse<List<CipherMessage>>()
-            .data(messageService.history(username, peer, beforeId, limit, deviceId))
+            .data(messageService.history(username, peer, beforeId, limit, deviceId,
+                splitTags(tags)))
             .rel(true);
+    }
+
+    /**
+     * 逗号分隔的标签串拆成列表；空串返回 null，交由服务层按「未提供」处理。
+     */
+    private static List<String> splitTags(String tags) {
+        if (tags == null || tags.trim().isEmpty()) {
+            return null;
+        }
+        List<String> result = new ArrayList<>();
+        for (String tag : tags.split(",")) {
+            String trimmed = tag.trim();
+            if (!trimmed.isEmpty()) {
+                result.add(trimmed);
+            }
+        }
+        return result.isEmpty() ? null : result;
     }
 
     /**

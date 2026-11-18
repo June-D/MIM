@@ -28,6 +28,7 @@ public final class PlaintextStore {
     private static final String FIELD_ITERATIONS = "iterations=";
     private static final String SENT_PREFIX = "sent|";
     private static final String TOKEN_PREFIX = "token|";
+    private static final String TAG_PREFIX = "tags|";
 
     private final Path directory;
     private final Map<String, String> texts = new LinkedHashMap<>();
@@ -134,6 +135,48 @@ public final class PlaintextStore {
             return;
         }
         put(TOKEN_PREFIX + peer + "|" + clientMsgId, token);
+    }
+
+    /**
+     * 本机持有的、与该对端的会话标签（可能多个：对端每台设备各自生成过）。
+     *
+     * <p>标签是双方共享的不透明值，服务端按它查历史，不再需要
+     * 「从用户名推导的盲引用」。标签随首条消息的加密信封送达。
+     */
+    public java.util.List<String> getConversationTags(String peer) {
+        if (peer == null) {
+            return java.util.Collections.emptyList();
+        }
+        String value = texts.get(TAG_PREFIX + peer);
+        if (value == null || value.isEmpty()) {
+            return java.util.Collections.emptyList();
+        }
+        return new java.util.ArrayList<>(Arrays.asList(value.split(",")));
+    }
+
+    /**
+     * 记录一个会话标签。上限 20 个，超出的标签不会影响消息收发，
+     * 只是历史查询可能少一条来源。
+     */
+    public void addConversationTag(String peer, String tag) {
+        if (peer == null || tag == null || tag.isEmpty()) {
+            return;
+        }
+        java.util.List<String> tags =
+            new java.util.ArrayList<>(getConversationTags(peer));
+        if (tags.contains(tag) || tags.size() >= 20) {
+            return;
+        }
+        tags.add(tag);
+        texts.put(TAG_PREFIX + peer, String.join(",", tags));
+        if (username == null || password == null) {
+            return;
+        }
+        try {
+            save();
+        } catch (Exception e) {
+            log.warn("会话标签保存失败：{}", e.getMessage());
+        }
     }
 
     public void put(String clientMsgId, String plaintext) {

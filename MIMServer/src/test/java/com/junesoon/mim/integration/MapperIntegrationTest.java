@@ -17,6 +17,7 @@ import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.PreKeyMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Base64;
 import java.util.Date;
 import java.util.List;
@@ -606,6 +607,8 @@ class MapperIntegrationTest extends IntegrationTestBase {
         + "fedcba98765432103333333333333333";
     private static final String REF_BOB = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    private static final String TAG_ONE = "tagAAAAAAAAAAAAAAAAAAAAAAAA1";
+    private static final String TAG_TWO = "tagBBBBBBBBBBBBBBBBBBBBBBBB2";
 
     private CipherMessage sealedMessage(String clientMsgId, String toUser, String target,
         String fromRef) {
@@ -615,6 +618,45 @@ class MapperIntegrationTest extends IntegrationTestBase {
         message.setFromRef(fromRef);
         message.setFromDeviceRef(REF_ALICE_DEVICE);
         return message;
+    }
+
+    @Test
+    @DisplayName("会话标签：按标签查历史，不依赖盲引用")
+    void tagHistoryFindsRowsWithoutRef() {
+        // 模拟「停写 from_ref 之后」的数据：没有盲引用，只有不透明标签
+        CipherMessage tagged = message(null, null, BOB, DEVICE_A, "msg-tag-001", 0);
+        tagged.setSealed(true);
+        tagged.setSessionId("session-tag");
+        tagged.setConversationTag(TAG_ONE);
+        messageMapper.insert(tagged);
+
+        CipherMessage other = message(null, null, BOB, DEVICE_A, "msg-tag-002", 1);
+        other.setSealed(true);
+        other.setSessionId("session-tag");
+        other.setConversationTag(TAG_TWO);
+        messageMapper.insert(other);
+
+        List<CipherMessage> found = messageMapper.selectTagHistory(
+            Collections.singletonList(TAG_ONE), BOB, ALICE, null, 50);
+        assertEquals(1, found.size(), "只应命中同一标签的消息");
+        assertEquals("msg-tag-001", found.get(0).getClientMsgId());
+        assertNull(found.get(0).getFromRef(), "标签查询不依赖盲引用");
+    }
+
+    @Test
+    @DisplayName("会话标签：查询被限定在会话双方，不会串到别人")
+    void tagHistoryScopedToParticipants() {
+        CipherMessage tagged = message(null, null, BOB, DEVICE_A, "msg-tag-003", 0);
+        tagged.setSealed(true);
+        tagged.setSessionId("session-tag");
+        tagged.setConversationTag(TAG_ONE);
+        messageMapper.insert(tagged);
+
+        assertTrue(messageMapper.selectTagHistory(Collections.singletonList(TAG_ONE),
+            ALICE, "carol", null, 50).isEmpty(),
+            "to_user 不在会话双方时不能返回，防止标签复用串消息");
+        assertEquals(1, messageMapper.selectTagHistory(Collections.singletonList(TAG_ONE),
+            ALICE, BOB, null, 50).size());
     }
 
     @Test

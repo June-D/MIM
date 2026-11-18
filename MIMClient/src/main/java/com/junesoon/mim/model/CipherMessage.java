@@ -134,6 +134,13 @@ public class CipherMessage {
     private String recallToken;
 
     /**
+     * 会话标签（不透明，双方共享）。客户端生成，服务端只按它建索引。
+     * 首次联系时随证书信封送达；之后每条消息都带上，便于服务端归类。
+     * 服务端不会回传该字段。
+     */
+    private String conversationTag;
+
+    /**
      * 哪台自己的设备把原文重新加密过来的。非空时用与该设备的会话解密。
      */
     private String syncFromDevice;

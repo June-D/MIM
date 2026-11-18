@@ -210,6 +210,7 @@ public class MessageServiceImpl implements MessageService {
             record.setFromRef(storedFromRef);
             record.setFromDeviceRef(storedFromDeviceRef);
             record.setRecallTokenHash(recallTokenHash);
+            record.setConversationTag(normalizeTag(message.getConversationTag()));
             record.setSealed(sealed);
             record.setSessionId(message.getSessionId());
             record.setToUsername(toUsername);
@@ -435,7 +436,7 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     public List<CipherMessage> history(String username, String peer, Long beforeId, int limit,
-        String deviceId) {
+        String deviceId, List<String> tags) {
         ValidationUtil.validateUsername(peer);
         int safeLimit = Math.max(1, Math.min(limit, MAX_HISTORY_LIMIT));
         String device = StringUtils.hasText(deviceId) ? deviceId.trim() : null;
@@ -476,6 +477,20 @@ public class MessageServiceImpl implements MessageService {
                     message.setFromMe(false);
                 }
                 messages.addAll(received);
+            }
+        }
+
+        // 会话标签：客户端生成的不透明值，双写期与盲引用并行查询。
+        // 标签查询不需要用户名，因此是 2c 匿名提交的历史查询基础。
+        List<String> safeTags = normalizeTags(tags);
+        if (!safeTags.isEmpty()) {
+            List<CipherMessage> tagged = messageMapper.selectTagHistory(safeTags, username, peer,
+                beforeId, safeLimit);
+            if (tagged != null) {
+                for (CipherMessage message : tagged) {
+                    message.setFromMe(peer.equals(message.getToUsername()));
+                }
+                messages.addAll(tagged);
             }
         }
 
@@ -728,6 +743,35 @@ public class MessageServiceImpl implements MessageService {
         return sample;
     }
 
+    /**
+     * 会话标签格式：客户端生成的 24~64 位 Base64URL，服务端不解释语义。
+     * 非法标签直接丢弃（不阻断消息），避免旧客户端或半升级客户端发不出消息。
+     */
+    private static final Pattern CONVERSATION_TAG =
+        Pattern.compile("^[A-Za-z0-9_-]{24,64}$");
+
+    private static final int MAX_TAGS = 20;
+
+    private String normalizeTag(String tag) {
+        return StringUtils.hasText(tag) && CONVERSATION_TAG.matcher(tag).matches() ? tag : null;
+    }
+
+    private List<String> normalizeTags(List<String> tags) {
+        if (tags == null || tags.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> safe = new ArrayList<>(Math.min(tags.size(), MAX_TAGS));
+        for (String tag : tags) {
+            if (safe.size() >= MAX_TAGS) {
+                break;
+            }
+            if (normalizeTag(tag) != null && !safe.contains(tag)) {
+                safe.add(tag);
+            }
+        }
+        return safe;
+    }
+
     private static final int MAX_SYNC_BATCH = 50;
 
     @Override
@@ -815,6 +859,8 @@ public class MessageServiceImpl implements MessageService {
         record.setFromDeviceRef(syncFromDeviceRef);
         // 同一逻辑消息的所有副本共用撤回凭证哈希：用 token 撤回时一次覆盖全部副本。
         record.setRecallTokenHash(original.getRecallTokenHash());
+        // 同步副本属于同一会话，标签必须跟着走，否则收信端按标签查不到它。
+        record.setConversationTag(original.getConversationTag());
         record.setSealed(false);
         record.setToUsername(original.getToUsername());
         record.setTargetDeviceId(target);

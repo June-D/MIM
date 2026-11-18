@@ -48,6 +48,14 @@ public class CipherMessage implements Serializable {
     @JsonIgnore
     private String fromDeviceRef;
 
+    /**
+     * 客户端生成的会话标签（不透明，24~64 位 Base64URL 字符）。
+     * 服务端只按它建索引，不落任何可从用户名推导的形式；
+     * 属于服务端索引，不回传给客户端（旧客户端会因未知字段反序列化失败）。
+     */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String conversationTag;
+
     private String toUsername;
 
     /**

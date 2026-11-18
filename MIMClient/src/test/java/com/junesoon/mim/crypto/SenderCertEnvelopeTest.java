@@ -53,6 +53,27 @@ class SenderCertEnvelopeTest {
     }
 
     @Test
+    @DisplayName("会话标签随信封送达，解包后可读")
+    void conversationTagRoundTrip() {
+        String packed = SenderCertEnvelope.pack(certificate(),
+            "tagAAAAAAAAAAAAAAAAAAAAAAAA1", "hi");
+        SenderCertEnvelope.Parsed parsed = SenderCertEnvelope.unpack(packed);
+        assertNotNull(parsed);
+        assertEquals("tagAAAAAAAAAAAAAAAAAAAAAAAA1", parsed.getConversationTag());
+        assertEquals("hi", parsed.getText());
+    }
+
+    @Test
+    @DisplayName("不带标签时保持 7 段格式，解包仍可用")
+    void legacyEnvelopeWithoutTag() {
+        SenderCertEnvelope.Parsed parsed =
+            SenderCertEnvelope.unpack(SenderCertEnvelope.pack(certificate(), "hi"));
+        assertNotNull(parsed);
+        assertNull(parsed.getConversationTag());
+        assertEquals("hi", parsed.getText());
+    }
+
+    @Test
     @DisplayName("正文含换行或控制字符时仍只按第一个换行切分")
     void payloadPreserved() {
         String payload = "第一行\n第二行\u0001不是分隔符";

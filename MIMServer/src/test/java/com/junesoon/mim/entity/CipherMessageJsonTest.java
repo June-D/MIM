@@ -38,12 +38,24 @@ class CipherMessageJsonTest {
         message.setRecallToken("3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         message.setRecallTokenHash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        message.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
 
         String json = mapper.writeValueAsString(message);
         assertFalse(json.contains("fromRef"), "盲引用不能下发给客户端");
         assertFalse(json.contains("fromDeviceRef"), "设备盲引用不能下发给客户端");
+        assertFalse(json.contains("conversationTag"), "会话标签不能下发给旧客户端");
         assertFalse(json.contains("recallToken"), "撤回凭证和哈希都不能下发给客户端");
         assertTrue(json.contains("\"sealed\":true"));
+    }
+
+    @Test
+    @DisplayName("请求体里的会话标签可反序列化")
+    void requestAcceptsConversationTag() throws Exception {
+        CipherMessage message = mapper.readValue(
+            "{\"clientMsgId\":\"client-msg-0001\","
+                + "\"conversationTag\":\"tagAAAAAAAAAAAAAAAAAAAAAAAA1\"}",
+            CipherMessage.class);
+        assertEquals("tagAAAAAAAAAAAAAAAAAAAAAAAA1", message.getConversationTag());
     }
 
     @Test

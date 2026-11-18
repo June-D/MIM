@@ -131,6 +131,7 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     `recalled`              tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否已撤回',
     `recalled_at`           bigint       NULL DEFAULT NULL COMMENT '撤回时间（毫秒）',
     `recall_token_hash`     varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '撤回凭证的 SHA-256；有值时撤回必须携带原始 token',
+    `conversation_tag`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '客户端生成的会话标签（不透明），替代可从用户名推导的 HMAC 盲引用',
     `sync_from_device`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '哪台设备把原文重新加密给目标设备；空表示原始副本',
     `sync_original_from`    varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '同步副本：原消息发送者（由转发设备签名）',
     `sync_original_to`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '同步副本：原消息收信人（由转发设备签名）',
@@ -144,7 +145,9 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     INDEX `idx_ref_conversation` (`from_ref`, `to_user`, `id`) USING BTREE,
     INDEX `idx_inbox` (`to_user`, `target_device_id`, `delivered`, `id`) USING BTREE,
     INDEX `idx_unread` (`to_user`, `target_device_id`, `read_flag`) USING BTREE,
-    INDEX `idx_ref_unread` (`from_ref`, `to_user`, `read_flag`) USING BTREE
+    INDEX `idx_ref_unread` (`from_ref`, `to_user`, `read_flag`) USING BTREE,
+    INDEX `idx_tag_conversation` (`conversation_tag`, `id`) USING BTREE,
+    INDEX `idx_tag_inbox` (`conversation_tag`, `to_user`, `id`) USING BTREE
 ) ENGINE = InnoDB
   CHARACTER SET = utf8mb4
   COLLATE = utf8mb4_general_ci
@@ -305,3 +308,16 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 -- ALTER TABLE `t_user_key`
 --     ADD COLUMN `supports_sender_cert` tinyint(1) NOT NULL DEFAULT 0
 --         COMMENT '客户端能否解析首条消息里的发送者证书';
+
+-- ------------------------------------------------------------
+-- 从旧版本升级（取消注释后执行）：会话标签（Phase 2c 前置）
+--
+-- 标签由客户端生成，服务端只当不透明字符串存储与索引。
+-- 它取代「HMAC(用户名) → from_ref」这种可被持有服务端密钥者反推的盲引用。
+-- 双写期两条查询路径并存；确认稳定后再停写 from_ref。
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_message`
+--     ADD COLUMN `conversation_tag` varchar(64) NULL
+--         COMMENT '客户端生成的会话标签（不透明）',
+--     ADD INDEX `idx_tag_conversation` (`conversation_tag`, `id`),
+--     ADD INDEX `idx_tag_inbox` (`conversation_tag`, `to_user`, `id`);

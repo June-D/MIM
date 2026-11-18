@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **218** 项、客户端 **123** 项、e2e **30 + 11 + 13** 项
+- 回归基线：服务端 **222** 项、客户端 **128** 项、e2e **30 + 14 + 13** 项
 
 ### 已完成
 
@@ -40,6 +40,8 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
 - 握手参数只活到投递：首条消息必须带，收信设备确认收到后服务端立刻擦除
   身份公钥/临时公钥/OPK 编号，避免用「公钥目录 join」反查用户名；
 - 首条消息可带服务端签发的发送者证书（2b）：证书在密文里，服务端仍不知道归属；
+- 会话标签随证书信封送达（2c 前置）：客户端生成、双方共享，服务端只当不透明值；
+  当前是双写期——标签与 `from_ref` 并存，历史同时按两者查询并去重；
 - 服务端提交时仍从 JWT 知道提交者。**不要宣传为提交匿名或完全 sealed**；
 - 提交匿名仍是 2c：服务端提交时仍从 JWT 知道发送者；
   2b 只让「已落库的首条消息」不再写 from_user。
@@ -60,8 +62,9 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
 2. **Phase 2（进行中）**：2a、2b 已完成并默认关闭；`SenderCertE2eTest`
    已覆盖服务端契约与真实双棘轮往返，但 **`MessageService` 的接线仍只在
    单元测试层面验证过**，开启前必须人工跑一遍首次联系/TOFU/会话丢失。
-   下一步 2c 匿名提交（防重放/配额/拉黑三件套 + 会话标签改造，需单独评审）；
-   见设计文档第 7、11 节。
+   2c 前置的**会话标签**已完成双写与按标签查历史；下一步把未读/已读/清除/
+   未投递/同步切到标签，再停写 `from_ref`，最后才是匿名提交
+   （仍需防重放/配额/拉黑评审）；见设计文档第 11 节。
 3. **运维收尾**：KMS SDK 直连（目前只有 CLI 命令桥接）、真实 SMTP、TOFU 人工核对流程。
 4. **长期迁移**：客户端 JavaFX 8/Boot 2.7 BOM 暂不升级；服务端保持 Java 17。
 
@@ -221,7 +224,7 @@ MIMServer/
                           PresenceService、PushService
   websocket/              SessionRegistry（本机会话）、WebSocketServer（生命周期+心跳）
   config/                 WebMvc、RedisSubscriber、WebSocket、TLS
-  src/test/java/          218 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
+  src/test/java/          222 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
 MIMClient/
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
@@ -232,7 +235,7 @@ MIMClient/
   websocket/              WSClient（只收推送）
   utils/                  TlsSupport（HTTPS/WSS 信任配置）
   gui/                    Login / Main / Chat / Loading
-  src/test/java/          123 项单元测试
+  src/test/java/          128 项单元测试
   src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```
 
@@ -446,6 +449,9 @@ mysql -uroot mim_core < MIMServer/sql/e2ee.sql
   `from_user` / `from_device_id` 对 sealed 消息为 NULL；
 - `t_message.recall_token_hash`：一次性撤回凭证的 SHA-256；有值时撤回必须
   提交原始 token，旧库执行 Phase 1.5 的 `ALTER` 与回填；
+- `t_message.conversation_tag`：客户端生成的会话标签（不透明），
+  按 `(tag, to_user, id)` 建索引，供 2c 阶段替代盲引用查历史；
+  旧库执行对应的 `ALTER`；
 - 唯一索引 `uk_client_target` 已改为 `(client_msg_id, target_device_id)`；
   迁移前先跑注释里的重复检查，避免旧数据冲突导致 `ADD UNIQUE` 失败；
 - `t_rsa_key.key_value`：启用 `MIM_MASTER_KEY` 前扩到 `varchar(4096)`，
@@ -586,8 +592,8 @@ cd MIMClient
 ./verify.sh
 
 # 或分端执行（在各自目录）
-cd MIMServer && ../mvnw test      # 218 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 123 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMServer && ../mvnw test      # 222 项（含真实 MySQL 集成）
+cd MIMClient && ../mvnw test      # 128 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -615,10 +621,10 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 
 | 测试/脚本 | 覆盖点 |
 |---|---|
-| `MapperIntegrationTest`（36 项） | XML 与 schema 匹配、upsert 语义、`INSERT IGNORE`、`FOR UPDATE` 领取、去重分页、撤回级联、sealed 盲引用与 token 撤回 |
+| `MapperIntegrationTest`（38 项） | XML 与 schema 匹配、upsert 语义、`INSERT IGNORE`、`FOR UPDATE` 领取、去重分页、撤回级联、sealed 盲引用与 token 撤回 |
 | `HttpApiIntegrationTest`（20 项） | 鉴权 401、限流 429、`@CurrentUser`/`@CurrentDevice` 解析、伪造发信人、多设备扇出 |
 | `MultiDeviceE2eTest`（30 项） | 多设备注册、按设备分发、各自解密、设备隔离、按 clientMsgId 撤回、sealed 往返/历史/撤回、缺 token 撤回被拒、注销后停止分发 |
-| `SenderCertE2eTest`（11 项） | 证书签发与独立验签、首条 sealed 不落 from_user、收信端着陆归属、投递后擦除握手参数、首条 sealed 在收信端历史可查。需服务端 `MIM_SENDER_CERT_ENABLED=true`，关闭时明确 SKIP |
+| `SenderCertE2eTest`（14 项） | 证书签发与独立验签、首条 sealed 不落 from_user、收信端着陆归属、投递后擦除握手参数、首条 sealed 在收信端历史可查。需服务端 `MIM_SENDER_CERT_ENABLED=true`，关闭时明确 SKIP |
 | `WsDevicePushE2eTest`（13 项） | WS 按设备推送：两台设备各收自己那份、多端同步副本、密文互不相同、都能解密 |
 
 ## HTTP 接口
@@ -920,6 +926,17 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 100. 新增 `SenderCertE2eTest`（11 项）：证书签发 → openssl/Java 独立验签 →
     首条 sealed 落库无 from_user → 收信端按证书还原 → 投递后握手参数擦除 →
     首条 sealed 在收信端历史可查。服务端未启用证书功能时明确 SKIP。
+101. 引入**会话标签**（Phase 2c 前置，双写期）：客户端生成 24 字节随机
+    Base64URL 标签，随证书信封送达对端并加密落盘；之后每条消息都带上，
+    服务端存 `conversation_tag` 并按 `(tag, to_user, id)` 建索引。
+    `GET /message/history/{peer}?tags=...` 走标签查询，与盲引用查询并行、
+    按 clientMsgId 去重。标签不参与任何签发，服务端无法从它反推用户名。
+    此阶段仍保留 `from_ref`（未读/清除/未投递/同步仍依赖它），
+    因此仅完成「可按标签归类」，尚未获得隐私收益。
+102. 标签相关测试：服务端 `MapperIntegrationTest` 2 项（无 ref 的标签行可查、
+    to_user 限定防串会话）、发送/JSON 契约各 1 项；客户端标签存储 3 项、
+    信封带标签 2 项；`SenderCertE2eTest` 扩到 14 项（学到标签 + 按标签查历史
+    + 响应不回传标签）。服务端 222 项、客户端 128 项、e2e 30 + 14 + 13 项通过。
 
 ## 仍需处理
 
@@ -942,8 +959,8 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
   CI/部署需要同时准备两个 JDK。
 - **Phase 2（进行中）**：2a 证书签发、2b 首条消息 sealed 均已落地但默认关闭；
   e2e 已覆盖证书契约与真实棘轮往返，客户端 `MessageService` 接线仍需人工验证。
-  2c 匿名提交除防重放/配额/拉黑外，还要求把历史/未读换成客户端生成的
-  会话标签，否则收信端无法按对端查历史；需单独评审。
+  会话标签已完成双写与标签历史查询，但**未读/已读/清除/未投递/同步仍依赖
+  `from_ref`**，因此当前还没有隐私收益；2c 匿名提交仍需单独评审。
   见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 11 节。
 - KMS 目前只有外部命令桥接（Vault/AWS/GCP CLI），尚未接 SDK；生产 SMTP
   仍需真实邮件服务器。

@@ -87,6 +87,7 @@ class ClearPersistenceTest {
                 + "from_device_id varchar(64) null,"
                 + "from_ref varchar(64) null,"
                 + "from_device_ref varchar(64) null,"
+                + "conversation_tag varchar(64) null,"
                 + "to_user varchar(64) not null,"
                 + "target_device_id varchar(64) not null,"
                 + "alg varchar(64) not null,"

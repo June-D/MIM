@@ -62,6 +62,14 @@ public interface MessageMapper {
         @Param("beforeId") Long beforeId, @Param("limit") int limit);
 
     /**
+     * 按会话标签查历史（不透明标签，双方共享）。
+     * to_user 限定在会话双方，避免标签被复用后串到别的会话。
+     */
+    List<CipherMessage> selectTagHistory(@Param("tags") List<String> tags,
+        @Param("viewer") String viewer, @Param("peer") String peer,
+        @Param("beforeId") Long beforeId, @Param("limit") int limit);
+
+    /**
      * 本设备的未投递消息。
      */
     List<CipherMessage> selectUndelivered(@Param("toUsername") String toUsername,

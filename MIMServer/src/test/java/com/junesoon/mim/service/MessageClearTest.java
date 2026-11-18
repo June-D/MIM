@@ -282,6 +282,14 @@ class MessageClearTest {
         }
 
         @Override
+        public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
+            Long beforeId, int limit) {
+            // 标签查询由 MapperIntegrationTest 用真实 MySQL 覆盖；
+            // 这些单测只关心旧路径，返回空列表即可。
+            return java.util.Collections.emptyList();
+        }
+
+        @Override
         public List<CipherMessage> selectUndelivered(String toUsername, String deviceId, int limit) {
             return Collections.emptyList();
         }

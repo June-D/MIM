@@ -466,6 +466,11 @@ public class MessageService {
             }
         }
 
+        // 会话标签：该对端已有的标签（对端每台设备可能各自生成过）。
+        // 没有标签时只在「能带证书的首条消息」上生成，否则对端学不到它。
+        java.util.List<String> knownTags = plaintextStore.getConversationTags(peer);
+        String conversationTag = knownTags.isEmpty() ? null : knownTags.get(0);
+
         // 证书预取放在 cryptoLock 外：Feign 调用可能很慢，
         // 不能让它阻塞所有会话的加解密。24 小时有效期内只请求一次。
         com.junesoon.mim.model.SenderCertificateView prefetchedCert = null;
@@ -519,7 +524,13 @@ public class MessageService {
                 boolean padding = Boolean.TRUE.equals(device.getSupportsPadding());
                 String payload = padding ? MessagePadding.pad(plaintext) : plaintext;
                 if (cert != null) {
-                    String packed = SenderCertEnvelope.pack(cert, payload);
+                    // 标签必须随证书信封一起送达，否则收信端永远不知道它。
+                    // 同一会话的所有副本共用这一个标签。
+                    if (conversationTag == null) {
+                        conversationTag = newConversationTag();
+                        plaintextStore.addConversationTag(peer, conversationTag);
+                    }
+                    String packed = SenderCertEnvelope.pack(cert, conversationTag, payload);
                     if (packed == null) {
                         cert = null;
                     } else {
@@ -536,6 +547,7 @@ public class MessageService {
                 CipherMessage replica = new CipherMessage();
                 replica.setClientMsgId(clientMsgId);
                 replica.setRecallToken(recallToken);
+                replica.setConversationTag(conversationTag);
                 replica.setFromUsername(sealedWire ? null : self);
                 replica.setFromDeviceId(sealedWire ? null : keyManager.deviceId());
                 replica.setToUsername(peer);
@@ -601,6 +613,16 @@ public class MessageService {
     /**
      * 生成 32 字节随机撤回凭证（Base64）。服务端只保存 SHA-256。
      */
+    /**
+     * 生成 24 字节随机会话标签（Base64URL，32 字符）。服务端只当不透明值，
+     * 不能用它反推任何用户名。
+     */
+    private static String newConversationTag() {
+        byte[] random = new byte[24];
+        new java.security.SecureRandom().nextBytes(random);
+        return java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+    }
+
     private static String newRecallToken() {
         byte[] random = new byte[32];
         new java.security.SecureRandom().nextBytes(random);
@@ -1127,6 +1149,10 @@ public class MessageService {
 
             String peer = certificate.getUsername();
             String peerDevice = normalizeDevice(certificate.getDeviceId());
+            if (parsed.getConversationTag() != null) {
+                // 标签随首条消息送达；之后本机发出的消息也用它归类。
+                plaintextStore.addConversationTag(peer, parsed.getConversationTag());
+            }
             SessionState opened = trial.getInbound();
             if (opened == null) {
                 throw new IdentityException("首条消息没有建立会话");
@@ -1203,8 +1229,10 @@ public class MessageService {
 
     public List<DecryptedMessage> history(String peer, Long beforeId, int limit) {
         try {
+            // 会话标签让服务端不必用「用户名 → 盲引用」来归类历史。
+            String tags = String.join(",", plaintextStore.getConversationTags(peer));
             ObjectRestResponse<List<CipherMessage>> response =
-                Request.connector(MessageFeign.class).history(peer, beforeId, limit);
+                Request.connector(MessageFeign.class).history(peer, beforeId, limit, tags);
             List<CipherMessage> data = (response == null || response.getData() == null)
                 ? new ArrayList<>() : response.getData();
             return decryptAll(data);
