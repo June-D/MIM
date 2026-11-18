@@ -17,4 +17,9 @@ public class KeyUploadRequest {
      * 防止仅凭被盗 JWT 就能替换本设备的身份公钥。
      */
     private String password;
+
+    /**
+     * 本设备是否支持消息长度填充；旧客户端不上报，按 false 处理。
+     */
+    private Boolean supportsPadding;
 }

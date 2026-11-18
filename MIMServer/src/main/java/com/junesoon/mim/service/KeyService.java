@@ -12,6 +12,12 @@ public interface KeyService {
         String password);
 
     /**
+     * 带能力协商的上传；supportsPadding 为空按 false 处理。
+     */
+    KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
+        String password, Boolean supportsPadding);
+
+    /**
      * 取指定设备（缺省为 default）的公钥。
      */
     KeyBundle get(String username, String deviceId);

@@ -98,6 +98,7 @@ class ClearPersistenceTest {
                 + "sender_used_opk tinyint null,"
                 + "consumed_opk_id int null,"
                 + "recipient_spk_id int null,"
+                + "padding tinyint not null default 0,"
                 + "sender_key_version int null,"
                 + "recipient_key_version int null,"
                 + "client_time bigint not null,"

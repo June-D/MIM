@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS `t_user_key` (
     `algorithm`   varchar(32)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'EC-P256' COMMENT '密钥算法标识',
     `key_version` int          NOT NULL DEFAULT 1 COMMENT '密钥版本，每次换钥自增',
     `fingerprint` varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '公钥 SHA-256 指纹，供线下核验',
+    `supports_padding` tinyint(1) NOT NULL DEFAULT 0 COMMENT '客户端是否支持消息长度填充',
     `crt_time`    datetime     NULL DEFAULT NULL COMMENT '创建时间',
     `upd_time`    datetime     NULL DEFAULT NULL COMMENT '更新时间',
     PRIMARY KEY (`username`, `device_id`) USING BTREE
@@ -114,6 +115,7 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     `sender_used_opk`       tinyint(1)   NULL DEFAULT NULL COMMENT 'X3DH 握手：是否使用了一次性预密钥',
     `consumed_opk_id`       int          NULL DEFAULT NULL COMMENT 'X3DH 握手：被消耗的一次性预密钥编号',
     `recipient_spk_id`      int          NULL DEFAULT NULL COMMENT 'X3DH 握手：使用接收方哪一把签名预密钥',
+    `padding`               tinyint(1)   NOT NULL DEFAULT 0 COMMENT '明文是否做了长度填充',
     `sender_key_version`    int          NULL DEFAULT NULL COMMENT '发信人身份公钥版本（兼容旧算法）',
     `recipient_key_version` int          NULL DEFAULT NULL COMMENT '收信人身份公钥版本（兼容旧算法）',
     `client_time`           bigint       NOT NULL COMMENT '客户端时间戳（毫秒），参与 AAD',
@@ -202,3 +204,13 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 --     CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 -- ALTER TABLE `t_friend_request`
 --     CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+
+-- ------------------------------------------------------------
+-- 从旧版本升级（取消注释后执行）：消息长度填充与能力协商
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_user_key`
+--     ADD COLUMN `supports_padding` tinyint(1) NOT NULL DEFAULT 0
+--         COMMENT '客户端是否支持消息长度填充';
+-- ALTER TABLE `t_message`
+--     ADD COLUMN `padding` tinyint(1) NOT NULL DEFAULT 0
+--         COMMENT '明文是否做了长度填充';

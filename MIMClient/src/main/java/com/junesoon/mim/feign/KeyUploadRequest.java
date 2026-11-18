@@ -20,4 +20,9 @@ public class KeyUploadRequest {
      * 当前登录口令的 Base64。新增或更换身份公钥时必须提供。
      */
     private String password;
+
+    /**
+     * 本设备是否支持消息长度填充。
+     */
+    private Boolean supportsPadding;
 }

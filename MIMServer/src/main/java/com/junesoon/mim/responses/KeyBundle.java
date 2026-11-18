@@ -22,4 +22,9 @@ public class KeyBundle {
     private Integer version;
 
     private String fingerprint;
+
+    /**
+     * 该设备是否支持消息长度填充。旧客户端为 false。
+     */
+    private Boolean supportsPadding;
 }

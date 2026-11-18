@@ -51,6 +51,12 @@ public class KeyServiceImpl implements KeyService {
     @Override
     public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
         String password) {
+        return upload(username, deviceId, publicKey, algorithm, password, null);
+    }
+
+    @Override
+    public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
+        String password, Boolean supportsPadding) {
         ValidationUtil.validateUsername(username);
         String device = StringUtils.hasText(deviceId)
             ? deviceId.trim() : UserKey.DEFAULT_DEVICE_ID;
@@ -78,10 +84,27 @@ public class KeyServiceImpl implements KeyService {
         }
         validateEcP256Key(keyBytes);
 
+        boolean padding = Boolean.TRUE.equals(supportsPadding);
         String fingerprint = fingerprint(keyBytes);
         UserKey existing = userKeyMapper.selectByDevice(username, device);
         if (existing != null && fingerprint.equals(existing.getFingerprint())) {
-            // 同一把公钥重复上传，保持幂等，不涨版本；旧客户端重登也能通过
+            // 同一把公钥重复上传，保持幂等，不涨版本；旧客户端重登也能通过。
+            // 能力字段未上报（旧客户端）时降级为 false，避免向无法解析填充的客户端发填充消息。
+            Boolean old = existing.getSupportsPadding();
+            if (supportsPadding == null) {
+                if (Boolean.TRUE.equals(old)) {
+                    existing.setSupportsPadding(false);
+                    existing.setUpdTime(new Date());
+                    userKeyMapper.upsert(existing);
+                }
+            } else if (!Boolean.valueOf(padding).equals(old)) {
+                if (!passwordVerifier.matches(username, password)) {
+                    throw new UserInvalidException("修改填充能力需要验证当前密码");
+                }
+                existing.setSupportsPadding(padding);
+                existing.setUpdTime(new Date());
+                userKeyMapper.upsert(existing);
+            }
             return toBundle(existing);
         }
         // 新增或更换身份公钥必须验证当前口令：
@@ -97,6 +120,7 @@ public class KeyServiceImpl implements KeyService {
         key.setAlgorithm(alg);
         key.setVersion(existing == null || existing.getVersion() == null ? 1 : existing.getVersion() + 1);
         key.setFingerprint(fingerprint);
+        key.setSupportsPadding(padding);
         key.setUpdTime(new Date());
         if (existing == null) {
             key.setCrtTime(new Date());
@@ -174,6 +198,7 @@ public class KeyServiceImpl implements KeyService {
         bundle.setAlgorithm(key.getAlgorithm());
         bundle.setVersion(key.getVersion());
         bundle.setFingerprint(key.getFingerprint());
+        bundle.setSupportsPadding(Boolean.TRUE.equals(key.getSupportsPadding()));
         return bundle;
     }
 }

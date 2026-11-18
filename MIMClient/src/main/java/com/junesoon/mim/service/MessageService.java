@@ -6,6 +6,7 @@ import com.junesoon.mim.components.Request;
 import com.junesoon.mim.crypto.Hkdf;
 import com.junesoon.mim.crypto.IdentityException;
 import com.junesoon.mim.crypto.IdentityStore;
+import com.junesoon.mim.crypto.MessagePadding;
 import com.junesoon.mim.crypto.OwnDeviceTrust;
 import com.junesoon.mim.crypto.PeerCipher;
 import com.junesoon.mim.crypto.PlaintextStore;
@@ -414,7 +415,9 @@ public class MessageService {
                     slot.setOutbound(state);
                 }
 
-                RatchetService.Encrypted encrypted = ratchet.encrypt(state, plaintext);
+                boolean padding = Boolean.TRUE.equals(device.getSupportsPadding());
+                String payload = padding ? MessagePadding.pad(plaintext) : plaintext;
+                RatchetService.Encrypted encrypted = ratchet.encrypt(state, payload);
                 persistSlot(peer, deviceId, slot);
                 log.info("发送到 {}/{}：序号={} 发送链长度={}",
                     peer, deviceId, encrypted.getHeader().getMessageNumber(),
@@ -432,6 +435,7 @@ public class MessageService {
                 replica.setPreviousChainLength(encrypted.getHeader().getPreviousChainLength());
                 replica.setMessageNumber(encrypted.getHeader().getMessageNumber());
                 replica.setClientTime(clientTime);
+                replica.setPadding(padding);
 
                 // 从会话状态读握手参数：它随会话持久化，重启后仍能带上。
                 // 只要状态里还留着参数就继续携带——对端可能还没建过这条链。
@@ -659,6 +663,9 @@ public class MessageService {
                         }
                         return buildResponderSession(peer, peerDevice, message);
                     });
+                if (Boolean.TRUE.equals(message.getPadding())) {
+                    plaintext = MessagePadding.strip(plaintext);
+                }
                 if (deviceSync) {
                     // 用转发设备的身份公钥验证「原消息归属 + 内容」的签名，
                     // 再以签名覆盖服务端给的 from/to/fromDevice。

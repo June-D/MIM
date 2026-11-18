@@ -9,12 +9,14 @@
         <result column="algorithm" jdbcType="VARCHAR" property="algorithm"/>
         <result column="key_version" jdbcType="INTEGER" property="version"/>
         <result column="fingerprint" jdbcType="VARCHAR" property="fingerprint"/>
+        <result column="supports_padding" jdbcType="TINYINT" property="supportsPadding"/>
         <result column="crt_time" jdbcType="TIMESTAMP" property="crtTime"/>
         <result column="upd_time" jdbcType="TIMESTAMP" property="updTime"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        username, device_id, public_key, algorithm, key_version, fingerprint, crt_time, upd_time
+        username, device_id, public_key, algorithm, key_version, fingerprint,
+        supports_padding, crt_time, upd_time
     </sql>
 
     <!--
@@ -42,7 +44,7 @@
     -->
     <select id="selectAllByUsername" resultMap="BaseResultMap">
         select k.username, k.device_id, k.public_key, k.algorithm, k.key_version,
-               k.fingerprint, k.crt_time, k.upd_time
+               k.fingerprint, k.supports_padding, k.crt_time, k.upd_time
         from t_user_key k
         join t_device d
           on d.username = k.username
@@ -54,16 +56,18 @@
 
     <insert id="upsert" parameterType="com.junesoon.mim.entity.UserKey">
         insert into t_user_key (username, device_id, public_key, algorithm, key_version,
-                                fingerprint, crt_time, upd_time)
+                                fingerprint, supports_padding, crt_time, upd_time)
         values (#{username,jdbcType=VARCHAR}, #{deviceId,jdbcType=VARCHAR},
                 #{publicKey,jdbcType=LONGVARCHAR}, #{algorithm,jdbcType=VARCHAR},
                 #{version,jdbcType=INTEGER}, #{fingerprint,jdbcType=VARCHAR},
+                ifnull(#{supportsPadding,jdbcType=TINYINT}, 0),
                 #{crtTime,jdbcType=TIMESTAMP}, #{updTime,jdbcType=TIMESTAMP})
         on duplicate key update
             public_key = values(public_key),
             algorithm = values(algorithm),
             key_version = values(key_version),
             fingerprint = values(fingerprint),
+            supports_padding = values(supports_padding),
             upd_time = values(upd_time)
     </insert>
 </mapper>

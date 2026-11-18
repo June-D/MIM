@@ -20,6 +20,7 @@
         <result column="sender_used_opk" jdbcType="TINYINT" property="senderUsedOneTimePreKey"/>
         <result column="consumed_opk_id" jdbcType="INTEGER" property="consumedOneTimePreKeyId"/>
         <result column="recipient_spk_id" jdbcType="INTEGER" property="recipientSignedPreKeyId"/>
+        <result column="padding" jdbcType="TINYINT" property="padding"/>
         <result column="sender_key_version" jdbcType="INTEGER" property="senderKeyVersion"/>
         <result column="recipient_key_version" jdbcType="INTEGER" property="recipientKeyVersion"/>
         <result column="client_time" jdbcType="BIGINT" property="clientTime"/>
@@ -41,6 +42,7 @@
         ratchet_public, previous_chain_length, message_number,
         sender_identity_key, sender_ephemeral_key, sender_used_opk, consumed_opk_id,
         recipient_spk_id,
+        padding,
         sender_key_version, recipient_key_version, client_time, server_time,
         delivered, read_flag, recalled, recalled_at, sync_from_device,
         sync_original_from, sync_original_to, sync_original_device, sync_signature
@@ -52,7 +54,7 @@
                                alg, iv, ciphertext,
                                ratchet_public, previous_chain_length, message_number,
                                sender_identity_key, sender_ephemeral_key, sender_used_opk,
-                               consumed_opk_id, recipient_spk_id,
+                               consumed_opk_id, recipient_spk_id, padding,
                                sender_key_version, recipient_key_version, client_time, server_time,
                                delivered, read_flag, recalled, sync_from_device,
                                sync_original_from, sync_original_to, sync_original_device,
@@ -66,6 +68,7 @@
                 #{senderIdentityKey,jdbcType=LONGVARCHAR}, #{senderEphemeralKey,jdbcType=VARCHAR},
                 #{senderUsedOneTimePreKey,jdbcType=TINYINT}, #{consumedOneTimePreKeyId,jdbcType=INTEGER},
                 #{recipientSignedPreKeyId,jdbcType=INTEGER},
+                #{padding,jdbcType=TINYINT},
                 #{senderKeyVersion,jdbcType=INTEGER}, #{recipientKeyVersion,jdbcType=INTEGER},
                 #{clientTime,jdbcType=BIGINT}, #{serverTime,jdbcType=BIGINT},
                 #{delivered,jdbcType=TINYINT}, #{readFlag,jdbcType=TINYINT},

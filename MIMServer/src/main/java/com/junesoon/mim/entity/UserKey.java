@@ -40,6 +40,11 @@ public class UserKey implements Serializable {
      */
     private String fingerprint;
 
+    /**
+     * 客户端是否支持消息长度填充。旧客户端不上报，按 false 处理。
+     */
+    private Boolean supportsPadding;
+
     private Date crtTime;
 
     private Date updTime;

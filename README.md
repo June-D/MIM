@@ -313,6 +313,8 @@ mysql -uroot mim_core < MIMServer/sql/e2ee.sql
 - `t_register_users.email_cipher / terms_version / agreed_at`：加密邮箱、
   用户协议版本与同意时间；
 - `t_one_time_prekey.claimed_by / claimed_at`：OPK 预留请求者与预留时间；
+- `t_user_key.supports_padding`：设备是否支持消息长度填充（能力协商）；
+- `t_message.padding`：该条明文是否做了长度填充；
 - `t_rsa_key.key_value`：启用 `MIM_MASTER_KEY` 前扩到 `varchar(4096)`，
   旧库执行 `MODIFY`（加密后的 RSA 私钥约 2.2KB）。
 
@@ -641,9 +643,15 @@ mvn test
 84. 启用二次验证时生成 **10 个一次性恢复码**（只存 BCrypt 哈希，单次使用）：
     登录可用恢复码替代 TOTP，关闭二次验证也支持「密码 + 恢复码」；
     关闭 2FA 或邮箱重置会清空全部恢复码。旧库启动时自动建表，无需手工迁移。
+85. 消息长度填充（能力协商）：设备上传身份公钥时声明 `supportsPadding`，
+    只有双方都支持才在加密前补到 **256 字符固定桶**，消息带 `padding` 标志；
+    旧客户端能力为 false，永远收不到填充消息；未填充消息原样展示。
+    服务端仍可见粗粒度长度与时间，属于部分缓解。
 
 ## 仍需处理
 
+- 消息长度填充只隐藏精确长度，服务端仍可见粗粒度长度、发送时间、参与者与设备。
+  sealed sender、cover traffic 等需要更大的协议改造。
 - 新设备首次信任仍依赖人工核对指纹，这是 TOFU 的固有局限。
 - 邮箱找回密码仍依赖用户填写真实邮箱与 SMTP；一次性恢复码已降低对邮箱的依赖，
   但邮箱仍是主要的密码重置渠道。

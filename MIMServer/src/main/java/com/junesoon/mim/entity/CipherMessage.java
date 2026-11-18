@@ -116,6 +116,11 @@ public class CipherMessage implements Serializable {
      */
     private Long serverTime;
 
+    /**
+     * 明文是否做了长度填充。接收方据此决定是否剥掉填充前缀。
+     */
+    private Boolean padding;
+
     private Boolean delivered;
 
     private Boolean readFlag;

@@ -96,6 +96,11 @@ public class CipherMessage {
 
     private Long serverTime;
 
+    /**
+     * 明文是否做了长度填充；接收方据此剥掉填充。
+     */
+    private Boolean padding;
+
     private Boolean delivered;
 
     private Boolean readFlag;

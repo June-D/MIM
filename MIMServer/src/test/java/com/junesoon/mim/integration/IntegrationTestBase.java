@@ -72,7 +72,9 @@ public abstract class IntegrationTestBase {
             }
             try (Connection connection = DriverManager.getConnection(source, username, password);
                 Statement statement = connection.createStatement()) {
-                statement.execute("CREATE DATABASE IF NOT EXISTS `" + schema
+                // 测试库按类独占；每次运行重建，避免旧表结构缺少新列
+                statement.execute("DROP DATABASE IF EXISTS `" + schema + "`");
+                statement.execute("CREATE DATABASE `" + schema
                     + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci");
             }
             String target = withDatabase(source, schema);

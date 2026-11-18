@@ -28,4 +28,9 @@ public class KeyBundle {
      * 公钥 SHA-256 指纹，供用户线下核对。
      */
     private String fingerprint;
+
+    /**
+     * 该设备是否支持消息长度填充。旧客户端为 false。
+     */
+    private Boolean supportsPadding;
 }

@@ -196,6 +196,7 @@ public class MessageServiceImpl implements MessageService {
             record.setSenderUsedOneTimePreKey(message.getSenderUsedOneTimePreKey());
             record.setConsumedOneTimePreKeyId(message.getConsumedOneTimePreKeyId());
             record.setRecipientSignedPreKeyId(message.getRecipientSignedPreKeyId());
+            record.setPadding(Boolean.TRUE.equals(message.getPadding()));
             record.setSenderKeyVersion(message.getSenderKeyVersion());
             record.setRecipientKeyVersion(message.getRecipientKeyVersion());
             record.setClientTime(message.getClientTime());
@@ -630,6 +631,7 @@ public class MessageServiceImpl implements MessageService {
             record.setSenderUsedOneTimePreKey(replica.getSenderUsedOneTimePreKey());
             record.setConsumedOneTimePreKeyId(replica.getConsumedOneTimePreKeyId());
             record.setRecipientSignedPreKeyId(replica.getRecipientSignedPreKeyId());
+            record.setPadding(Boolean.TRUE.equals(replica.getPadding()));
             record.setSyncOriginalFrom(replica.getSyncOriginalFrom());
             record.setSyncOriginalTo(replica.getSyncOriginalTo());
             record.setSyncOriginalDevice(replica.getSyncOriginalDevice());
