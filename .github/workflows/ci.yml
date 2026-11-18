@@ -69,7 +69,7 @@ jobs:
           MIM_REDIS_PORT: '6379'
           # CI 中数据库必须可用：不可用时让测试明确失败，而不是跳过造成假绿
           MIM_TEST_DB_REQUIRED: 'true'
-        run: mvn -B clean test
+        run: ../mvnw -B clean test
 
       - name: 测试报告
         if: always()
@@ -101,7 +101,7 @@ jobs:
 
       - name: 编译与测试
         working-directory: MIMClient
-        run: mvn -B clean compile && mvn -B test
+        run: ../mvnw -B clean compile && ../mvnw -B test
 
   # ------------------------------------------------------------
   # 端到端：真实服务端 + 真实数据库，跑完整加解密链路
@@ -172,8 +172,8 @@ jobs:
           MIM_REDIS_PORT: '6379'
         run: |
           export PATH="$JAVA_HOME/bin:$PATH"
-          mvn -B -q compile
-          mvn -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/cp.txt
+          ../mvnw -B -q compile
+          ../mvnw -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/cp.txt
           nohup java -cp "target/classes:$(cat /tmp/cp.txt)" \
             com.junesoon.mim.MIMServerStarter > /tmp/server.log 2>&1 &
           for i in $(seq 1 60); do
@@ -194,8 +194,8 @@ jobs:
         working-directory: MIMClient
         run: |
           # 加密层不依赖 JavaFX，直接编译主源码即可跑 e2e
-          mvn -B -q compile
-          mvn -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/client-cp.txt
+          ../mvnw -B -q compile
+          ../mvnw -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/client-cp.txt
 
       - name: 安装 redis-cli
         run: sudo apt-get update && sudo apt-get install -y redis-tools

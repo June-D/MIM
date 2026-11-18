@@ -286,7 +286,7 @@ WebSocket 只在握手时校验 JWT；服务端每分钟关闭一次已过期的
 
 - 服务端 **JDK 17**（无需 JavaFX）
 - 客户端 **JDK 8**（需**带 JavaFX**，如 Zulu FX 8；Corretto 8 不含 JavaFX）
-- Maven 3.6.3+（服务端 Boot 3 插件的最低版本）
+- Maven Wrapper（`./mvnw`）固定 **Maven 3.9.9**；也可使用系统 Maven 3.6.3+。
 - MySQL 8 / Redis 5+
 
 ```bash
@@ -332,6 +332,7 @@ ALTER TABLE t_friend_request CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_ge
 ### 启动服务端
 
 ```bash
+cd MIMServer
 export JAVA_HOME=/path/to/jdk-17
 export MIM_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_core?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8"
 export MIM_DB_USERNAME=root
@@ -343,10 +344,10 @@ export MIM_REDIS_PASSWORD=
 export MIM_REDIS_SSL=false
 export MIM_REDIS_REQUIRE_SECURE=false
 export MIM_MASTER_KEY=
-mvn spring-boot:run
+../mvnw spring-boot:run
 ```
 
-> 服务端需要 JDK 17 与 Maven 3.6.3+；客户端仍需带 JavaFX 的 JDK 8。
+> 服务端需要 JDK 17；Maven 已由 `mvnw` 固定为 3.9.9。客户端仍需带 JavaFX 的 JDK 8。
 > 两个 JDK 可以并存，分别通过 `JAVA_HOME` / `MIM_CLIENT_JAVA_HOME` 指定。
 
 > `MIM_MASTER_KEY` 是 JWT RSA 私钥的静态加密密钥（Base64 32 字节）。
@@ -408,8 +409,8 @@ export MIM_EMAIL_KEY_PREVIOUS_COMMAND='vault kv get -field=key secret/mim/email-
 
 ```bash
 cd MIMClient
-mvn compile
-mvn exec:java -Dexec.mainClass=com.junesoon.mim.MIMClientStarter
+../mvnw compile
+../mvnw exec:java -Dexec.mainClass=com.junesoon.mim.MIMClientStarter
 ```
 
 首次登录生成身份密钥对，加密存到 `~/.mim/identity/`；会话棘轮状态存到 `~/.mim/sessions/`。
@@ -420,9 +421,9 @@ mvn exec:java -Dexec.mainClass=com.junesoon.mim.MIMClientStarter
 # 一键（推荐）
 ./verify.sh
 
-# 或分端执行
-cd MIMServer && mvn test      # 123 项：单元 81 + Mapper 集成 25 + HTTP 集成 17
-cd MIMClient && mvn test      # 40 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+# 或分端执行（在各自目录）
+cd MIMServer && ../mvnw test      # 184 项（含真实 MySQL 集成）
+cd MIMClient && ../mvnw test      # 104 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -431,7 +432,7 @@ cd MIMClient && mvn test      # 40 项：HKDF/SecretBox、X3DH+双棘轮、TOFU�
 ```bash
 mysql -uroot -e "CREATE DATABASE IF NOT EXISTS mim_test CHARACTER SET utf8mb4;"
 export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&allowMultiQueries=true"
-mvn test
+../mvnw test
 ```
 
 数据库不可用时集成测试会**跳过**（本地友好）；CI 里设置
@@ -708,7 +709,8 @@ mvn test
     MySQL 下 184 项测试通过，CI 继续覆盖单元、集成与 e2e。
 91. 合并次版本/补丁依赖：MyBatis 3.0.5、Druid 1.2.28；客户端 Lombok 1.18.48、
     slf4j 2.0.20、ribbon 2.7.18、Java-WebSocket 1.6.0、Feign 13.18。
-    surefire 3.6.1 / compiler 3.16 需要 Maven 3.6.3+，暂留 3.2.5 / 3.8.1。
+92. 引入 **Maven Wrapper 3.9.9**（`mvnw` / `.mvn`），`verify.sh` 与 CI 改用
+    `mvnw`；同时启用 compiler 3.16.0 与 surefire 3.6.1，消除本机 Maven 版本差异。
 
 ## 仍需处理
 

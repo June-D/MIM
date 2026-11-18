@@ -113,7 +113,7 @@ section "服务端：编译 + 单元测试"
   cd "$SERVER_DIR" || exit 1
   export JAVA_HOME="$SERVER_JH"
   export PATH="$JAVA_HOME/bin:$PATH"
-  mvn -q -o clean compile
+  "$ROOT_DIR/mvnw" -q -o clean compile
 ) && ok "编译通过" || fail "服务端编译失败"
 
 (
@@ -128,7 +128,7 @@ section "服务端：编译 + 单元测试"
   else
     echo "  未设置 MIM_TEST_DB_URL，集成测试将跳过（Mapper / HTTP 层）"
   fi
-  mvn -o test 2>&1 | tail -30
+  "$ROOT_DIR/mvnw" -o test 2>&1 | tail -30
 ) || fail "服务端测试失败"
 
 # ---------------- 客户端 ----------------
@@ -138,14 +138,14 @@ section "客户端：编译 + 单元测试"
   cd "$CLIENT_DIR" || exit 1
   export JAVA_HOME="$CLIENT_JH"
   export PATH="$JAVA_HOME/bin:$PATH"
-  mvn -q -o clean compile
+  "$ROOT_DIR/mvnw" -q -o clean compile
 ) && ok "编译通过" || fail "客户端编译失败"
 
 (
   cd "$CLIENT_DIR" || exit 1
   export JAVA_HOME="$CLIENT_JH"
   export PATH="$JAVA_HOME/bin:$PATH"
-  mvn -o test 2>&1 | tail -30
+  "$ROOT_DIR/mvnw" -o test 2>&1 | tail -30
 ) || fail "客户端测试失败"
 
 # ---------------- 端到端（可选） ----------------
@@ -199,7 +199,7 @@ if [ "$RUN_E2E" -eq 1 ]; then
         cd "$CLIENT_DIR" || exit 1
         export JAVA_HOME="$CLIENT_JH"
         export PATH="$JAVA_HOME/bin:$PATH"
-        mvn -o dependency:build-classpath -Dmdep.outputFile="$TMP_E2E/cp.txt" -q
+        "$ROOT_DIR/mvnw" -o dependency:build-classpath -Dmdep.outputFile="$TMP_E2E/cp.txt" -q
         CP="target/classes:$(cat "$TMP_E2E/cp.txt")"
         javac -encoding UTF-8 -cp "$CP" -d "$TMP_E2E" "$E2E_FILE"
         # 从源码里的 package 声明取全限定类名
