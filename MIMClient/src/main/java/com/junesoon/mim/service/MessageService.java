@@ -516,7 +516,9 @@ public class MessageService {
 
                 // 从会话状态读握手参数：它随会话持久化，重启后仍能带上。
                 // 只要状态里还留着参数就继续携带——对端可能还没建过这条链。
-                if (state.hasPendingHandshake()) {
+                // sealed 时一律不带：双方已确认会话，且身份公钥一旦落库
+                // 就能与公钥目录 join 出用户名，会抵消 sealed 的意义。
+                if (!sealed && state.hasPendingHandshake()) {
                     replica.setSenderIdentityKey(state.getHandshakeSenderIdentityKey());
                     replica.setSenderEphemeralKey(state.getHandshakeSenderEphemeralKey());
                     replica.setSenderUsedOneTimePreKey(state.isHandshakeUsedOneTimePreKey());

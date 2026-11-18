@@ -521,6 +521,45 @@ class MessageSendValidationTest {
     }
 
     @Test
+    @DisplayName("sealed 消息不落库握手参数，桥接期消息仍然保留")
+    void sealedDropsHandshakeParams() throws Exception {
+        enableSealedSender();
+
+        CipherMessage sealed = replica(BOB_DEVICE_A);
+        sealed.setSealed(true);
+        sealed.setSessionId("session-abcdef12");
+        sealed.setSenderIdentityKey(ALICE + "-key-" + ALICE_DEVICE);
+        sealed.setSenderEphemeralKey("ZXBoZW1lcmFs");
+        sealed.setSenderUsedOneTimePreKey(Boolean.TRUE);
+        sealed.setConsumedOneTimePreKeyId(7);
+        sealed.setRecipientSignedPreKeyId(3);
+
+        CipherMessage stored = service.send(ALICE, ALICE_DEVICE,
+            Collections.singletonList(sealed)).get(0);
+        assertNull(stored.getSenderIdentityKey(),
+            "身份公钥可与公钥目录 join 出用户名，sealed 行不能落库");
+        assertNull(stored.getSenderEphemeralKey());
+        assertNull(stored.getConsumedOneTimePreKeyId());
+        assertNull(stored.getRecipientSignedPreKeyId());
+        assertFalse(Boolean.TRUE.equals(stored.getSenderUsedOneTimePreKey()));
+
+        // 桥接期消息（未 sealed）必须保留参数，否则对端永远建不出会话
+        CipherMessage bridge = replica(BOB_DEVICE_A);
+        bridge.setClientMsgId("client-msg-0002");
+        bridge.setSenderIdentityKey(ALICE + "-key-" + ALICE_DEVICE);
+        bridge.setSenderEphemeralKey("ZXBoZW1lcmFs");
+        bridge.setSenderUsedOneTimePreKey(Boolean.TRUE);
+        bridge.setConsumedOneTimePreKeyId(7);
+        bridge.setRecipientSignedPreKeyId(3);
+
+        CipherMessage bridgeStored = service.send(ALICE, ALICE_DEVICE,
+            Collections.singletonList(bridge)).get(0);
+        assertEquals(ALICE + "-key-" + ALICE_DEVICE, bridgeStored.getSenderIdentityKey());
+        assertEquals(Integer.valueOf(7), bridgeStored.getConsumedOneTimePreKeyId());
+        assertEquals(Boolean.TRUE, bridgeStored.getSenderUsedOneTimePreKey());
+    }
+
+    @Test
     @DisplayName("sealed 消息缺少 sessionId 被拒绝")
     void sealedWithoutSessionRejected() throws Exception {
         enableSealedSender();

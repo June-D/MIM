@@ -145,8 +145,9 @@ public class MessageServiceImpl implements MessageService {
 
         // 首条握手消息里的身份公钥必须与发信设备登记的公钥一致。
         // 接收方虽然也会做 TOFU 校验，但服务端先挡掉明显伪造的声明，
-        // 避免把畸形包扩散给收信端。
-        if (!UserKey.DEFAULT_DEVICE_ID.equals(fromDevice)) {
+        // 避免把畸形包扩散给收信端。sealed 消息不落库也不使用这些参数，
+        // 因此只对桥接期消息校验。
+        if (!shouldSeal(messages.get(0)) && !UserKey.DEFAULT_DEVICE_ID.equals(fromDevice)) {
             UserKey senderKey = userKeyMapper.selectByDevice(authenticatedUser, fromDevice);
             String claimed = messages.get(0).getSenderIdentityKey();
             if (senderKey != null && StringUtils.hasText(claimed)
@@ -219,11 +220,17 @@ public class MessageServiceImpl implements MessageService {
             record.setRatchetPublic(message.getRatchetPublic());
             record.setPreviousChainLength(message.getPreviousChainLength());
             record.setMessageNumber(message.getMessageNumber());
-            record.setSenderIdentityKey(message.getSenderIdentityKey());
-            record.setSenderEphemeralKey(message.getSenderEphemeralKey());
-            record.setSenderUsedOneTimePreKey(message.getSenderUsedOneTimePreKey());
-            record.setConsumedOneTimePreKeyId(message.getConsumedOneTimePreKeyId());
-            record.setRecipientSignedPreKeyId(message.getRecipientSignedPreKeyId());
+            // sealed 表示双方已确认会话，收信端已经能推进棘轮，握手参数不再需要。
+            // 而且 sender_identity_key 能与 t_user_key.public_key 直接 join 出用户名，
+            // 落库就等于绕过盲引用；临时公钥与 OPK 编号同理只保留在桥接期。
+            record.setSenderIdentityKey(sealed ? null : message.getSenderIdentityKey());
+            record.setSenderEphemeralKey(sealed ? null : message.getSenderEphemeralKey());
+            record.setSenderUsedOneTimePreKey(
+                sealed ? Boolean.FALSE : message.getSenderUsedOneTimePreKey());
+            record.setConsumedOneTimePreKeyId(
+                sealed ? null : message.getConsumedOneTimePreKeyId());
+            record.setRecipientSignedPreKeyId(
+                sealed ? null : message.getRecipientSignedPreKeyId());
             record.setPadding(Boolean.TRUE.equals(message.getPadding()));
             record.setSenderKeyVersion(message.getSenderKeyVersion());
             record.setRecipientKeyVersion(message.getRecipientKeyVersion());

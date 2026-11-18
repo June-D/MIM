@@ -256,6 +256,9 @@ UNIQUE KEY uk_client_target (client_msg_id, target_device_id)
 - 撤回：`selectOwnedCopy` 接受用户名或盲引用；消息有 `recall_token_hash` 时
   必须提交匹配的 `recallToken`，只用 `recallByToken` 更新；
   没有哈希的旧消息回退到 `recallBySender`。
+- 握手参数只落在桥接期消息：sealed 行的 `sender_identity_key` /
+  `sender_ephemeral_key` / `consumed_opk_id` / `recipient_spk_id` 一律写 NULL。
+  身份公钥可 join `t_user_key.public_key` 反查用户名，落库会抵消盲引用的意义。
 
 ### 客户端
 
@@ -312,13 +315,16 @@ UNIQUE KEY uk_client_target (client_msg_id, target_device_id)
 
 - 这是「数据库发送者列无明文、无固定索引」，不是提交匿名：服务端提交时
   仍从 JWT 知道发送者，盲引用也可被持有服务端密钥者关联。
+- 数据库中与发送者相关的列只剩：盲引用（需服务端密钥才能关联）、
+  密钥版本号、客户端时间。sealed 行不保存身份公钥与握手参数，
+  因此不能用「公钥目录 join」反查用户名。
 - 撤回凭证保存在发送端本地；另一台设备只有在历史同步时收到信封才有凭证，
   本机数据丢失或从未同步的设备只能走旧版兼容撤回路径。
 - 首次联系与桥接消息仍是旧格式，发送者可见，直到 Phase 2 的令牌/证书体系。
 
 ### 验证
 
-- 服务端 210 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
+- 服务端 211 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
   未读、token 撤回、Phase 1 存量行兼容与清除点过滤；
 - 客户端 112 项：`recallToken` 落盘、凭证信封格式与请求体改动；
 - e2e 多设备 29 项：新增「响应不回显撤回凭证」「缺 token 撤回 sealed 被拒」与

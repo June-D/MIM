@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **210** 项、客户端 **112** 项、e2e **29 + 13** 项
+- 回归基线：服务端 **211** 项、客户端 **112** 项、e2e **29 + 13** 项
 
 ### 已完成
 
@@ -65,6 +65,9 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
 - 撤回优先走 token：消息有 `recall_token_hash` 就必须提交匹配的原始 token；
   没有哈希的旧消息才回退到发信人引用；
 - 设备间同步副本共用原消息的 `recall_token_hash`，一次撤回覆盖所有副本；
+- sealed 消息不落库握手参数（`sender_identity_key` / 临时公钥 / OPK 编号）：
+  身份公钥能与 `t_user_key.public_key` 直接 join 出用户名，落库等于绕过盲引用；
+  客户端也不再在 sealed 消息上携带这些参数，桥接期消息不变；
 - 跨设备撤回：设备声明 `supportsRecallToken` 后，历史同步会把凭证装进
   `SyncEnvelope` 信封，随**已加密**的同步副本送到本账号其它设备；
   服务端仍只看到密文与哈希，旧客户端只收纯文本副本；
@@ -205,7 +208,7 @@ MIMServer/
                           PresenceService、PushService
   websocket/              SessionRegistry（本机会话）、WebSocketServer（生命周期+心跳）
   config/                 WebMvc、RedisSubscriber、WebSocket、TLS
-  src/test/java/          210 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
+  src/test/java/          211 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
 MIMClient/
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
@@ -566,7 +569,7 @@ cd MIMClient
 ./verify.sh
 
 # 或分端执行（在各自目录）
-cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
+cd MIMServer && ../mvnw test      # 211 项（含真实 MySQL 集成）
 cd MIMClient && ../mvnw test      # 112 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
