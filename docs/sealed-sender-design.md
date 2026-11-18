@@ -396,9 +396,11 @@ Phase 1.5 消除的是**持久化**发送者元数据。首次联系与桥接消
 - 已实现文件：`crypto/SenderCertEnvelope`、`crypto/SenderCertVerifier`、
   `crypto/ServerCertPin`、`service/SenderCertService`；
   发送与解密接在 `MessageService.send` / `decryptFirstContact`。
-- **未验证项**：e2e 的副本是手工拼装的，不走客户端发送路径，
-  因此 2b 的双向收发尚未在真实界面上跑过；上线前必须人工验证
-  首次联系、TOFU 弹窗、会话丢失提示三条路径。
+- 验证：`SenderCertE2eTest` 11 项已覆盖证书签发/独立验签、首条 sealed
+  不落 from_user、收信端按证书还原、投递后擦除、收信端历史可查。
+- **未验证项**：该 e2e 用真实双棘轮模拟两端，但不走
+  `MessageService` 的发送/解密接线；上线前必须人工验证首次联系、
+  TOFU 弹窗、会话丢失提示三条路径。
 
 **2c：匿名提交（暂缓）**
 - `/message` 增加不带 JWT 的通道，用令牌认证；服务端只校验签名与未消费。

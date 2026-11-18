@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **218** 项、客户端 **123** 项、e2e **30 + 13** 项
+- 回归基线：服务端 **218** 项、客户端 **123** 项、e2e **30 + 11 + 13** 项
 
 ### 已完成
 
@@ -57,9 +57,11 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
    - `MIMClient/src/main/java/com/junesoon/mim/service/HistorySync.java` 与
      `MIMClient/src/main/java/com/junesoon/mim/crypto/SyncEnvelope.java`（跨设备撤回归属这条链路）
    - `MIMServer/sql/e2ee.sql` 末尾的升级补丁
-2. **Phase 2（进行中）**：2a、2b 已完成，默认关闭；**必须先在真实界面上验证
-   首条消息 sealed 的双向收发**，再考虑默认开启。下一步 2c 匿名提交
-   （防重放/配额/拉黑三件套，需单独评审）；见设计文档第 7、11 节。
+2. **Phase 2（进行中）**：2a、2b 已完成并默认关闭；`SenderCertE2eTest`
+   已覆盖服务端契约与真实双棘轮往返，但 **`MessageService` 的接线仍只在
+   单元测试层面验证过**，开启前必须人工跑一遍首次联系/TOFU/会话丢失。
+   下一步 2c 匿名提交（防重放/配额/拉黑三件套 + 会话标签改造，需单独评审）；
+   见设计文档第 7、11 节。
 3. **运维收尾**：KMS SDK 直连（目前只有 CLI 命令桥接）、真实 SMTP、TOFU 人工核对流程。
 4. **长期迁移**：客户端 JavaFX 8/Boot 2.7 BOM 暂不升级；服务端保持 Java 17。
 
@@ -608,11 +610,15 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 
 覆盖内容：
 
+> `SenderCertE2eTest` 需要服务端以 `MIM_SENDER_CERT_ENABLED=true` 启动；
+> 未启用时它会打印 SKIP 并以 0 退出，不会伪装成通过。
+
 | 测试/脚本 | 覆盖点 |
 |---|---|
 | `MapperIntegrationTest`（36 项） | XML 与 schema 匹配、upsert 语义、`INSERT IGNORE`、`FOR UPDATE` 领取、去重分页、撤回级联、sealed 盲引用与 token 撤回 |
 | `HttpApiIntegrationTest`（20 项） | 鉴权 401、限流 429、`@CurrentUser`/`@CurrentDevice` 解析、伪造发信人、多设备扇出 |
 | `MultiDeviceE2eTest`（30 项） | 多设备注册、按设备分发、各自解密、设备隔离、按 clientMsgId 撤回、sealed 往返/历史/撤回、缺 token 撤回被拒、注销后停止分发 |
+| `SenderCertE2eTest`（11 项） | 证书签发与独立验签、首条 sealed 不落 from_user、收信端着陆归属、投递后擦除握手参数、首条 sealed 在收信端历史可查。需服务端 `MIM_SENDER_CERT_ENABLED=true`，关闭时明确 SKIP |
 | `WsDevicePushE2eTest`（13 项） | WS 按设备推送：两台设备各收自己那份、多端同步副本、密文互不相同、都能解密 |
 
 ## HTTP 接口
@@ -910,7 +916,10 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     再验签 + 绑定握手身份公钥 + 走 TOFU，最后把会话落到真实对端槽位。
     服务端证书公钥由 `ServerCertPin` 首次固定（换钥保留旧值）。
     任一环节失败都退回旧格式或按不可解密处理，不猜测发送者。
-    服务端 218 项、客户端 123 项、e2e 30 + 13 项通过。
+    服务端 218 项、客户端 123 项、e2e 30 + 11 + 13 项通过。
+100. 新增 `SenderCertE2eTest`（11 项）：证书签发 → openssl/Java 独立验签 →
+    首条 sealed 落库无 from_user → 收信端按证书还原 → 投递后握手参数擦除 →
+    首条 sealed 在收信端历史可查。服务端未启用证书功能时明确 SKIP。
 
 ## 仍需处理
 
@@ -932,8 +941,9 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 - 服务端已迁移到 Boot 3.5.16 + Java 17；客户端仍为 JavaFX 8，
   CI/部署需要同时准备两个 JDK。
 - **Phase 2（进行中）**：2a 证书签发、2b 首条消息 sealed 均已落地但默认关闭；
-  2b 的客户端收发路径目前只有单元测试覆盖，未在真实界面上跑过双向验证。
-  2c 匿名提交需要防重放/配额/拉黑三件套，需单独评审。
+  e2e 已覆盖证书契约与真实棘轮往返，客户端 `MessageService` 接线仍需人工验证。
+  2c 匿名提交除防重放/配额/拉黑外，还要求把历史/未读换成客户端生成的
+  会话标签，否则收信端无法按对端查历史；需单独评审。
   见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 11 节。
 - KMS 目前只有外部命令桥接（Vault/AWS/GCP CLI），尚未接 SDK；生产 SMTP
   仍需真实邮件服务器。
