@@ -392,6 +392,62 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
             .andExpect(jsonPath("$.data.length()").value(1));
     }
 
+    @Test
+    @DisplayName("封存消息的撤回凭证跨设备生效，缺失时被拒绝")
+    void sealedRecallTokenWorksAcrossDevices() throws Exception {
+        String aliceToken = registerAndLogin("alice");
+        registerDevice(aliceToken, "alice-a");
+        registerDevice(aliceToken, "alice-b");
+        uploadKey(aliceToken, "alice-a", p256PublicKey());
+        uploadKey(aliceToken, "alice-b", p256PublicKey());
+        String bobToken = registerAndLogin("bob");
+        registerDevice(bobToken, "bob-dev");
+        uploadKey(bobToken, "bob-dev", p256PublicKey());
+
+        // 发送端生成的随机凭证；服务端只保存哈希
+        String recallToken = "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        Map<String, Object> message = replica("msg-cross-recall-01", "bob", "bob-dev");
+        message.put("sealed", true);
+        message.put("sessionId", "session-cross-01");
+        message.put("recallToken", recallToken);
+
+        mockMvc.perform(post("/message")
+                .header("Authorization", "Bearer " + aliceToken)
+                .header("X-Device-Id", "alice-a")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(
+                    java.util.Collections.singletonList(message))))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(200))
+            .andExpect(jsonPath("$.data[0].fromUsername").value(
+                org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data[0].recallToken").doesNotExist())
+            .andExpect(jsonPath("$.data[0].recallTokenHash").doesNotExist());
+
+        // 换一台设备、不带凭证：必须拒绝，不能退回发信人引用
+        mockMvc.perform(post("/message/recall/msg-cross-recall-01")
+                .header("Authorization", "Bearer " + aliceToken)
+                .header("X-Device-Id", "alice-b")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(40001))
+            .andExpect(jsonPath("$.message").value(
+                org.hamcrest.Matchers.containsString("撤回凭证")));
+
+        // 带上发送端的凭证：另一台设备也能撤回
+        mockMvc.perform(post("/message/recall/msg-cross-recall-01")
+                .header("Authorization", "Bearer " + aliceToken)
+                .header("X-Device-Id", "alice-b")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"recallToken\":\"" + recallToken + "\"}"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(200))
+            .andExpect(jsonPath("$.data.recalled").value(true))
+            .andExpect(jsonPath("$.data.recallToken").doesNotExist())
+            .andExpect(jsonPath("$.data.recallTokenHash").doesNotExist());
+    }
+
     // ==================== 限流与异常映射 ====================
 
     @Test

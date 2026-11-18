@@ -47,7 +47,8 @@ public class KeyController {
     public ObjectRestResponse<KeyBundle> upload(@CurrentUser String username,
         @CurrentDevice String deviceId, @RequestBody KeyUploadRequest request) {
         KeyBundle bundle = keyService.upload(username, deviceId, request.getPublicKey(),
-            request.getAlgorithm(), request.getPassword(), request.getSupportsPadding());
+            request.getAlgorithm(), request.getPassword(), request.getSupportsPadding(),
+            request.getSupportsRecallToken());
         log.info("用户 {} 设备 {} 上传加密公钥，版本 {} 指纹 {}",
             username, deviceId, bundle.getVersion(), bundle.getFingerprint());
         return new ObjectRestResponse<KeyBundle>().data(bundle).rel(true);

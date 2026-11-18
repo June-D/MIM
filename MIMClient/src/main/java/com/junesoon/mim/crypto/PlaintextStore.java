@@ -27,6 +27,7 @@ public final class PlaintextStore {
     private static final String FIELD_DATA = "data=";
     private static final String FIELD_ITERATIONS = "iterations=";
     private static final String SENT_PREFIX = "sent|";
+    private static final String TOKEN_PREFIX = "token|";
 
     private final Path directory;
     private final Map<String, String> texts = new LinkedHashMap<>();
@@ -115,6 +116,24 @@ public final class PlaintextStore {
             return;
         }
         put(SENT_PREFIX + peer + "|" + clientMsgId, plaintext);
+    }
+
+    /**
+     * 取发送时保存的一次性撤回凭证。凭证与消息一起加密落盘，
+     * 服务端只有哈希，丢失凭证就只能走旧版兼容撤回路径。
+     */
+    public String getRecallToken(String peer, String clientMsgId) {
+        if (peer == null || clientMsgId == null) {
+            return null;
+        }
+        return texts.get(TOKEN_PREFIX + peer + "|" + clientMsgId);
+    }
+
+    public void putRecallToken(String peer, String clientMsgId, String token) {
+        if (peer == null || clientMsgId == null || token == null) {
+            return;
+        }
+        put(TOKEN_PREFIX + peer + "|" + clientMsgId, token);
     }
 
     public void put(String clientMsgId, String plaintext) {

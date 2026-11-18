@@ -1,6 +1,7 @@
 package com.junesoon.mim.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -176,6 +177,39 @@ class KeyServiceTest {
         service.upload("alice", DEVICE, publicKey, "EC-P256", "pw");
         KeyBundle second = service.upload("alice", DEVICE, publicKey, "EC-P256", "pw");
         assertEquals(1, second.getVersion(), "同一指纹不应涨版本");
+    }
+
+    @Test
+    @DisplayName("能力位随公钥上传保存并在返回包里可见")
+    void capabilityRoundTrip() throws Exception {
+        KeyBundle bundle = service.upload("alice", DEVICE, realP256PublicKey(), "EC-P256", "pw",
+            Boolean.TRUE, Boolean.TRUE);
+        assertTrue(bundle.getSupportsPadding());
+        assertTrue(bundle.getSupportsRecallToken(),
+            "跨设备撤回能力必须回传给客户端，否则同步副本永远不带凭证");
+        assertTrue(service.get("alice", DEVICE).getSupportsRecallToken());
+    }
+
+    @Test
+    @DisplayName("旧客户端重登未上报能力位时降级为 false，且不涨版本")
+    void capabilitiesDowngradeWhenNotDeclared() throws Exception {
+        String key = realP256PublicKey();
+        service.upload("alice", DEVICE, key, "EC-P256", "pw", Boolean.TRUE, Boolean.TRUE);
+        KeyBundle legacy = service.upload("alice", DEVICE, key, "EC-P256", "pw");
+        assertFalse(Boolean.TRUE.equals(legacy.getSupportsRecallToken()));
+        assertFalse(Boolean.TRUE.equals(legacy.getSupportsPadding()));
+        assertEquals(1, legacy.getVersion(), "能力变化不是换钥，不应涨版本");
+    }
+
+    @Test
+    @DisplayName("修改能力位需要验证当前密码")
+    void capabilityChangeRequiresPassword() throws Exception {
+        String key = realP256PublicKey();
+        service.upload("alice", DEVICE, key, "EC-P256", "pw", Boolean.FALSE, Boolean.FALSE);
+        assertThrows(UserInvalidException.class,
+            () -> service.upload("alice", DEVICE, key, "EC-P256", "wrong",
+                Boolean.TRUE, Boolean.TRUE),
+            "仅凭被盗 JWT 不能把设备标成支持新能力");
     }
 
     @Test

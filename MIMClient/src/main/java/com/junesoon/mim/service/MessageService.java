@@ -14,6 +14,7 @@ import com.junesoon.mim.crypto.PreKeyStore;
 import com.junesoon.mim.crypto.RatchetService;
 import com.junesoon.mim.crypto.SessionState;
 import com.junesoon.mim.crypto.SessionStore;
+import com.junesoon.mim.crypto.SyncEnvelope;
 import com.junesoon.mim.crypto.SyncPayload;
 import com.junesoon.mim.crypto.TrustChangedException;
 import com.junesoon.mim.crypto.TrustStore;
@@ -432,6 +433,8 @@ public class MessageService {
         }
 
         String clientMsgId = java.util.UUID.randomUUID().toString();
+        // 一次性撤回凭证：服务端只保存哈希，撤回时必须原样带回。
+        String recallToken = newRecallToken();
         long clientTime = System.currentTimeMillis();
         List<CipherMessage> replicas = new ArrayList<>(devices.size());
 
@@ -495,6 +498,7 @@ public class MessageService {
 
                 CipherMessage replica = new CipherMessage();
                 replica.setClientMsgId(clientMsgId);
+                replica.setRecallToken(recallToken);
                 replica.setFromUsername(sealed ? null : self);
                 replica.setFromDeviceId(sealed ? null : keyManager.deviceId());
                 replica.setToUsername(peer);
@@ -550,8 +554,18 @@ public class MessageService {
         synchronized (cryptoLock) {
             plaintextStore.put(cacheKey(self, keyManager.deviceId(), clientMsgId), plaintext);
             plaintextStore.putSent(peer, clientMsgId, plaintext);
+            plaintextStore.putRecallToken(peer, clientMsgId, recallToken);
         }
         return new DecryptedMessage(first, plaintext, false);
+    }
+
+    /**
+     * 生成 32 字节随机撤回凭证（Base64）。服务端只保存 SHA-256。
+     */
+    private static String newRecallToken() {
+        byte[] random = new byte[32];
+        new java.security.SecureRandom().nextBytes(random);
+        return java.util.Base64.getEncoder().encodeToString(random);
     }
 
     /**
@@ -722,7 +736,7 @@ public class MessageService {
         }
         String cached = readCache(message, cacheKey, deviceSync, isSelf);
         if (cached != null) {
-            return new DecryptedMessage(message, cached, false);
+            return new DecryptedMessage(message, unwrapSync(message, cached, deviceSync), false);
         }
         if (isSelf && !deviceSync) {
             // 自己发出的密文是用对方的接收链加密的，本机棘轮解不开。
@@ -805,7 +819,8 @@ public class MessageService {
                     log.warn("会话状态保存失败，可能导致后续消息解密异常：{}", e.getMessage());
                 }
                 plaintextStore.put(cacheKey, plaintext);
-                return new DecryptedMessage(message, plaintext, false);
+                return new DecryptedMessage(message,
+                    unwrapSync(message, plaintext, deviceSync), false);
             }
         } catch (Exception e) {
             log.warn("解密消息 {} 失败：{}", message.getClientMsgId(), e.getMessage());
@@ -870,6 +885,43 @@ public class MessageService {
     private static String syncCacheKey(CipherMessage message) {
         return "sync|" + normalizeDevice(message.getSyncFromDevice()) + "|"
             + (message.getClientMsgId() == null ? "" : message.getClientMsgId());
+    }
+
+    /**
+     * 同步副本拆信封：把撤回凭证收进本机存储，返回界面要显示的正文。
+     *
+     * <p>缓存里存的仍是<b>未拆包</b>的明文，因为 {@code readCache} 要用同一串
+     * 内容重新验证转发设备的签名；拆包只发生在返回给界面之前。
+     *
+     * <p>只有「自己发出的」副本才带凭证，收件方向的副本原样返回。
+     */
+    private String unwrapSync(CipherMessage message, String stored, boolean deviceSync) {
+        if (!deviceSync) {
+            return stored;
+        }
+        SyncEnvelope.Parsed parsed = SyncEnvelope.unpack(stored);
+        if (parsed == null) {
+            return stored;
+        }
+        String self = ApplicatonStore.getUsername();
+        String originalFrom = message.getSyncOriginalFrom();
+        String originalTo = message.getSyncOriginalTo();
+        if (self != null && self.equals(originalFrom) && originalTo != null) {
+            // 与发送端保存凭证时用的是同一个键：会话对端 + clientMsgId。
+            plaintextStore.putRecallToken(originalTo, message.getClientMsgId(),
+                parsed.getRecallToken());
+        }
+        return parsed.getText();
+    }
+
+    /**
+     * 取发送时保存的一次性撤回凭证。
+     *
+     * <p>历史同步把它加密转发给本账号的其它设备，那些设备才有权撤回同一条消息；
+     * 服务端始终只保存哈希。
+     */
+    public String recallTokenFor(String peer, String clientMsgId) {
+        return plaintextStore.getRecallToken(peer, clientMsgId);
     }
 
     private static boolean syncSignatureValid(CipherMessage message, String plaintext) {
@@ -1055,11 +1107,17 @@ public class MessageService {
 
     /**
      * 撤回自己发送的消息（按 clientMsgId 撤回所有设备副本）。
+     *
+     * <p>新消息必须带发送时保存的 recallToken；服务端只认哈希。
+     * 本机没有凭证（旧消息或已被清理）时传空，服务端退回兼容路径。
      */
-    public void recall(String clientMsgId) throws IdentityException {
+    public void recall(String peer, String clientMsgId) throws IdentityException {
         try {
+            String token = plaintextStore.getRecallToken(peer, clientMsgId);
+            com.junesoon.mim.model.RecallRequest body =
+                new com.junesoon.mim.model.RecallRequest(token);
             ObjectRestResponse<CipherMessage> response =
-                Request.connector(MessageFeign.class).recall(clientMsgId);
+                Request.connector(MessageFeign.class).recall(clientMsgId, body);
             if (response == null || response.getStatus() != 200) {
                 String error = response == null ? "服务端无响应" : response.getMessage();
                 throw new IdentityException(error == null ? "撤回失败" : error);

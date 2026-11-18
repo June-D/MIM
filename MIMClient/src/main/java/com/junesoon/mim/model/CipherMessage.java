@@ -128,6 +128,12 @@ public class CipherMessage {
     private Long recalledAt;
 
     /**
+     * 一次性撤回凭证。发送时随消息提交，服务端只保存它的哈希；
+     * 撤回时必须原样带回。旧客户端没有该字段，服务端退回兼容路径。
+     */
+    private String recallToken;
+
+    /**
      * 哪台自己的设备把原文重新加密过来的。非空时用与该设备的会话解密。
      */
     private String syncFromDevice;

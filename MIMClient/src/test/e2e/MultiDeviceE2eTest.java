@@ -92,6 +92,12 @@ public final class MultiDeviceE2eTest {
         }
         check("两个设备的预密钥签名都可验证", allVerified);
 
+        boolean allRecallToken = true;
+        for (PreKeyBundleView bundle : bundles) {
+            allRecallToken &= bundle.supportsRecallToken;
+        }
+        check("两台设备的预密钥包都声明支持跨设备撤回凭证", allRecallToken);
+
         // ---- alice 为每个设备各建会话并加密 ----
         RatchetService ratchet = new RatchetService();
         TrustStore aliceTrust = new TrustStore(workDir.resolve("trust-alice"));
@@ -208,8 +214,9 @@ public final class MultiDeviceE2eTest {
 
         RatchetService.Encrypted bobReply = ratchet.encrypt(bobState, "sealed reply");
         String replyId = java.util.UUID.randomUUID().toString();
+        String replyToken = newRecallToken();
         String replyBody = sealedReplica(replyId, aliceName, aliceDevice, bobReply, sessionId,
-            System.currentTimeMillis());
+            System.currentTimeMillis(), replyToken);
         String replyResp = httpPost(BASE + "/message", bobToken, bobDesktop,
             "[" + replyBody + "]");
         check("bob 的回复以 sealed 提交成功", replyResp.contains("\"status\":200")
@@ -226,8 +233,9 @@ public final class MultiDeviceE2eTest {
 
         RatchetService.Encrypted aliceSealed = ratchet.encrypt(aliceState, "sealed follow-up");
         String sealedId = java.util.UUID.randomUUID().toString();
+        String sealedToken = newRecallToken();
         String sealedBody = sealedReplica(sealedId, bobName, bobDesktop, aliceSealed, sessionId,
-            System.currentTimeMillis());
+            System.currentTimeMillis(), sealedToken);
         String sealedResp = httpPost(BASE + "/message", aliceToken, aliceDevice,
             "[" + sealedBody + "]");
         check("alice 的后续消息以 sealed 提交成功", sealedResp.contains("\"status\":200")
@@ -257,8 +265,15 @@ public final class MultiDeviceE2eTest {
             bobSealedHistory.contains("\"sealed\":true")
                 && bobSealedHistory.contains("\"fromMe\":false"));
 
-        String sealedRecall = httpPost(BASE + "/message/recall/" + sealedId,
+        check("sealed 后续消息的响应不回显撤回凭证",
+            !sealedResp.contains("recallToken") && !sealedResp.contains(sealedToken));
+        String noTokenRecall = httpPost(BASE + "/message/recall/" + sealedId,
             aliceToken, aliceDevice, null);
+        check("sealed 消息缺少撤回凭证时被拒绝",
+            noTokenRecall.contains("撤回凭证无效"));
+        String sealedRecall = httpPost(BASE + "/message/recall/" + sealedId,
+            aliceToken, aliceDevice,
+            "{\"recallToken\":\"" + sealedToken + "\"}");
         check("sealed 后续消息可撤回", sealedRecall.contains("\"status\":200"));
         String afterSealedRecall = httpGet(BASE + "/message/history/" + aliceName,
             bobToken, bobDesktop);
@@ -305,7 +320,7 @@ public final class MultiDeviceE2eTest {
      */
     private static String sealedReplica(String clientMsgId, String toUsername,
         String targetDeviceId, RatchetService.Encrypted encrypted, String sessionId,
-        long clientTime) {
+        long clientTime, String recallToken) {
         return "{\"clientMsgId\":\"" + clientMsgId + "\","
             + "\"toUsername\":\"" + toUsername + "\","
             + "\"targetDeviceId\":\"" + targetDeviceId + "\","
@@ -316,7 +331,15 @@ public final class MultiDeviceE2eTest {
             + "\"previousChainLength\":" + encrypted.getHeader().getPreviousChainLength() + ","
             + "\"messageNumber\":" + encrypted.getHeader().getMessageNumber() + ","
             + "\"clientTime\":" + clientTime + ","
+            + "\"recallToken\":\"" + recallToken + "\","
             + "\"sealed\":true,\"sessionId\":\"" + sessionId + "\"}";
+    }
+
+    /** 生成与客户端一致的 32 字节随机撤回凭证（Base64）。 */
+    private static String newRecallToken() {
+        byte[] random = new byte[32];
+        new java.security.SecureRandom().nextBytes(random);
+        return java.util.Base64.getEncoder().encodeToString(random);
     }
 
     // ==================== HTTP 辅助 ====================
@@ -329,6 +352,7 @@ public final class MultiDeviceE2eTest {
         String signedPreKeySignature;
         Integer oneTimePreKeyId;
         String oneTimePreKeyPublic;
+        boolean supportsRecallToken;
     }
 
     private static final class CipherMessageView {
@@ -367,7 +391,8 @@ public final class MultiDeviceE2eTest {
     private static void uploadIdentityKey(String token, String deviceId, String publicKey)
         throws Exception {
         String body = "{\"publicKey\":\"" + publicKey
-            + "\",\"algorithm\":\"EC-P256\",\"password\":\"" + base64(PASSWORD) + "\"}";
+            + "\",\"algorithm\":\"EC-P256\",\"password\":\"" + base64(PASSWORD)
+            + "\",\"supportsPadding\":true,\"supportsRecallToken\":true}";
         requireOk(httpPost(BASE + "/key", token, deviceId, body), "上传身份公钥");
     }
 
@@ -413,6 +438,7 @@ public final class MultiDeviceE2eTest {
                 view.oneTimePreKeyId = Integer.parseInt(opkId);
                 view.oneTimePreKeyPublic = strOrNull(block, "\"oneTimePreKeyPublic\":\"");
             }
+            view.supportsRecallToken = block.contains("\"supportsRecallToken\":true");
             bundles.add(view);
         }
         return bundles;

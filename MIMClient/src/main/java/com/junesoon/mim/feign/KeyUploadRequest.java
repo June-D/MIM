@@ -25,4 +25,10 @@ public class KeyUploadRequest {
      * 本设备是否支持消息长度填充。
      */
     private Boolean supportsPadding;
+
+    /**
+     * 本设备能否在「自己设备间同步」的副本里接收加密的撤回凭证。
+     * 声明后，另一台设备转发历史时会顺带把撤回凭证加密送过来。
+     */
+    private Boolean supportsRecallToken;
 }

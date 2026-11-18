@@ -7,6 +7,7 @@ import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.ratelimit.RateLimit;
 import com.junesoon.mim.requests.ClearRequest;
 import com.junesoon.mim.requests.ReadRequest;
+import com.junesoon.mim.requests.RecallRequest;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.MessageService;
@@ -112,9 +113,11 @@ public class MessageController {
     @PostMapping("/recall/{clientMsgId}")
     @RateLimit(limit = 30, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
     public ObjectRestResponse<CipherMessage> recall(@CurrentUser String username,
-        @PathVariable String clientMsgId) {
+        @PathVariable String clientMsgId,
+        @RequestBody(required = false) RecallRequest request) {
+        String recallToken = request == null ? null : request.getRecallToken();
         return new ObjectRestResponse<CipherMessage>()
-            .data(messageService.recall(username, clientMsgId))
+            .data(messageService.recall(username, clientMsgId, recallToken))
             .rel(true);
     }
 

@@ -22,4 +22,10 @@ public class KeyUploadRequest {
      * 本设备是否支持消息长度填充；旧客户端不上报，按 false 处理。
      */
     private Boolean supportsPadding;
+
+    /**
+     * 本设备能否在「自己设备间同步」的副本里接收加密的撤回凭证。
+     * 旧客户端不上报，按 false 处理，只会收到纯文本副本。
+     */
+    private Boolean supportsRecallToken;
 }

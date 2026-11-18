@@ -300,11 +300,9 @@ class MessageSyncTest {
         }
 
         @Override
-        public CipherMessage selectByClientMsgId(String fromUsername, String clientMsgId,
-            String targetDeviceId) {
+        public CipherMessage selectByClientMsgId(String clientMsgId, String targetDeviceId) {
             for (CipherMessage row : rows) {
-                if (fromUsername.equals(row.getFromUsername())
-                    && clientMsgId.equals(row.getClientMsgId())
+                if (clientMsgId.equals(row.getClientMsgId())
                     && targetDeviceId.equals(row.getTargetDeviceId())) {
                     return row;
                 }
@@ -318,17 +316,32 @@ class MessageSyncTest {
         }
 
         @Override
-        public CipherMessage selectAnyByClientMsgId(String fromUsername, String clientMsgId) {
+        public CipherMessage selectOwnedCopy(String clientMsgId, String fromUser, String fromRef) {
+            for (CipherMessage row : rows) {
+                if (!clientMsgId.equals(row.getClientMsgId())) {
+                    continue;
+                }
+                if (row.getFromUsername() != null
+                    && row.getFromUsername().equals(fromUser)) {
+                    return row;
+                }
+                if (row.getFromRef() != null && row.getFromRef().equals(fromRef)) {
+                    return row;
+                }
+            }
             return null;
         }
 
         @Override
-        public CipherMessage selectParticipantCopy(String username, String clientMsgId) {
+        public CipherMessage selectParticipantCopy(String clientMsgId, String username,
+            String userRef) {
             for (CipherMessage row : rows) {
                 if (!clientMsgId.equals(row.getClientMsgId()) || row.getSyncFromDevice() != null) {
                     continue;
                 }
-                if (username.equals(row.getFromUsername()) || username.equals(row.getToUsername())) {
+                if (username.equals(row.getFromUsername())
+                    || username.equals(row.getToUsername())
+                    || (userRef != null && userRef.equals(row.getFromRef()))) {
                     return row;
                 }
             }
@@ -343,6 +356,18 @@ class MessageSyncTest {
         @Override
         public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
             String deviceId, Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistory(String fromRef, String toUser,
+            Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistoryForDevice(String fromRef, String toUser,
+            String viewer, String deviceId, String deviceRef, Long beforeId, int limit) {
             return Collections.emptyList();
         }
 
@@ -367,7 +392,17 @@ class MessageSyncTest {
         }
 
         @Override
+        public int markReadByRef(String fromRef, String toUsername, Long beforeId) {
+            return 0;
+        }
+
+        @Override
         public long countUnread(String fromUsername, String toUsername) {
+            return 0;
+        }
+
+        @Override
+        public long countUnreadByRef(String fromRef, String toUsername) {
             return 0;
         }
 
@@ -377,7 +412,17 @@ class MessageSyncTest {
         }
 
         @Override
+        public long countUnreadAfterByRef(String fromRef, String toUsername, long afterId) {
+            return 0;
+        }
+
+        @Override
         public Long maxConversationId(String a, String b) {
+            return null;
+        }
+
+        @Override
+        public Long maxRefConversationId(String fromRef, String toUser) {
             return null;
         }
 
@@ -387,7 +432,18 @@ class MessageSyncTest {
         }
 
         @Override
-        public int recall(String clientMsgId, String fromUsername, long recalledAt) {
+        public int wipeRefConversation(String fromRef, String toUser, long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public int recallByToken(String clientMsgId, String recallTokenHash, long recalledAt) {
+            return 0;
+        }
+
+        @Override
+        public int recallBySender(String clientMsgId, String fromUser, String fromRef,
+            long recalledAt) {
             return 0;
         }
     }

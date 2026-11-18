@@ -7,6 +7,7 @@ import com.junesoon.mim.crypto.Hkdf;
 import com.junesoon.mim.crypto.IdentityException;
 import com.junesoon.mim.crypto.OwnDeviceTrust;
 import com.junesoon.mim.crypto.SessionStore;
+import com.junesoon.mim.crypto.SyncEnvelope;
 import com.junesoon.mim.crypto.SyncPayload;
 import com.junesoon.mim.crypto.TrustStore;
 import com.junesoon.mim.feign.ChatFeign;
@@ -262,8 +263,16 @@ public final class HistorySync {
             return null;
         }
         try {
+            // 撤回凭证随加密副本一起走，服务端只看到密文。
+            // 目标设备没声明能力时保持纯文本，旧客户端不会看到信封。
+            String recallToken = message.isMine()
+                ? MessageService.getInstance().recallTokenFor(conversationPeer,
+                    message.getClientMsgId())
+                : null;
+            String payload = Boolean.TRUE.equals(bundle.getSupportsRecallToken())
+                ? SyncEnvelope.pack(recallToken, text) : text;
             CipherMessage replica = MessageService.getInstance().wrapForOwnDevice(
-                targetDeviceId, text, message.getClientMsgId(), message.getTimestamp(), bundle);
+                targetDeviceId, payload, message.getClientMsgId(), message.getTimestamp(), bundle);
 
             // 用本机身份私钥签住「原消息归属 + 内容」，接收端验签后以这些字段为准。
             // 否则被攻破的服务端可以把任意历史内容挂到任意联系人名下。
@@ -295,7 +304,7 @@ public final class HistorySync {
             replica.setSyncOriginalTo(originalTo);
             replica.setSyncOriginalDevice(originalDevice);
             String canonical = SyncPayload.canonical(originalFrom, originalTo, originalDevice,
-                message.getClientMsgId(), clientTime, targetDeviceId, text);
+                message.getClientMsgId(), clientTime, targetDeviceId, payload);
             replica.setSyncSignature(SyncPayload.sign(identity.getPrivateKey(), canonical));
             return replica;
         } catch (IdentityException e) {

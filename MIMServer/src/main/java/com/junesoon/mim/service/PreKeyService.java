@@ -58,10 +58,12 @@ public interface PreKeyService {
         private final String signedPreKeySignature;
         private final Integer oneTimePreKeyId;
         private final String oneTimePreKeyPublic;
+        private final Boolean supportsRecallToken;
 
         public PreKeyBundle(String username, String deviceId, String identityPublicKey,
             Integer identityKeyVersion, Integer signedPreKeyId, String signedPreKeyPublic,
-            String signedPreKeySignature, Integer oneTimePreKeyId, String oneTimePreKeyPublic) {
+            String signedPreKeySignature, Integer oneTimePreKeyId, String oneTimePreKeyPublic,
+            Boolean supportsRecallToken) {
             this.username = username;
             this.deviceId = deviceId;
             this.identityPublicKey = identityPublicKey;
@@ -71,6 +73,7 @@ public interface PreKeyService {
             this.signedPreKeySignature = signedPreKeySignature;
             this.oneTimePreKeyId = oneTimePreKeyId;
             this.oneTimePreKeyPublic = oneTimePreKeyPublic;
+            this.supportsRecallToken = supportsRecallToken;
         }
 
         public String getUsername() {
@@ -111,6 +114,14 @@ public interface PreKeyService {
 
         public boolean hasOneTimePreKey() {
             return oneTimePreKeyId != null && oneTimePreKeyPublic != null;
+        }
+
+        /**
+         * 该设备能否接收「带加密撤回凭证」的同步副本。
+         * 历史同步据此决定是否把凭证包进密文；旧客户端为 false。
+         */
+        public Boolean getSupportsRecallToken() {
+            return supportsRecallToken;
         }
     }
 }

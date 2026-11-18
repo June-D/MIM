@@ -7,6 +7,8 @@
         <result column="client_msg_id" jdbcType="VARCHAR" property="clientMsgId"/>
         <result column="from_user" jdbcType="VARCHAR" property="fromUsername"/>
         <result column="from_device_id" jdbcType="VARCHAR" property="fromDeviceId"/>
+        <result column="from_ref" jdbcType="VARCHAR" property="fromRef"/>
+        <result column="from_device_ref" jdbcType="VARCHAR" property="fromDeviceRef"/>
         <result column="to_user" jdbcType="VARCHAR" property="toUsername"/>
         <result column="target_device_id" jdbcType="VARCHAR" property="targetDeviceId"/>
         <result column="alg" jdbcType="VARCHAR" property="alg"/>
@@ -31,6 +33,7 @@
         <result column="read_flag" jdbcType="TINYINT" property="readFlag"/>
         <result column="recalled" jdbcType="TINYINT" property="recalled"/>
         <result column="recalled_at" jdbcType="BIGINT" property="recalledAt"/>
+        <result column="recall_token_hash" jdbcType="VARCHAR" property="recallTokenHash"/>
         <result column="sync_from_device" jdbcType="VARCHAR" property="syncFromDevice"/>
         <result column="sync_original_from" jdbcType="VARCHAR" property="syncOriginalFrom"/>
         <result column="sync_original_to" jdbcType="VARCHAR" property="syncOriginalTo"/>
@@ -39,30 +42,33 @@
     </resultMap>
 
     <sql id="Base_Column_List">
-        id, client_msg_id, from_user, from_device_id, to_user, target_device_id,
+        id, client_msg_id, from_user, from_device_id, from_ref, from_device_ref,
+        to_user, target_device_id,
         alg, iv, ciphertext,
         ratchet_public, previous_chain_length, message_number,
         sender_identity_key, sender_ephemeral_key, sender_used_opk, consumed_opk_id,
         recipient_spk_id,
         padding, sealed, session_id,
         sender_key_version, recipient_key_version, client_time, server_time,
-        delivered, read_flag, recalled, recalled_at, sync_from_device,
+        delivered, read_flag, recalled, recalled_at, recall_token_hash, sync_from_device,
         sync_original_from, sync_original_to, sync_original_device, sync_signature
     </sql>
 
     <insert id="insert" parameterType="com.junesoon.mim.entity.CipherMessage"
             useGeneratedKeys="true" keyProperty="id">
-        insert into t_message (client_msg_id, from_user, from_device_id, to_user, target_device_id,
+        insert into t_message (client_msg_id, from_user, from_device_id, from_ref, from_device_ref,
+                               to_user, target_device_id,
                                alg, iv, ciphertext,
                                ratchet_public, previous_chain_length, message_number,
                                sender_identity_key, sender_ephemeral_key, sender_used_opk,
                                consumed_opk_id, recipient_spk_id, padding, sealed, session_id,
                                sender_key_version, recipient_key_version, client_time, server_time,
-                               delivered, read_flag, recalled, sync_from_device,
+                               delivered, read_flag, recalled, recall_token_hash, sync_from_device,
                                sync_original_from, sync_original_to, sync_original_device,
                                sync_signature)
         values (#{clientMsgId,jdbcType=VARCHAR}, #{fromUsername,jdbcType=VARCHAR},
-                #{fromDeviceId,jdbcType=VARCHAR}, #{toUsername,jdbcType=VARCHAR},
+                #{fromDeviceId,jdbcType=VARCHAR}, #{fromRef,jdbcType=VARCHAR},
+                #{fromDeviceRef,jdbcType=VARCHAR}, #{toUsername,jdbcType=VARCHAR},
                 #{targetDeviceId,jdbcType=VARCHAR},
                 #{alg,jdbcType=VARCHAR}, #{iv,jdbcType=VARCHAR}, #{ciphertext,jdbcType=LONGVARCHAR},
                 #{ratchetPublic,jdbcType=VARCHAR}, #{previousChainLength,jdbcType=INTEGER},
@@ -76,20 +82,21 @@
                 #{senderKeyVersion,jdbcType=INTEGER}, #{recipientKeyVersion,jdbcType=INTEGER},
                 #{clientTime,jdbcType=BIGINT}, #{serverTime,jdbcType=BIGINT},
                 #{delivered,jdbcType=TINYINT}, #{readFlag,jdbcType=TINYINT},
-                #{recalled,jdbcType=TINYINT}, #{syncFromDevice,jdbcType=VARCHAR},
+                #{recalled,jdbcType=TINYINT}, #{recallTokenHash,jdbcType=VARCHAR},
+                #{syncFromDevice,jdbcType=VARCHAR},
                 #{syncOriginalFrom,jdbcType=VARCHAR}, #{syncOriginalTo,jdbcType=VARCHAR},
                 #{syncOriginalDevice,jdbcType=VARCHAR}, #{syncSignature,jdbcType=LONGVARCHAR})
     </insert>
 
     <!--
       幂等查询：同一条逻辑消息对同一目标设备只应该有一份。
+      唯一键不含发信人：sealed 消息根本不保存明文发信人。
     -->
     <select id="selectByClientMsgId" resultMap="BaseResultMap">
         select
         <include refid="Base_Column_List"/>
         from t_message
-        where from_user = #{fromUsername,jdbcType=VARCHAR}
-          and client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+        where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
           and target_device_id = #{targetDeviceId,jdbcType=VARCHAR}
         limit 1
     </select>
@@ -102,16 +109,20 @@
     </select>
 
     <!--
-      取该 clientMsgId 的任意一份副本（不限目标设备）。
-      撤回需要先判定「是否本人发的」「是否超时」「是否已撤回」，
-      这些属性在所有设备副本上一致，取任意一份即可。
+      取当前用户拥有的任意一份副本（不限目标设备），用于撤回的权限与时限判定。
+      sealed 消息按 from_ref 匹配；Phase 1 存量数据（盲引用写在 from_user）
+      仍可通过 from_user = fromRef 命中，迁移前后都能撤回。
     -->
-    <select id="selectAnyByClientMsgId" resultMap="BaseResultMap">
+    <select id="selectOwnedCopy" resultMap="BaseResultMap">
         select
         <include refid="Base_Column_List"/>
         from t_message
-        where from_user = #{fromUsername,jdbcType=VARCHAR}
-          and client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+        where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+          and (
+              from_user = #{fromUser,jdbcType=VARCHAR}
+              or from_ref = #{fromRef,jdbcType=VARCHAR}
+              or from_user = #{fromRef,jdbcType=VARCHAR}
+          )
         limit 1
     </select>
 
@@ -122,7 +133,11 @@
         from t_message
         where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
           and sync_from_device is null
-          and (from_user = #{username,jdbcType=VARCHAR} or to_user = #{username,jdbcType=VARCHAR})
+          and (
+              from_user = #{username,jdbcType=VARCHAR}
+              or from_ref = #{userRef,jdbcType=VARCHAR}
+              or to_user = #{username,jdbcType=VARCHAR}
+          )
         order by id asc
         limit 1
     </select>
@@ -184,7 +199,65 @@
     </select>
 
     <!--
+      sealed 消息历史：from_ref 指向发信人盲引用，to_user 仍是收信人用户名。
+      发件方向查 from_ref = 我的引用；收件方向查 from_ref = 对方的引用。
+    -->
+    <select id="selectRefHistory" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where id in (
+            select min(t.id) from t_message t
+            where t.from_ref = #{fromRef,jdbcType=VARCHAR}
+              and t.to_user = #{toUser,jdbcType=VARCHAR}
+            group by t.client_msg_id
+        )
+        <if test="beforeId != null">
+            and id &lt; #{beforeId,jdbcType=BIGINT}
+        </if>
+        order by id desc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <!--
+      sealed 消息的按设备历史：
+      - 收件侧优先取发给本设备的那份副本；
+      - 发件侧优先取本设备发出的那份（from_device_ref 对应本设备）。
+      两者都找不到时退回最早一份。
+    -->
+    <select id="selectRefHistoryForDevice" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where id in (
+            select chosen from (
+                select coalesce(
+                    min(case
+                        when target_device_id = #{deviceId,jdbcType=VARCHAR}
+                         and (to_user = #{viewer,jdbcType=VARCHAR} or sync_from_device is not null)
+                        then id end),
+                    min(case
+                        when from_device_ref = #{deviceRef,jdbcType=VARCHAR}
+                        then id end),
+                    min(id)
+                ) as chosen
+                from t_message
+                where from_ref = #{fromRef,jdbcType=VARCHAR}
+                  and to_user = #{toUser,jdbcType=VARCHAR}
+                group by client_msg_id
+            ) picked
+        )
+        <if test="beforeId != null">
+            and id &lt; #{beforeId,jdbcType=BIGINT}
+        </if>
+        order by id desc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <!--
       本设备的未投递消息。发给本设备的原始副本，以及别的设备转发给本设备的副本，都算。
+      清除点的 peer：发件副本用 to_user，收件 sealed 副本用 from_ref，
+      旧消息退回 from_user。
     -->
     <select id="selectUndelivered" resultMap="BaseResultMap">
         select
@@ -199,7 +272,8 @@
           and id &gt; ifnull((
               select cleared_before_id from t_conversation_clear
               where username = #{toUsername,jdbcType=VARCHAR}
-                and peer = if(from_user = #{toUsername,jdbcType=VARCHAR}, to_user, from_user)
+                and peer = if(from_user = #{toUsername,jdbcType=VARCHAR},
+                              to_user, if(from_ref is not null, from_ref, from_user))
           ), 0)
         order by id asc
         limit #{limit,jdbcType=INTEGER}
@@ -249,10 +323,40 @@
         </if>
     </update>
 
+    <!-- sealed 收件消息的 from_user 是 NULL，按盲引用标记已读。 -->
+    <update id="markReadByRef">
+        update t_message
+        set read_flag = 1
+        where from_ref = #{fromRef,jdbcType=VARCHAR}
+          and to_user = #{toUsername,jdbcType=VARCHAR}
+          and read_flag = 0
+          and recalled = 0
+        <if test="beforeId != null">
+          and client_msg_id in (
+            select client_msg_id from (
+              select distinct client_msg_id
+              from t_message
+              where from_ref = #{fromRef,jdbcType=VARCHAR}
+                and to_user = #{toUsername,jdbcType=VARCHAR}
+                and id &lt;= #{beforeId,jdbcType=BIGINT}
+            ) read_ids
+          )
+        </if>
+    </update>
+
     <select id="countUnread" resultType="java.lang.Long">
         select count(distinct client_msg_id)
         from t_message
         where from_user = #{fromUsername,jdbcType=VARCHAR}
+          and to_user = #{toUsername,jdbcType=VARCHAR}
+          and read_flag = 0
+          and recalled = 0
+    </select>
+
+    <select id="countUnreadByRef" resultType="java.lang.Long">
+        select count(distinct client_msg_id)
+        from t_message
+        where from_ref = #{fromRef,jdbcType=VARCHAR}
           and to_user = #{toUsername,jdbcType=VARCHAR}
           and read_flag = 0
           and recalled = 0
@@ -268,11 +372,28 @@
           and id &gt; #{afterId,jdbcType=BIGINT}
     </select>
 
+    <select id="countUnreadAfterByRef" resultType="java.lang.Long">
+        select count(distinct client_msg_id)
+        from t_message
+        where from_ref = #{fromRef,jdbcType=VARCHAR}
+          and to_user = #{toUsername,jdbcType=VARCHAR}
+          and read_flag = 0
+          and recalled = 0
+          and id &gt; #{afterId,jdbcType=BIGINT}
+    </select>
+
     <select id="maxConversationId" resultType="java.lang.Long">
         select max(id)
         from t_message
         where (from_user = #{a,jdbcType=VARCHAR} and to_user = #{b,jdbcType=VARCHAR})
            or (from_user = #{b,jdbcType=VARCHAR} and to_user = #{a,jdbcType=VARCHAR})
+    </select>
+
+    <select id="maxRefConversationId" resultType="java.lang.Long">
+        select max(id)
+        from t_message
+        where from_ref = #{fromRef,jdbcType=VARCHAR}
+          and to_user = #{toUser,jdbcType=VARCHAR}
     </select>
 
     <update id="wipeConversation">
@@ -284,20 +405,51 @@
             or (from_user = #{b,jdbcType=VARCHAR} and to_user = #{a,jdbcType=VARCHAR}))
     </update>
 
+    <update id="wipeRefConversation">
+        update t_message
+        set ciphertext = null,
+            iv = null
+        where id &lt;= #{beforeId,jdbcType=BIGINT}
+          and from_ref = #{fromRef,jdbcType=VARCHAR}
+          and to_user = #{toUser,jdbcType=VARCHAR}
+    </update>
+
     <!--
       撤回：清空所有设备副本的密文。
-      条件里带 from_user 与 recalled = 0，保证只有发信人能撤回且不可重复撤回。
       按 client_msg_id 而非 id 更新，才能一次撤回所有设备副本。
+      新消息用一次性 token 授权：服务端只存哈希，不依赖发信人引用。
     -->
-    <update id="recall">
+    <update id="recallByToken">
         update t_message
         set ciphertext = null,
             iv = null,
             recalled = 1,
             recalled_at = #{recalledAt,jdbcType=BIGINT}
         where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
-          and from_user = #{fromUsername,jdbcType=VARCHAR}
+          and recall_token_hash = #{recallTokenHash,jdbcType=VARCHAR}
           and recalled = 0
+    </update>
+
+    <!--
+      旧消息兼容：没有 recall_token_hash 的历史数据仍按发信人引用授权。
+      from_user = #{fromRef} 兼容 Phase 1 把盲引用写在 from_user 的存量行。
+      条件里再限定 recall_token_hash is null：同一 clientMsgId 只要有一份副本
+      已经带凭证，就不允许用发信人身份绕过 token 校验。
+    -->
+    <update id="recallBySender">
+        update t_message
+        set ciphertext = null,
+            iv = null,
+            recalled = 1,
+            recalled_at = #{recalledAt,jdbcType=BIGINT}
+        where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+          and recalled = 0
+          and recall_token_hash is null
+          and (
+              from_user = #{fromUser,jdbcType=VARCHAR}
+              or from_ref = #{fromRef,jdbcType=VARCHAR}
+              or from_user = #{fromRef,jdbcType=VARCHAR}
+          )
     </update>
 
 </mapper>

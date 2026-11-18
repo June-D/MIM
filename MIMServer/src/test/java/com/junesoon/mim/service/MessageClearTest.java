@@ -238,8 +238,7 @@ class MessageClearTest {
         }
 
         @Override
-        public CipherMessage selectByClientMsgId(String fromUsername, String clientMsgId,
-            String targetDeviceId) {
+        public CipherMessage selectByClientMsgId(String clientMsgId, String targetDeviceId) {
             return null;
         }
 
@@ -249,7 +248,7 @@ class MessageClearTest {
         }
 
         @Override
-        public CipherMessage selectAnyByClientMsgId(String fromUsername, String clientMsgId) {
+        public CipherMessage selectOwnedCopy(String clientMsgId, String fromUser, String fromRef) {
             return null;
         }
 
@@ -259,7 +258,8 @@ class MessageClearTest {
         }
 
         @Override
-        public CipherMessage selectParticipantCopy(String username, String clientMsgId) {
+        public CipherMessage selectParticipantCopy(String clientMsgId, String username,
+            String userRef) {
             return null;
         }
 
@@ -267,6 +267,18 @@ class MessageClearTest {
         public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
             String deviceId, Long beforeId, int limit) {
             return new ArrayList<>(history);
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistory(String fromRef, String toUser,
+            Long beforeId, int limit) {
+            return new ArrayList<>();
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistoryForDevice(String fromRef, String toUser,
+            String viewer, String deviceId, String deviceRef, Long beforeId, int limit) {
+            return new ArrayList<>();
         }
 
         @Override
@@ -290,17 +302,38 @@ class MessageClearTest {
         }
 
         @Override
+        public int markReadByRef(String fromRef, String toUsername, Long beforeId) {
+            return 0;
+        }
+
+        @Override
         public long countUnread(String fromUsername, String toUsername) {
             return 0;
         }
 
         @Override
-        public int recall(String clientMsgId, String fromUsername, long recalledAt) {
+        public long countUnreadByRef(String fromRef, String toUsername) {
+            return 0;
+        }
+
+        @Override
+        public int recallByToken(String clientMsgId, String recallTokenHash, long recalledAt) {
+            return 0;
+        }
+
+        @Override
+        public int recallBySender(String clientMsgId, String fromUser, String fromRef,
+            long recalledAt) {
             return 0;
         }
 
         @Override
         public Long maxConversationId(String a, String b) {
+            return maxId;
+        }
+
+        @Override
+        public Long maxRefConversationId(String fromRef, String toUser) {
             return maxId;
         }
 
@@ -311,7 +344,18 @@ class MessageClearTest {
         }
 
         @Override
+        public int wipeRefConversation(String fromRef, String toUser, long beforeId) {
+            wipedBefore = beforeId;
+            return 1;
+        }
+
+        @Override
         public long countUnreadAfter(String fromUsername, String toUsername, long afterId) {
+            return 0;
+        }
+
+        @Override
+        public long countUnreadAfterByRef(String fromRef, String toUsername, long afterId) {
             return 0;
         }
     }

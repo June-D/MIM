@@ -1,6 +1,7 @@
 package com.junesoon.mim.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +15,7 @@ import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.service.impl.MessageServiceImpl;
+import com.junesoon.mim.utils.RecallToken;
 import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.List;
@@ -42,6 +44,9 @@ class MessageRecallTest {
         CipherMessage anyCopy;
         int recallAffected = 1;
         boolean recallCalled;
+        boolean tokenPath;
+        boolean senderPath;
+        String usedTokenHash;
 
         @Override
         public int insert(CipherMessage message) {
@@ -49,14 +54,21 @@ class MessageRecallTest {
         }
 
         @Override
-        public CipherMessage selectByClientMsgId(String fromUsername, String clientMsgId,
-            String targetDeviceId) {
+        public CipherMessage selectByClientMsgId(String clientMsgId, String targetDeviceId) {
             return anyCopy;
         }
 
         @Override
-        public CipherMessage selectAnyByClientMsgId(String fromUsername, String clientMsgId) {
-            return anyCopy;
+        public CipherMessage selectOwnedCopy(String clientMsgId, String fromUser, String fromRef) {
+            if (anyCopy == null) {
+                return null;
+            }
+            boolean owned = fromUser != null && fromUser.equals(anyCopy.getFromUsername());
+            if (!owned && fromRef != null) {
+                owned = fromRef.equals(anyCopy.getFromRef())
+                    || fromRef.equals(anyCopy.getFromUsername());
+            }
+            return owned ? anyCopy : null;
         }
 
         @Override
@@ -70,13 +82,26 @@ class MessageRecallTest {
         }
 
         @Override
-        public CipherMessage selectParticipantCopy(String username, String clientMsgId) {
+        public CipherMessage selectParticipantCopy(String clientMsgId, String username,
+            String userRef) {
             return null;
         }
 
         @Override
         public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
             String deviceId, Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistory(String fromRef, String toUser,
+            Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistoryForDevice(String fromRef, String toUser,
+            String viewer, String deviceId, String deviceRef, Long beforeId, int limit) {
             return Collections.emptyList();
         }
 
@@ -101,13 +126,33 @@ class MessageRecallTest {
         }
 
         @Override
+        public int markReadByRef(String fromRef, String toUsername, Long beforeId) {
+            return 0;
+        }
+
+        @Override
         public long countUnread(String fromUsername, String toUsername) {
             return 0;
         }
 
         @Override
-        public int recall(String clientMsgId, String fromUsername, long recalledAt) {
+        public long countUnreadByRef(String fromRef, String toUsername) {
+            return 0;
+        }
+
+        @Override
+        public int recallByToken(String clientMsgId, String recallTokenHash, long recalledAt) {
             recallCalled = true;
+            tokenPath = true;
+            usedTokenHash = recallTokenHash;
+            return recallAffected;
+        }
+
+        @Override
+        public int recallBySender(String clientMsgId, String fromUser, String fromRef,
+            long recalledAt) {
+            recallCalled = true;
+            senderPath = true;
             return recallAffected;
         }
 
@@ -117,12 +162,27 @@ class MessageRecallTest {
         }
 
         @Override
+        public long countUnreadAfterByRef(String fromRef, String toUsername, long afterId) {
+            return 0;
+        }
+
+        @Override
         public Long maxConversationId(String a, String b) {
             return null;
         }
 
         @Override
+        public Long maxRefConversationId(String fromRef, String toUser) {
+            return null;
+        }
+
+        @Override
         public int wipeConversation(String a, String b, long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public int wipeRefConversation(String fromRef, String toUser, long beforeId) {
             return 0;
         }
     }
@@ -292,16 +352,62 @@ class MessageRecallTest {
         messageMapper.anyCopy = message("alice", System.currentTimeMillis());
         CipherMessage result = service.recall("alice", CLIENT_MSG_ID);
         assertTrue(messageMapper.recallCalled, "应当调用 Mapper 的 recall");
+        assertTrue(messageMapper.senderPath, "没有凭证哈希的旧消息走发信人兼容路径");
         assertSame(messageMapper.anyCopy, result);
         assertTrue(Boolean.TRUE.equals(result.getRecalled()));
         assertTrue(result.getCiphertext() == null, "撤回后快照里的密文应被清空");
     }
 
     @Test
+    @DisplayName("新消息带正确 recallToken 才能撤回，且只比对哈希")
+    void newMessageRequiresMatchingToken() {
+        String token = "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        CipherMessage fresh = message("alice", System.currentTimeMillis());
+        fresh.setRecallTokenHash(RecallToken.hash(token));
+        messageMapper.anyCopy = fresh;
+
+        CipherMessage result = service.recall("alice", CLIENT_MSG_ID, token);
+        assertTrue(messageMapper.tokenPath, "有凭证哈希的消息必须走 token 路径");
+        assertFalse(messageMapper.senderPath, "不能退回发信人路径");
+        assertEquals(RecallToken.hash(token), messageMapper.usedTokenHash,
+            "传给 Mapper 的必须是哈希，不是原始 token");
+        assertTrue(Boolean.TRUE.equals(result.getRecalled()));
+    }
+
+    @Test
+    @DisplayName("token 不匹配时拒绝撤回，不写库")
+    void wrongTokenRejected() {
+        String token = "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        CipherMessage fresh = message("alice", System.currentTimeMillis());
+        fresh.setRecallTokenHash(RecallToken.hash(token));
+        messageMapper.anyCopy = fresh;
+
+        UserInvalidException ex = assertThrows(UserInvalidException.class,
+            () -> service.recall("alice", CLIENT_MSG_ID, "wrong-token-1234567890"));
+        assertEquals("撤回凭证无效", ex.getMessage());
+        assertFalse(messageMapper.recallCalled, "凭证不匹配不应触达写操作");
+    }
+
+    @Test
+    @DisplayName("新消息缺少 token 时拒绝撤回")
+    void missingTokenRejected() {
+        String token = "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        CipherMessage fresh = message("alice", System.currentTimeMillis());
+        fresh.setRecallTokenHash(RecallToken.hash(token));
+        messageMapper.anyCopy = fresh;
+
+        UserInvalidException ex = assertThrows(UserInvalidException.class,
+            () -> service.recall("alice", CLIENT_MSG_ID));
+        assertEquals("撤回凭证无效", ex.getMessage());
+        assertFalse(messageMapper.recallCalled);
+    }
+
+    @Test
     @DisplayName("非发信人不能撤回他人消息")
     void nonSenderCannotRecall() {
         messageMapper.anyCopy = message("alice", System.currentTimeMillis());
-        // bob 用 alice 的 clientMsgId 找不到副本（selectAnyByClientMsgId 按 from_user 过滤）
+        // bob 用 alice 的 clientMsgId 找不到「本人拥有」的副本
+        //（selectOwnedCopy 按 from_user / from_ref 过滤）
         messageMapper.anyCopy = null;
         UserInvalidException ex = assertThrows(UserInvalidException.class,
             () -> service.recall("bob", CLIENT_MSG_ID));

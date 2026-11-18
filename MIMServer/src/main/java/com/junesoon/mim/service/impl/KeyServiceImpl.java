@@ -51,12 +51,12 @@ public class KeyServiceImpl implements KeyService {
     @Override
     public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
         String password) {
-        return upload(username, deviceId, publicKey, algorithm, password, null);
+        return upload(username, deviceId, publicKey, algorithm, password, null, null);
     }
 
     @Override
     public KeyBundle upload(String username, String deviceId, String publicKey, String algorithm,
-        String password, Boolean supportsPadding) {
+        String password, Boolean supportsPadding, Boolean supportsRecallToken) {
         ValidationUtil.validateUsername(username);
         String device = StringUtils.hasText(deviceId)
             ? deviceId.trim() : UserKey.DEFAULT_DEVICE_ID;
@@ -85,23 +85,23 @@ public class KeyServiceImpl implements KeyService {
         validateEcP256Key(keyBytes);
 
         boolean padding = Boolean.TRUE.equals(supportsPadding);
+        boolean recallToken = Boolean.TRUE.equals(supportsRecallToken);
         String fingerprint = fingerprint(keyBytes);
         UserKey existing = userKeyMapper.selectByDevice(username, device);
         if (existing != null && fingerprint.equals(existing.getFingerprint())) {
             // 同一把公钥重复上传，保持幂等，不涨版本；旧客户端重登也能通过。
-            // 能力字段未上报（旧客户端）时降级为 false，避免向无法解析填充的客户端发填充消息。
-            Boolean old = existing.getSupportsPadding();
-            if (supportsPadding == null) {
-                if (Boolean.TRUE.equals(old)) {
-                    existing.setSupportsPadding(false);
-                    existing.setUpdTime(new Date());
-                    userKeyMapper.upsert(existing);
-                }
-            } else if (!Boolean.valueOf(padding).equals(old)) {
+            // 能力字段未上报（旧客户端）时降级为 false，避免向无法解析的客户端
+            // 发填充消息或带凭证的同步副本。
+            boolean paddingChanged = capabilityChanged(existing.getSupportsPadding(), padding);
+            boolean recallChanged = capabilityChanged(existing.getSupportsRecallToken(),
+                recallToken);
+            if (paddingChanged || recallChanged) {
                 if (!passwordVerifier.matches(username, password)) {
                     throw new UserInvalidException("修改填充能力需要验证当前密码");
                 }
-                existing.setSupportsPadding(padding);
+                existing.setSupportsPadding(declaredCapability(supportsPadding, padding));
+                existing.setSupportsRecallToken(declaredCapability(supportsRecallToken,
+                    recallToken));
                 existing.setUpdTime(new Date());
                 userKeyMapper.upsert(existing);
             }
@@ -121,6 +121,7 @@ public class KeyServiceImpl implements KeyService {
         key.setVersion(existing == null || existing.getVersion() == null ? 1 : existing.getVersion() + 1);
         key.setFingerprint(fingerprint);
         key.setSupportsPadding(padding);
+        key.setSupportsRecallToken(recallToken);
         key.setUpdTime(new Date());
         if (existing == null) {
             key.setCrtTime(new Date());
@@ -157,6 +158,21 @@ public class KeyServiceImpl implements KeyService {
             bundles.add(toBundle(key));
         }
         return bundles;
+    }
+
+    /**
+     * 能力位是否发生变化。未上报（null）视为 false：
+     * 旧客户端重登会把已声明过的能力降级，这是刻意的保守选择。
+     */
+    private boolean capabilityChanged(Boolean stored, boolean declared) {
+        return Boolean.TRUE.equals(stored) != declared;
+    }
+
+    /**
+     * 写库的能力位；未上报时固定为 false。
+     */
+    private Boolean declaredCapability(Boolean declared, boolean value) {
+        return declared == null ? Boolean.FALSE : value;
     }
 
     private void validateEcP256Key(byte[] keyBytes) {
@@ -199,6 +215,7 @@ public class KeyServiceImpl implements KeyService {
         bundle.setVersion(key.getVersion());
         bundle.setFingerprint(key.getFingerprint());
         bundle.setSupportsPadding(Boolean.TRUE.equals(key.getSupportsPadding()));
+        bundle.setSupportsRecallToken(Boolean.TRUE.equals(key.getSupportsRecallToken()));
         return bundle;
     }
 }

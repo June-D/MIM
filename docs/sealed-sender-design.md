@@ -206,15 +206,121 @@
 ### 与原草案的差异
 
 - 原草案要求 sealed 消息的 `from_user` 为 NULL，并使用一次性 `recallToken`；
-  当前兼容实现使用盲引用和 JWT 用户名 → 盲引用比对完成撤回授权。这样历史、
-  未读、同步和撤回不需要重写查询层，但会留下**可被持有服务端密钥者关联的
-  伪随机发送者索引**。
-- 如果要求严格「数据库列无任何发送者索引」，下一步需要增加
-  `from_ref`/`from_device_ref` 列 + 会话 ID 历史查询，并重做撤回 token；
-  这是尚未完成的独立改造。
+  Phase 1 的兼容实现使用盲引用和 JWT 用户名 → 盲引用比对完成撤回授权。
+  这样历史、未读、同步和撤回不需要重写查询层，但会留下**可被持有服务端密钥者
+  关联的伪随机发送者索引**。
+- Phase 1.5 已按草案补上 `from_ref`/`from_device_ref` 独立列与一次性 token 撤回，
+  详见第 10 节；第 9 节保留为 Phase 1 的历史记录。
 
 ### 验证
 
 - 服务端 186 项（含真实 MySQL 集成）、客户端 107 项；
 - e2e：多设备 26 项（含 sealed 往返、历史、撤回）+ WebSocket 13 项；
 - 新客户端对旧客户端保持桥接模式；旧客户端对 sealed 服务端仍走明文路径。
+
+## 10. Phase 1.5 实现状态（发送者列置 NULL）
+
+Phase 1.5 按第 6 节草案补齐两件事：发送者列不再承载盲引用，撤回不再依赖
+发信人引用。已经落地并验证，但**提交匿名仍未实现**。
+
+### 数据模型
+
+```sql
+from_user        varchar(64) NULL   -- sealed 消息写 NULL
+from_device_id   varchar(64) NULL   -- sealed 消息写 NULL
+from_ref         varchar(64) NULL   -- sealed 发信人 HMAC 盲引用
+from_device_ref  varchar(64) NULL   -- sealed 发信设备 HMAC 盲引用
+recall_token_hash varchar(64) NULL  -- 一次性撤回凭证的 SHA-256
+UNIQUE KEY uk_client_target (client_msg_id, target_device_id)
+```
+
+- 唯一键不再包含发送者。sealed 消息本来就没有明文发送者，把它留在唯一索引里
+  只会让幂等语义依赖盲引用。
+- `idx_ref_conversation(from_ref, to_user, id)` 和
+  `idx_ref_unread(from_ref, to_user, read_flag)` 支撑发件方向的历史与未读；
+  收件方向仍按 `(from_ref, to_user)` 查询，因为收件人列仍是明文用户名。
+
+### 服务端
+
+- 发送：`sealed=1` 时 `from_user`/`from_device_id` 写 NULL，盲引用写独立列；
+  同一条逻辑消息的所有设备副本共用同一份 `recall_token_hash`。
+- 历史：先按旧格式 `from_user` 查询，再分别按「我的引用 → 对端用户名」和
+  「对端引用 → 我的用户名」查询，结果按 id 合并；`fromMe` 由方向决定。
+- 未读/已读/清除：旧格式走原查询，sealed 走 `ByRef` 变体。
+- 未投递：清除点的 peer 解析改为
+  `if(from_user = toUser, to_user, coalesce(from_ref, from_user))`；
+  收件 sealed 副本按 `from_ref` 命中清除点。
+- 同步：`selectParticipantCopy` 同时接受用户名和盲引用，避免把同步副本当原文。
+- 能力回传：`KeyBundle` / 预密钥包带 `supportsRecallToken`，供发送端判断
+  目标设备能否接收带凭证的同步副本。
+- 撤回：`selectOwnedCopy` 接受用户名或盲引用；消息有 `recall_token_hash` 时
+  必须提交匹配的 `recallToken`，只用 `recallByToken` 更新；
+  没有哈希的旧消息回退到 `recallBySender`。
+
+### 客户端
+
+- 每条逻辑消息生成 32 字节随机 `recallToken`（Base64），随所有副本提交；
+- `PlaintextStore` 新增 `token|peer|clientMsgId` 加密项；
+- `MessageService.recall(peer, clientMsgId)` 从本地取 token，放进请求体；
+- 历史同步转发「自己发出的」消息时，用 `SyncEnvelope` 把凭证包进密文；
+  接收设备解密后拆包，正文上屏、凭证落盘（详见下方「跨设备撤回」）；
+- 服务端 `recallToken` 是 `WRITE_ONLY`，`recallTokenHash` 是 `@JsonIgnore`，
+  响应里不会回显凭证或哈希。
+
+### 跨设备撤回（凭证同步）
+
+撤回凭证以发送设备为源。另一台设备要能撤回同一条消息，必须拿到同一份凭证，
+而服务端只存哈希——所以凭证只能随**已加密**的数据走：
+
+1. 设备上传公钥时声明 `supportsRecallToken`，服务端存
+   `t_user_key.supports_recall_token`，并在预密钥包里回传；
+2. 历史同步向目标设备转发时，若目标设备声明了该能力，就把凭证与正文打包成
+   `SyncEnvelope`，整体交给双棘轮加密，再上送 `/message/sync`；
+3. 接收设备解密后拆信封：正文显示给界面，凭证写进本地
+   `token|peer|clientMsgId` 加密项；本地明文缓存仍保存未拆包原串，
+   因为要用同一串内容重新验证转发设备的签名；
+4. 该设备之后调用 `/message/recall` 时就能带上凭证，服务端比对哈希后放行。
+
+兼容与边界：
+
+- 信封以 `U+0001` 魔数开头并校验凭证字符集，不满足就当普通正文，绝不误判；
+- 未声明能力的旧客户端只收纯文本副本，行为与升级前完全一致；
+- 能力位变更需要当前密码，防止只凭被盗 JWT 把设备标成支持新能力；
+- 凭证只在「源设备还持有它」且「跑过历史同步」时才送达；
+  本机数据被清除或从未同步的设备仍只能走旧版兼容撤回路径。
+
+### 迁移与兼容
+
+- `MIMServer/sql/e2ee.sql` 末尾提供取消注释即用的升级补丁，顺序固定：
+  1. 加 `from_ref` / `from_device_ref` / `recall_token_hash`；
+  2. 把 `sealed=1` 行的 `from_user` / `from_device_id` 回填到新列；
+  3. 修改 `from_user`/`from_device_id` 为可空；
+  4. 换成不含发送者的唯一索引，并加两个盲引用索引；
+  5. 把 `sealed=1` 行的发送者列置 NULL。
+- 跨设备撤回另有一条独立的 `ALTER`：`t_user_key` 加
+  `supports_recall_token tinyint(1) NOT NULL DEFAULT 0`。只加列即可，
+  没有历史数据需要回填；旧设备默认 0，行为与升级前一致。
+- 不回填就置 NULL 会让旧 sealed 历史在迁移后全部查不到。
+- 旧唯一索引换成新唯一索引前，先跑注释里的重复检查；若存在
+  「同一 clientMsgId + 目标设备」的多行数据，`ADD UNIQUE` 会失败。
+- 旧消息没有 `recall_token_hash`，撤回继续走「JWT 用户名 / 盲引用」比对；
+  新旧客户端可以混跑，不需要一次性全部升级。
+- 本地 MySQL 旧库（10 条 sealed 消息）已按上述顺序迁移成功：sealed 行
+  `from_user` 全为 NULL、`from_ref` 全部回填，唯一索引与两个新索引生效。
+
+### 安全边界
+
+- 这是「数据库发送者列无明文、无固定索引」，不是提交匿名：服务端提交时
+  仍从 JWT 知道发送者，盲引用也可被持有服务端密钥者关联。
+- 撤回凭证保存在发送端本地；另一台设备只有在历史同步时收到信封才有凭证，
+  本机数据丢失或从未同步的设备只能走旧版兼容撤回路径。
+- 首次联系与桥接消息仍是旧格式，发送者可见，直到 Phase 2 的令牌/证书体系。
+
+### 验证
+
+- 服务端 210 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
+  未读、token 撤回、Phase 1 存量行兼容与清除点过滤；
+- 客户端 112 项：`recallToken` 落盘、凭证信封格式与请求体改动；
+- e2e 多设备 29 项：新增「响应不回显撤回凭证」「缺 token 撤回 sealed 被拒」与
+  「预密钥包声明支持跨设备撤回凭证」，
+  WebSocket 13 项不受影响。

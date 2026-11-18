@@ -27,4 +27,10 @@ public class KeyBundle {
      * 该设备是否支持消息长度填充。旧客户端为 false。
      */
     private Boolean supportsPadding;
+
+    /**
+     * 该设备能否在「自己设备间同步」的副本里接收加密的撤回凭证。
+     * 只有声明支持的目标设备才会收到带凭证的副本，旧客户端保持纯文本。
+     */
+    private Boolean supportsRecallToken;
 }

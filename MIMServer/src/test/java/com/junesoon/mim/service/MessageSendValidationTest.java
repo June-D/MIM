@@ -1,9 +1,13 @@
 package com.junesoon.mim.service;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.junesoon.mim.config.KeyConfiguration;
 import com.junesoon.mim.entity.CipherMessage;
 import com.junesoon.mim.entity.Device;
 import com.junesoon.mim.entity.User;
@@ -15,6 +19,7 @@ import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.service.impl.MessageServiceImpl;
+import com.junesoon.mim.utils.MetadataRef;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -44,29 +49,33 @@ class MessageSendValidationTest {
         final Map<String, CipherMessage> byKey = new HashMap<>();
         final List<CipherMessage> inserted = new ArrayList<>();
 
-        private static String key(String from, String clientMsgId, String target) {
-            return from + "|" + clientMsgId + "|" + target;
+        private static String key(String clientMsgId, String target) {
+            return clientMsgId + "|" + target;
         }
 
         @Override
         public int insert(CipherMessage message) {
             inserted.add(message);
-            byKey.put(key(message.getFromUsername(), message.getClientMsgId(),
-                message.getTargetDeviceId()), message);
+            byKey.put(key(message.getClientMsgId(), message.getTargetDeviceId()), message);
             return 1;
         }
 
         @Override
-        public CipherMessage selectByClientMsgId(String fromUsername, String clientMsgId,
-            String targetDeviceId) {
-            return byKey.get(key(fromUsername, clientMsgId, targetDeviceId));
+        public CipherMessage selectByClientMsgId(String clientMsgId, String targetDeviceId) {
+            return byKey.get(key(clientMsgId, targetDeviceId));
         }
 
         @Override
-        public CipherMessage selectAnyByClientMsgId(String fromUsername, String clientMsgId) {
+        public CipherMessage selectOwnedCopy(String clientMsgId, String fromUser, String fromRef) {
             for (CipherMessage message : inserted) {
-                if (message.getFromUsername().equals(fromUsername)
-                    && message.getClientMsgId().equals(clientMsgId)) {
+                if (!message.getClientMsgId().equals(clientMsgId)) {
+                    continue;
+                }
+                if (message.getFromUsername() != null
+                    && message.getFromUsername().equals(fromUser)) {
+                    return message;
+                }
+                if (message.getFromRef() != null && message.getFromRef().equals(fromRef)) {
                     return message;
                 }
             }
@@ -84,13 +93,26 @@ class MessageSendValidationTest {
         }
 
         @Override
-        public CipherMessage selectParticipantCopy(String username, String clientMsgId) {
+        public CipherMessage selectParticipantCopy(String clientMsgId, String username,
+            String userRef) {
             return null;
         }
 
         @Override
         public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
             String deviceId, Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistory(String fromRef, String toUser,
+            Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectRefHistoryForDevice(String fromRef, String toUser,
+            String viewer, String deviceId, String deviceRef, Long beforeId, int limit) {
             return Collections.emptyList();
         }
 
@@ -115,12 +137,28 @@ class MessageSendValidationTest {
         }
 
         @Override
+        public int markReadByRef(String fromRef, String toUsername, Long beforeId) {
+            return 0;
+        }
+
+        @Override
         public long countUnread(String fromUsername, String toUsername) {
             return 0;
         }
 
         @Override
-        public int recall(String clientMsgId, String fromUsername, long recalledAt) {
+        public long countUnreadByRef(String fromRef, String toUsername) {
+            return 0;
+        }
+
+        @Override
+        public int recallByToken(String clientMsgId, String recallTokenHash, long recalledAt) {
+            return 0;
+        }
+
+        @Override
+        public int recallBySender(String clientMsgId, String fromUser, String fromRef,
+            long recalledAt) {
             return 0;
         }
 
@@ -130,12 +168,27 @@ class MessageSendValidationTest {
         }
 
         @Override
+        public long countUnreadAfterByRef(String fromRef, String toUsername, long afterId) {
+            return 0;
+        }
+
+        @Override
         public Long maxConversationId(String a, String b) {
             return null;
         }
 
         @Override
+        public Long maxRefConversationId(String fromRef, String toUser) {
+            return null;
+        }
+
+        @Override
         public int wipeConversation(String a, String b, long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public int wipeRefConversation(String fromRef, String toUser, long beforeId) {
             return 0;
         }
     }
@@ -396,6 +449,18 @@ class MessageSendValidationTest {
         return Collections.singletonList(replica(targetDeviceId));
     }
 
+    /**
+     * 注入可用的盲引用密钥：单测不启动 Spring，@Value 不会自动装配。
+     */
+    private void enableSealedSender() throws Exception {
+        MetadataRef metadataRef = new MetadataRef();
+        KeyConfiguration keys = new KeyConfiguration();
+        keys.setUserPriKey(new byte[32]);
+        setField(metadataRef, "keyConfiguration", keys);
+        setField(service, "metadataRef", metadataRef);
+        setField(service, "sealedSenderEnabled", true);
+    }
+
     // ==================== 结构校验 ====================
 
     @Test
@@ -429,6 +494,40 @@ class MessageSendValidationTest {
     void spoofedSenderIgnored() {
         List<CipherMessage> saved = service.send(ALICE, ALICE_DEVICE, single(BOB_DEVICE_A));
         assertEquals(ALICE, saved.get(0).getFromUsername());
+    }
+
+    @Test
+    @DisplayName("sealed 消息：发送者列为 NULL，盲引用与撤回哈希独立保存")
+    void sealedMessageHidesSenderAndStoresTokenHash() throws Exception {
+        enableSealedSender();
+        CipherMessage sealed = replica(BOB_DEVICE_A);
+        sealed.setSealed(true);
+        sealed.setSessionId("session-abcdef12");
+        sealed.setRecallToken("3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+
+        List<CipherMessage> saved = service.send(ALICE, ALICE_DEVICE,
+            Collections.singletonList(sealed));
+        CipherMessage stored = saved.get(0);
+
+        assertNull(stored.getFromUsername(), "sealed 消息不应保存明文发信人");
+        assertNull(stored.getFromDeviceId(), "sealed 消息不应保存明文发信设备");
+        assertNotNull(stored.getFromRef());
+        assertNotNull(stored.getFromDeviceRef());
+        assertEquals(64, stored.getFromRef().length(), "盲引用应为 64 位十六进制");
+        assertNotNull(stored.getRecallTokenHash(), "新消息应保存撤回凭证哈希");
+        assertEquals(64, stored.getRecallTokenHash().length());
+        assertFalse(stored.getRecallTokenHash().contains("3q2+7w"),
+            "数据库里只能出现哈希，不能出现原始 token");
+    }
+
+    @Test
+    @DisplayName("sealed 消息缺少 sessionId 被拒绝")
+    void sealedWithoutSessionRejected() throws Exception {
+        enableSealedSender();
+        CipherMessage sealed = replica(BOB_DEVICE_A);
+        sealed.setSealed(true);
+        assertThrows(UserInvalidException.class,
+            () -> service.send(ALICE, ALICE_DEVICE, Collections.singletonList(sealed)));
     }
 
     @Test

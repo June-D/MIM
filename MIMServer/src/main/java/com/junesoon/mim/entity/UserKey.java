@@ -45,6 +45,12 @@ public class UserKey implements Serializable {
      */
     private Boolean supportsPadding;
 
+    /**
+     * 客户端能否在设备间同步副本里接收加密的撤回凭证。
+     * 旧客户端不上报，按 false 处理；不支持的设备只会收到纯文本副本。
+     */
+    private Boolean supportsRecallToken;
+
     private Date crtTime;
 
     private Date updTime;

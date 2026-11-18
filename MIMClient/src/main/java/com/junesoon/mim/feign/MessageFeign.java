@@ -42,7 +42,8 @@ public interface MessageFeign extends FeignAPI {
      * 撤回自己发送的消息（按 clientMsgId 撤回所有设备副本）。
      */
     @RequestLine("POST /message/recall/{clientMsgId}")
-    ObjectRestResponse<CipherMessage> recall(@Param("clientMsgId") String clientMsgId);
+    ObjectRestResponse<CipherMessage> recall(@Param("clientMsgId") String clientMsgId,
+        com.junesoon.mim.model.RecallRequest request);
 
     @RequestLine("POST /message/clear")
     ObjectRestResponse<ClearResult> clear(ClearRequest request);

@@ -1,6 +1,8 @@
 package com.junesoon.mim.entity;
 
 import java.io.Serializable;
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import lombok.Data;
 
 /**
@@ -26,8 +28,25 @@ public class CipherMessage implements Serializable {
 
     /**
      * 发信设备。多设备下用于区分同一用户的多个设备。
+     * sealed 消息这两项都是 NULL，发信人/设备改由下面的盲引用列表达。
      */
     private String fromDeviceId;
+
+    /**
+     * sealed 消息的发信人 HMAC 盲引用（64 位十六进制）。
+     * 服务端只按它做历史、未读、清除与撤回索引，不保存明文用户名。
+     * 盲引用属于服务端索引，绝不回传给客户端：旧客户端没有该字段，
+     * 一旦下发就会在反序列化时报未知字段，破坏新旧版本混跑。
+     */
+    @JsonIgnore
+    private String fromRef;
+
+    /**
+     * sealed 消息的发信设备 HMAC 盲引用。用于发件侧多设备历史区分。
+     * 与 fromRef 一样只留在服务端。
+     */
+    @JsonIgnore
+    private String fromDeviceRef;
 
     private String toUsername;
 
@@ -149,6 +168,18 @@ public class CipherMessage implements Serializable {
     private Boolean recalled;
 
     private Long recalledAt;
+
+    /**
+     * 客户端提交的一次性撤回凭证。只用于请求，绝不入库、绝不回显。
+     */
+    @JsonProperty(access = JsonProperty.Access.WRITE_ONLY)
+    private String recallToken;
+
+    /**
+     * 撤回凭证的 SHA-256 十六进制。入库用于授权校验，响应中必须隐藏。
+     */
+    @JsonIgnore
+    private String recallTokenHash;
 
     /**
      * 哪台设备把原文重新加密给 {@link #targetDeviceId}。

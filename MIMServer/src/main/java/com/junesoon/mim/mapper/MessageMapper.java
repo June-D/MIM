@@ -10,36 +10,55 @@ public interface MessageMapper {
 
     /**
      * 幂等查询：同一条逻辑消息对同一目标设备只应有一份。
+     *
+     * <p>唯一键是 {@code (client_msg_id, target_device_id)}，不含发信人：
+     * sealed 消息本来就不保存明文发信人。
      */
-    CipherMessage selectByClientMsgId(@Param("fromUsername") String fromUsername,
-        @Param("clientMsgId") String clientMsgId,
+    CipherMessage selectByClientMsgId(@Param("clientMsgId") String clientMsgId,
         @Param("targetDeviceId") String targetDeviceId);
 
     CipherMessage selectById(@Param("id") Long id);
 
     /**
-     * 按 clientMsgId 取任意一份副本（不限目标设备），用于撤回时的权限与时限判定。
+     * 按 clientMsgId 取当前用户拥有的任意一份副本（不限目标设备），
+     * 用于撤回时的权限与时限判定。
      */
-    CipherMessage selectAnyByClientMsgId(@Param("fromUsername") String fromUsername,
-        @Param("clientMsgId") String clientMsgId);
+    CipherMessage selectOwnedCopy(@Param("clientMsgId") String clientMsgId,
+        @Param("fromUser") String fromUser, @Param("fromRef") String fromRef);
 
     /**
      * 当前用户参与过的原始副本（不含设备间转发的副本）。
      */
-    CipherMessage selectParticipantCopy(@Param("username") String username,
-        @Param("clientMsgId") String clientMsgId);
+    CipherMessage selectParticipantCopy(@Param("clientMsgId") String clientMsgId,
+        @Param("username") String username, @Param("userRef") String userRef);
 
     /**
-     * 会话历史，优先取这台设备解得开的副本。
+     * 会话历史，优先取这台设备解得开的副本（旧消息，发信人是明文用户名）。
      */
     List<CipherMessage> selectHistoryForDevice(@Param("viewer") String viewer,
         @Param("peer") String peer, @Param("deviceId") String deviceId,
         @Param("beforeId") Long beforeId, @Param("limit") int limit);
 
     /**
-     * 会话历史，按 client_msg_id 去重（多设备副本不会重复出现）。
+     * 会话历史，按 client_msg_id 去重（旧消息，发信人是明文用户名）。
      */
     List<CipherMessage> selectHistory(@Param("a") String a, @Param("b") String b,
+        @Param("beforeId") Long beforeId, @Param("limit") int limit);
+
+    /**
+     * sealed 消息历史：from_ref 是发信人盲引用，to_user 是收信人用户名。
+     */
+    List<CipherMessage> selectRefHistory(@Param("fromRef") String fromRef,
+        @Param("toUser") String toUser, @Param("beforeId") Long beforeId,
+        @Param("limit") int limit);
+
+    /**
+     * sealed 消息的按设备历史。viewer 用于识别收件副本，
+     * deviceRef 用于在发件方向挑出本设备发出的那份副本。
+     */
+    List<CipherMessage> selectRefHistoryForDevice(@Param("fromRef") String fromRef,
+        @Param("toUser") String toUser, @Param("viewer") String viewer,
+        @Param("deviceId") String deviceId, @Param("deviceRef") String deviceRef,
         @Param("beforeId") Long beforeId, @Param("limit") int limit);
 
     /**
@@ -56,7 +75,13 @@ public interface MessageMapper {
     int markRead(@Param("fromUsername") String fromUsername, @Param("toUsername") String toUsername,
         @Param("beforeId") Long beforeId);
 
+    int markReadByRef(@Param("fromRef") String fromRef, @Param("toUsername") String toUsername,
+        @Param("beforeId") Long beforeId);
+
     long countUnread(@Param("fromUsername") String fromUsername,
+        @Param("toUsername") String toUsername);
+
+    long countUnreadByRef(@Param("fromRef") String fromRef,
         @Param("toUsername") String toUsername);
 
     /**
@@ -67,10 +92,18 @@ public interface MessageMapper {
     long countUnreadAfter(@Param("fromUsername") String fromUsername,
         @Param("toUsername") String toUsername, @Param("afterId") long afterId);
 
+    long countUnreadAfterByRef(@Param("fromRef") String fromRef,
+        @Param("toUsername") String toUsername, @Param("afterId") long afterId);
+
     /**
-     * 这段对话里目前最大的消息 id。没有消息时返回 null。
+     * 这段对话里目前最大的消息 id（旧消息）。没有消息时返回 null。
      */
     Long maxConversationId(@Param("a") String a, @Param("b") String b);
+
+    /**
+     * sealed 方向的最大消息 id：from_ref 指向发信人盲引用。
+     */
+    Long maxRefConversationId(@Param("fromRef") String fromRef, @Param("toUser") String toUser);
 
     /**
      * 清除双方时抹掉密文。只清自己这边时不能调用，对方还要读这些消息。
@@ -78,11 +111,21 @@ public interface MessageMapper {
     int wipeConversation(@Param("a") String a, @Param("b") String b,
         @Param("beforeId") long beforeId);
 
+    int wipeRefConversation(@Param("fromRef") String fromRef, @Param("toUser") String toUser,
+        @Param("beforeId") long beforeId);
+
     /**
-     * 撤回：按 client_msg_id 一次性清空所有设备副本的密文。
+     * 用一次性撤回凭证撤回：只比对哈希，不需要发信人引用。
      *
-     * @return 影响行数；0 表示无权撤回或已撤回
+     * @return 影响行数；0 表示凭证不匹配或已撤回
      */
-    int recall(@Param("clientMsgId") String clientMsgId,
-        @Param("fromUsername") String fromUsername, @Param("recalledAt") long recalledAt);
+    int recallByToken(@Param("clientMsgId") String clientMsgId,
+        @Param("recallTokenHash") String recallTokenHash, @Param("recalledAt") long recalledAt);
+
+    /**
+     * 旧消息兼容撤回：没有 recall_token_hash 的历史数据按发信人引用授权。
+     */
+    int recallBySender(@Param("clientMsgId") String clientMsgId,
+        @Param("fromUser") String fromUser, @Param("fromRef") String fromRef,
+        @Param("recalledAt") long recalledAt);
 }

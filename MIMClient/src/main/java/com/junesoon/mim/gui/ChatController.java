@@ -632,9 +632,13 @@ public class ChatController {
      * 撤回指定消息（由界面右键菜单触发）。
      */
     public void onRecallClick(String clientMsgId) {
+        if (chatUser == null || chatUser.getUsername() == null) {
+            return;
+        }
+        String peer = chatUser.getUsername();
         new Thread(() -> {
             try {
-                messageService.recall(clientMsgId);
+                messageService.recall(peer, clientMsgId);
                 Platform.runLater(() -> markLocalRecalled(clientMsgId));
             } catch (IdentityException e) {
                 Platform.runLater(() -> AlertUtil.show("撤回失败", e.getMessage()));

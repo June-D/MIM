@@ -38,6 +38,12 @@ public class PreKeyBundle {
 
     private String oneTimePreKeyPublic;
 
+    /**
+     * 该设备能否接收带加密撤回凭证的同步副本。
+     * 旧客户端没有该字段，按 false 处理，只收纯文本副本。
+     */
+    private Boolean supportsRecallToken;
+
     public boolean hasOneTimePreKey() {
         return oneTimePreKeyId != null && oneTimePreKeyPublic != null;
     }

@@ -51,9 +51,16 @@ public interface MessageService {
     /**
      * 撤回自己发出的消息（按 clientMsgId 撤回所有设备副本）。
      *
+     * <p>{@code recallToken} 是发送时客户端生成的一次性凭证；服务端只保存哈希。
+     * 没有凭证的历史消息退回发信人引用兼容路径。
+     *
      * @return 撤回后的消息快照；null 表示不存在
      */
-    CipherMessage recall(String username, String clientMsgId);
+    CipherMessage recall(String username, String clientMsgId, String recallToken);
+
+    default CipherMessage recall(String username, String clientMsgId) {
+        return recall(username, clientMsgId, null);
+    }
 
     /**
      * 清除与某人的对话。{@code forBoth} 为真时对方的记录也一起清掉，并抹掉服务端密文。
