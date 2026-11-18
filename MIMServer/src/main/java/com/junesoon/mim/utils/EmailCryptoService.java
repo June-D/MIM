@@ -34,6 +34,9 @@ public class EmailCryptoService {
     @Value("${mim.security.email-key:}")
     private String configuredKey;
 
+    @Value("${mim.security.email-key-file:}")
+    private String configuredKeyFile;
+
     private volatile byte[] cachedKey;
 
     public EmailCryptoService(KeyConfiguration keyConfiguration) {
@@ -124,8 +127,9 @@ public class EmailCryptoService {
             if (cachedKey != null) {
                 return cachedKey;
             }
-            if (configuredKey != null && !configuredKey.trim().isEmpty()) {
-                byte[] decoded = Base64.getDecoder().decode(configuredKey.trim());
+            String configured = SecretValue.load(configuredKey, configuredKeyFile);
+            if (configured != null && !configured.trim().isEmpty()) {
+                byte[] decoded = Base64.getDecoder().decode(configured.trim());
                 if (decoded.length != 32) {
                     throw new IllegalStateException("MIM_EMAIL_KEY 必须是 32 字节的 Base64");
                 }

@@ -51,9 +51,11 @@ mim:
     # 邮箱加密密钥（Base64，32 字节）。留空时从 JWT 私钥派生。
     # 更换该密钥会导致历史邮箱无法解密，请妥善保管。
     email-key: ${MIM_EMAIL_KEY:}
+    email-key-file: ${MIM_EMAIL_KEY_FILE:}
     # JWT RSA 私钥的静态加密主密钥（Base64，32 字节）。
     # 配置后新写入 t_rsa_key 的密钥为 AES-GCM 密文；丢失/错误会导致拒绝启动。
     master-key: ${MIM_MASTER_KEY:}
+    master-key-file: ${MIM_MASTER_KEY_FILE:}
   # 传输层安全。默认关闭便于本地开发；生产环境必须开启，
   # 否则 JWT 与登录口令会在网络上明文传输，E2EE 也会被中间人冒充绕过。
   tls:

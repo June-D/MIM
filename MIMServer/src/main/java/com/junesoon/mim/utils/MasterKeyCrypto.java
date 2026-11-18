@@ -31,10 +31,13 @@ public class MasterKeyCrypto {
     @Value("${mim.security.master-key:}")
     private String configuredKey;
 
+    @Value("${mim.security.master-key-file:}")
+    private String configuredKeyFile;
+
     private volatile byte[] cachedKey;
 
     public boolean isEnabled() {
-        return StringUtils.hasText(configuredKey);
+        return StringUtils.hasText(SecretValue.load(configuredKey, configuredKeyFile));
     }
 
     public String encrypt(String name, String plaintext) {
@@ -95,7 +98,8 @@ public class MasterKeyCrypto {
             if (cachedKey != null) {
                 return cachedKey;
             }
-            byte[] decoded = Base64.getDecoder().decode(configuredKey.trim());
+            byte[] decoded = Base64.getDecoder().decode(
+                SecretValue.load(configuredKey, configuredKeyFile).trim());
             if (decoded.length != 32) {
                 throw new IllegalStateException("MIM_MASTER_KEY 必须是 32 字节的 Base64");
             }

@@ -337,6 +337,8 @@ mvn spring-boot:run
 > `MIM_MASTER_KEY` 是 JWT RSA 私钥的静态加密密钥（Base64 32 字节）。
 > 配置后请务必备份；丢失或错误会导致服务端拒绝启动，且不会静默换钥。
 > 启用前先把 `t_rsa_key.key_value` 扩到 `varchar(4096)`。
+> 也可以把密钥放到文件里，用 `MIM_MASTER_KEY_FILE` / `MIM_EMAIL_KEY_FILE`
+> 指向 Docker/K8s Secret 挂载路径；环境变量优先。
 
 > Redis 必须设置密码并只监听本机或内网。非本机 Redis 还应启用 TLS
 > （`MIM_REDIS_SSL=true`）；设置 `MIM_REDIS_REQUIRE_SECURE=true` 后，
@@ -618,6 +620,9 @@ mvn test
 81. JWT RSA 私钥支持 `MIM_MASTER_KEY` 的 **AES-GCM 静态加密**：旧库明文
     密钥在启动时无感迁移为密文；主密钥缺失或错误时拒绝启动，绝不静默换钥。
     启用前需把 `t_rsa_key.key_value` 扩到 `varchar(4096)`。
+82. `MIM_MASTER_KEY` / `MIM_EMAIL_KEY` 支持从文件读取
+    （`MIM_MASTER_KEY_FILE` / `MIM_EMAIL_KEY_FILE`），便于 Docker/K8s
+    Secret 或 Vault 挂载；环境变量优先。
 
 ## 仍需处理
 
