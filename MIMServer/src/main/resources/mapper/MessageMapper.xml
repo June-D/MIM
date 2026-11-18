@@ -68,7 +68,7 @@
                 #{senderIdentityKey,jdbcType=LONGVARCHAR}, #{senderEphemeralKey,jdbcType=VARCHAR},
                 #{senderUsedOneTimePreKey,jdbcType=TINYINT}, #{consumedOneTimePreKeyId,jdbcType=INTEGER},
                 #{recipientSignedPreKeyId,jdbcType=INTEGER},
-                #{padding,jdbcType=TINYINT},
+                ifnull(#{padding,jdbcType=TINYINT}, 0),
                 #{senderKeyVersion,jdbcType=INTEGER}, #{recipientKeyVersion,jdbcType=INTEGER},
                 #{clientTime,jdbcType=BIGINT}, #{serverTime,jdbcType=BIGINT},
                 #{delivered,jdbcType=TINYINT}, #{readFlag,jdbcType=TINYINT},
