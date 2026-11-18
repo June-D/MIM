@@ -34,7 +34,15 @@ public class MasterKeyCrypto {
     @Value("${mim.security.master-key-file:}")
     private String configuredKeyFile;
 
+    @Value("${mim.security.master-key-previous:}")
+    private String previousKey;
+
+    @Value("${mim.security.master-key-previous-file:}")
+    private String previousKeyFile;
+
     private volatile byte[] cachedKey;
+
+    private volatile byte[] cachedPreviousKey;
 
     public boolean isEnabled() {
         return StringUtils.hasText(SecretValue.load(configuredKey, configuredKeyFile));
@@ -67,22 +75,67 @@ public class MasterKeyCrypto {
             throw new IllegalStateException(
                 "数据库中存有加密的 JWT 密钥，但未配置 MIM_MASTER_KEY，拒绝启动");
         }
+        try {
+            return decryptWith(key(), name, stored);
+        } catch (Exception currentFailure) {
+            byte[] previous = previousKeyOrNull();
+            if (previous != null) {
+                try {
+                    return decryptWith(previous, name, stored);
+                } catch (Exception ignored) {
+                    // 落到下面的统一错误
+                }
+            }
+            throw new IllegalStateException(
+                "JWT 密钥解密失败，请检查 MIM_MASTER_KEY / MIM_MASTER_KEY_PREVIOUS",
+                currentFailure);
+        }
+    }
+
+    /**
+     * 如果当前密文是用上一把主密钥加密的，则用当前主密钥重加密。
+     * 已经是当前密钥加密时原样返回；两把都解不开则失败。
+     */
+    public String reencryptIfNeeded(String name, String stored) {
+        if (!isEncrypted(stored)) {
+            return stored;
+        }
+        if (!isEnabled()) {
+            throw new IllegalStateException(
+                "数据库中存有加密的 JWT 密钥，但未配置 MIM_MASTER_KEY，拒绝启动");
+        }
+        try {
+            decryptWith(key(), name, stored);
+            return stored;
+        } catch (Exception currentFailure) {
+            byte[] previous = previousKeyOrNull();
+            if (previous == null) {
+                throw new IllegalStateException(
+                    "JWT 密钥无法用当前主密钥解密，且未配置 MIM_MASTER_KEY_PREVIOUS",
+                    currentFailure);
+            }
+            try {
+                String plaintext = decryptWith(previous, name, stored);
+                return encrypt(name, plaintext);
+            } catch (Exception e) {
+                throw new IllegalStateException(
+                    "JWT 密钥无法用当前或上一把主密钥解密", e);
+            }
+        }
+    }
+
+    private String decryptWith(byte[] aesKey, String name, String stored) throws Exception {
         int idx = stored.indexOf(':', PREFIX.length());
         if (idx <= PREFIX.length()) {
             throw new IllegalStateException("加密的 JWT 密钥格式损坏");
         }
-        try {
-            byte[] nonce = Base64.getDecoder().decode(stored.substring(PREFIX.length(), idx));
-            byte[] ciphertext = Base64.getDecoder().decode(stored.substring(idx + 1));
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key(), "AES"),
-                new GCMParameterSpec(TAG_BITS, nonce));
-            cipher.updateAAD(aad(name));
-            return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            throw new IllegalStateException(
-                "JWT 密钥解密失败，请检查 MIM_MASTER_KEY 是否正确", e);
-        }
+        byte[] nonce = Base64.getDecoder().decode(stored.substring(PREFIX.length(), idx));
+        byte[] ciphertext = Base64.getDecoder().decode(stored.substring(idx + 1));
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKey, "AES"),
+            new GCMParameterSpec(TAG_BITS, nonce));
+        cipher.updateAAD(aad(name));
+        return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
     }
 
     public static boolean isEncrypted(String stored) {
@@ -105,6 +158,29 @@ public class MasterKeyCrypto {
             }
             cachedKey = decoded;
             return cachedKey;
+        }
+    }
+
+    private byte[] previousKeyOrNull() {
+        if (!StringUtils.hasText(SecretValue.load(previousKey, previousKeyFile))) {
+            return null;
+        }
+        byte[] key = cachedPreviousKey;
+        if (key != null) {
+            return key;
+        }
+        synchronized (this) {
+            if (cachedPreviousKey != null) {
+                return cachedPreviousKey;
+            }
+            byte[] decoded = Base64.getDecoder().decode(
+                SecretValue.load(previousKey, previousKeyFile).trim());
+            if (decoded.length != 32) {
+                throw new IllegalStateException(
+                    "MIM_MASTER_KEY_PREVIOUS 必须是 32 字节的 Base64");
+            }
+            cachedPreviousKey = decoded;
+            return cachedPreviousKey;
         }
     }
 

@@ -6,18 +6,34 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.junesoon.mim.config.KeyConfiguration;
+import java.util.Base64;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * 服务端敏感字段（邮箱、TOTP 密钥）的加密存储测试。
  */
 class EmailCryptoServiceTest {
 
+    private static final String KEY_A = Base64.getEncoder().encodeToString(
+        "0123456789abcdef0123456789abcdef".getBytes());
+    private static final String KEY_B = Base64.getEncoder().encodeToString(
+        "fedcba9876543210fedcba9876543210".getBytes());
+
     private static EmailCryptoService service() {
         KeyConfiguration config = new KeyConfiguration();
         config.setUserPriKey("test-jwt-private-key-material".getBytes());
         return new EmailCryptoService(config);
+    }
+
+    private static EmailCryptoService crypto(String current, String previous) {
+        KeyConfiguration config = new KeyConfiguration();
+        config.setUserPriKey("test-jwt-private-key-material".getBytes());
+        EmailCryptoService crypto = new EmailCryptoService(config);
+        ReflectionTestUtils.setField(crypto, "configuredKey", current);
+        ReflectionTestUtils.setField(crypto, "previousKey", previous);
+        return crypto;
     }
 
     @Test
@@ -52,6 +68,44 @@ class EmailCryptoServiceTest {
         assertEquals("JBSWY3DPEHPK3PXP", crypto.decryptTotp("alice", stored));
         assertNull(crypto.decryptTotp("bob", stored), "AAD 绑定用户名");
         assertNull(crypto.decrypt("alice", stored), "TOTP 密文不能当邮箱密文解");
+    }
+
+    @Test
+    @DisplayName("邮箱/TOTP 密钥轮换：新密钥 + 旧密钥可解密，并重加密为当前密钥")
+    void rotateEmailKey() {
+        EmailCryptoService old = crypto(KEY_A, null);
+        String email = old.encrypt("alice", "alice@example.com");
+        String totp = old.encryptTotp("alice", "JBSWY3DPEHPK3PXP");
+
+        EmailCryptoService rotated = crypto(KEY_B, KEY_A);
+        assertTrue(rotated.rotationConfigured());
+        assertEquals("alice@example.com", rotated.decrypt("alice", email));
+        assertEquals("JBSWY3DPEHPK3PXP", rotated.decryptTotp("alice", totp));
+
+        String newEmail = rotated.reencryptEmail("alice", email);
+        String newTotp = rotated.reencryptTotp("alice", totp);
+        assertNotEquals(email, newEmail);
+        assertNotEquals(totp, newTotp);
+
+        EmailCryptoService nextOnly = crypto(KEY_B, null);
+        assertEquals("alice@example.com", nextOnly.decrypt("alice", newEmail));
+        assertEquals("JBSWY3DPEHPK3PXP", nextOnly.decryptTotp("alice", newTotp));
+    }
+
+    @Test
+    @DisplayName("从 JWT 私钥派生密钥迁移到显式 MIM_EMAIL_KEY")
+    void migrateLegacyDerivedKey() {
+        EmailCryptoService legacy = service();
+        String email = legacy.encrypt("alice", "alice@example.com");
+        String totp = legacy.encryptTotp("alice", "JBSWY3DPEHPK3PXP");
+
+        EmailCryptoService explicit = crypto(KEY_B, null);
+        assertEquals("alice@example.com", explicit.decrypt("alice", email));
+        String newEmail = explicit.reencryptEmail("alice", email);
+        String newTotp = explicit.reencryptTotp("alice", totp);
+        assertEquals("alice@example.com", explicit.decrypt("alice", newEmail));
+        assertEquals("JBSWY3DPEHPK3PXP", explicit.decryptTotp("alice", newTotp));
+        assertNotEquals(email, newEmail);
     }
 
     @Test

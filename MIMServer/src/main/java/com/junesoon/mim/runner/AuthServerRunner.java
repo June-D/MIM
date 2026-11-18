@@ -10,9 +10,11 @@ import jakarta.annotation.Resource;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.scheduling.annotation.Scheduled;
 
 @Slf4j
+@Order(10)
 @Configuration
 public class AuthServerRunner implements CommandLineRunner {
 
@@ -62,6 +64,11 @@ public class AuthServerRunner implements CommandLineRunner {
             rsaKeyService.set(USER_PRI_KEY, RsaKeyHelper.encode(pri));
             rsaKeyService.set(USER_PUB_KEY, RsaKeyHelper.encode(pub));
             log.info("JWT 密钥已使用 MIM_MASTER_KEY 加密存储");
+        }
+        boolean rotated = rsaKeyService.rotateEncryption(USER_PRI_KEY);
+        rotated |= rsaKeyService.rotateEncryption(USER_PUB_KEY);
+        if (rotated) {
+            log.info("JWT 密钥已使用新的 MIM_MASTER_KEY 重新加密");
         }
         refreshUserPubKey();
     }

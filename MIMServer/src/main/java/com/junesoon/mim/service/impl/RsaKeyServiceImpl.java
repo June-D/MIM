@@ -42,4 +42,19 @@ public class RsaKeyServiceImpl implements RsaKeyService {
         RsaKey rsaKey = rsaKeyMapper.selectByPrimaryKey(key);
         return rsaKey != null && MasterKeyCrypto.isEncrypted(rsaKey.getValue());
     }
+
+    @Override
+    public boolean rotateEncryption(String key) {
+        RsaKey rsaKey = rsaKeyMapper.selectByPrimaryKey(key);
+        if (rsaKey == null) {
+            return false;
+        }
+        String rotated = masterKeyCrypto.reencryptIfNeeded(key, rsaKey.getValue());
+        if (rotated.equals(rsaKey.getValue())) {
+            return false;
+        }
+        rsaKey.setValue(rotated);
+        rsaKeyMapper.upsert(rsaKey);
+        return true;
+    }
 }

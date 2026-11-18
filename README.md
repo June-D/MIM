@@ -353,12 +353,44 @@ mvn spring-boot:run
 > 启用前先把 `t_rsa_key.key_value` 扩到 `varchar(4096)`。
 > 也可以把密钥放到文件里，用 `MIM_MASTER_KEY_FILE` / `MIM_EMAIL_KEY_FILE`
 > 指向 Docker/K8s Secret 挂载路径；环境变量优先。
+> 轮换时把新密钥放主配置、旧密钥放 `MIM_MASTER_KEY_PREVIOUS` /
+> `MIM_EMAIL_KEY_PREVIOUS`，启动时会自动重加密，详见下方「密钥轮换与备份」。
 
 > Redis 必须设置密码并只监听本机或内网。非本机 Redis 还应启用 TLS
 > （`MIM_REDIS_SSL=true`）；设置 `MIM_REDIS_REQUIRE_SECURE=true` 后，
 > 非本机地址缺密码或 TLS 会直接拒绝启动。
 > Pub/Sub 推送频道本身不带签名，Redis 被攻破等同于能伪造推送信封；
 > 不要把 6379 暴露到公网。
+
+## 密钥轮换与备份
+
+### 邮箱 / TOTP 密钥
+
+1. 生成新的 32 字节 Base64 密钥，设置：
+   `MIM_EMAIL_KEY=<新> MIM_EMAIL_KEY_PREVIOUS=<旧>`（也支持 `*_FILE`）。
+2. 重启服务端。`EmailKeyRotation` 会用当前密钥解密旧数据并重加密，
+   日志出现「邮箱/TOTP 密钥轮换完成」。旧密钥仍可读，但新写入全部用新钥。
+3. 确认账号的 2FA 登录正常后，移除 `MIM_EMAIL_KEY_PREVIOUS`，再次重启。
+
+如果旧数据来自未配置 `MIM_EMAIL_KEY` 时的 JWT 私钥派生密钥，
+直接设置新的 `MIM_EMAIL_KEY` 即可启动：轮换器会把旧派生密钥加密的数据
+迁移到显式密钥，无需配置 `_PREVIOUS`。
+
+### JWT 主密钥
+
+1. 设置 `MIM_MASTER_KEY=<新> MIM_MASTER_KEY_PREVIOUS=<旧>`，重启。
+2. `AuthServerRunner` 会先用旧钥解出 JWT RSA 私钥，再用新钥重加密
+   `t_rsa_key`；**RSA 签名密钥本身不变**，已签发 JWT 不受影响。
+3. 确认登录正常后移除 `MIM_MASTER_KEY_PREVIOUS`，再次重启。
+
+### 备份
+
+- 必须同时备份数据库与 `MIM_MASTER_KEY` / `MIM_EMAIL_KEY`；密钥不在数据库里。
+- 丢失主密钥会导致服务端拒绝启动；丢失邮箱密钥会导致 TOTP/邮箱密文无法解密。
+- 建议定期做恢复演练：在隔离环境用备份的数据库 + 密钥启动，确认能登录、
+  能解密 TOTP/邮箱，再销毁演练环境。
+- 一次只轮换一类密钥；完成并确认后再轮换另一类。保留 `_PREVIOUS` 期间不要
+  再轮换到第三把密钥。
 
 ### 启动客户端
 
@@ -653,6 +685,9 @@ mvn test
 86. 恢复码闭环：账号菜单可重新生成恢复码（当前密码 + 验证码/旧恢复码）；
     忘记密码页支持用恢复码直接重置密码，成功后关闭 2FA、清空恢复码并让所有
     旧令牌失效。这样邮箱不可用、验证器丢失时仍能恢复账号。
+87. 密钥轮换与备份：`MIM_MASTER_KEY` / `MIM_EMAIL_KEY` 支持
+    `_PREVIOUS` 双读；启动时自动把旧 JWT 密钥和旧邮箱/TOTP 密文重加密为新钥，
+    并附轮换步骤与备份/恢复演练清单。主密钥轮换不改变 RSA 签名密钥。
 
 ## 仍需处理
 
@@ -662,8 +697,8 @@ mvn test
 - 邮箱找回密码仍依赖用户填写真实邮箱与 SMTP；恢复码已支持登录、关闭 2FA
   和重置密码，但仍需用户提前离线保存。
 - 邮箱与 TOTP 的加密密钥未显式配置 `MIM_EMAIL_KEY` 时会回退到 JWT 私钥；
-  JWT 私钥本身可用 `MIM_MASTER_KEY` 加密，但仍建议配置独立 `MIM_EMAIL_KEY`
-  或使用 KMS，并备份主密钥。同时拿到数据库与主密钥仍可解密。
+  JWT 私钥本身可用 `MIM_MASTER_KEY` 加密。现已支持轮换与备份，但生产环境
+  仍建议使用 KMS/Secret Manager 托管密钥；同时拿到数据库与主密钥仍可解密。
 - 旧版未绑定设备的 JWT 默认仍兼容；客户端全部升级后可设
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
 - 服务端已迁移到 Boot 3.3.5 + Java 17；客户端仍为 JavaFX 8，

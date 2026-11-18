@@ -4,13 +4,17 @@ import com.junesoon.mim.config.KeyConfiguration;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
+import java.util.List;
 import javax.crypto.Cipher;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 /**
  * 服务端敏感字段的加密存储。
@@ -37,7 +41,17 @@ public class EmailCryptoService {
     @Value("${mim.security.email-key-file:}")
     private String configuredKeyFile;
 
+    @Value("${mim.security.email-key-previous:}")
+    private String previousKey;
+
+    @Value("${mim.security.email-key-previous-file:}")
+    private String previousKeyFile;
+
     private volatile byte[] cachedKey;
+
+    private volatile byte[] cachedPreviousKey;
+
+    private volatile byte[] cachedLegacyKey;
 
     public EmailCryptoService(KeyConfiguration keyConfiguration) {
         this.keyConfiguration = keyConfiguration;
@@ -80,6 +94,54 @@ public class EmailCryptoService {
         return decryptValue("MIM/totp/v1|", "二次验证密钥", username, stored);
     }
 
+    /**
+     * 是否需要在启动时扫描并重加密旧数据。
+     */
+    public boolean rotationConfigured() {
+        return StringUtils.hasText(SecretValue.load(configuredKey, configuredKeyFile))
+            || StringUtils.hasText(SecretValue.load(previousKey, previousKeyFile));
+    }
+
+    /**
+     * 如邮箱密文不是当前密钥加密的，则用当前密钥重加密。
+     * 返回 null 表示当前/上一把/旧 JWT 派生密钥都解不开，调用方应保留原值并告警。
+     */
+    public String reencryptEmail(String username, String stored) {
+        if (stored == null || stored.trim().isEmpty()) {
+            return stored;
+        }
+        try {
+            if (decryptWith(key(), "MIM/email/v1|", username, stored) != null) {
+                return stored;
+            }
+        } catch (Exception ignored) {
+            // 继续尝试旧密钥
+        }
+        String plain = decryptAny("MIM/email/v1|", "邮箱", username, stored);
+        return plain == null ? null : encryptValue("MIM/email/v1|", "邮箱", username, plain);
+    }
+
+    /**
+     * TOTP 旧数据可能是明文 Base32，也可能是旧密钥密文；统一升级为当前密钥密文。
+     */
+    public String reencryptTotp(String username, String stored) {
+        if (stored == null || stored.trim().isEmpty()) {
+            return stored;
+        }
+        if (stored.indexOf(':') <= 0) {
+            return encryptTotp(username, stored);
+        }
+        try {
+            if (decryptWith(key(), "MIM/totp/v1|", username, stored) != null) {
+                return stored;
+            }
+        } catch (Exception ignored) {
+            // 继续尝试旧密钥
+        }
+        String plain = decryptAny("MIM/totp/v1|", "二次验证密钥", username, stored);
+        return plain == null ? null : encryptTotp(username, plain);
+    }
+
     private String encryptValue(String aadPrefix, String label, String username, String value) {
         try {
             byte[] nonce = new byte[NONCE_BYTES];
@@ -100,22 +162,67 @@ public class EmailCryptoService {
         if (stored == null || stored.trim().isEmpty()) {
             return null;
         }
+        if (stored.indexOf(':') <= 0) {
+            return null;
+        }
+        return decryptAny(aadPrefix, label, username, stored);
+    }
+
+    /**
+     * 依次尝试当前、上一把、旧 JWT 派生密钥；认证失败会自然抛异常。
+     */
+    private String decryptAny(String aadPrefix, String label, String username, String stored) {
+        List<byte[]> keys = new ArrayList<>(3);
+        addKey(keys, safeCurrentKey());
+        addKey(keys, previousKeyOrNull());
+        addKey(keys, legacyKeyOrNull());
+        Exception last = null;
+        for (byte[] candidate : keys) {
+            try {
+                return decryptWith(candidate, aadPrefix, username, stored);
+            } catch (Exception e) {
+                last = e;
+            }
+        }
+        log.warn("解密用户 {} 的{}失败：{}", username, label,
+            last == null ? "没有可用密钥" : last.getMessage());
+        return null;
+    }
+
+    private void addKey(List<byte[]> keys, byte[] candidate) {
+        if (candidate == null) {
+            return;
+        }
+        for (byte[] existing : keys) {
+            if (Arrays.equals(existing, candidate)) {
+                return;
+            }
+        }
+        keys.add(candidate);
+    }
+
+    private byte[] safeCurrentKey() {
+        try {
+            return key();
+        } catch (Exception e) {
+            log.warn("邮箱加密密钥不可用：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String decryptWith(byte[] aesKey, String aadPrefix, String username, String stored)
+        throws Exception {
         int idx = stored.indexOf(':');
         if (idx <= 0) {
             return null;
         }
-        try {
-            byte[] nonce = Base64.getDecoder().decode(stored.substring(0, idx));
-            byte[] ciphertext = Base64.getDecoder().decode(stored.substring(idx + 1));
-            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
-            cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(key(), "AES"),
-                new GCMParameterSpec(TAG_BITS, nonce));
-            cipher.updateAAD(aad(aadPrefix, username));
-            return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            log.warn("解密用户 {} 的{}失败：{}", username, label, e.getMessage());
-            return null;
-        }
+        byte[] nonce = Base64.getDecoder().decode(stored.substring(0, idx));
+        byte[] ciphertext = Base64.getDecoder().decode(stored.substring(idx + 1));
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.DECRYPT_MODE, new SecretKeySpec(aesKey, "AES"),
+            new GCMParameterSpec(TAG_BITS, nonce));
+        cipher.updateAAD(aad(aadPrefix, username));
+        return new String(cipher.doFinal(ciphertext), StandardCharsets.UTF_8);
     }
 
     private byte[] key() throws Exception {
@@ -135,13 +242,61 @@ public class EmailCryptoService {
                 }
                 cachedKey = decoded;
             } else {
-                byte[] privateKey = keyConfiguration.getUserPriKey();
-                if (privateKey == null || privateKey.length == 0) {
+                cachedKey = legacyKey();
+                if (cachedKey == null) {
                     throw new IllegalStateException("邮箱加密密钥尚未初始化");
                 }
-                cachedKey = MessageDigest.getInstance("SHA-256").digest(privateKey);
             }
             return cachedKey;
+        }
+    }
+
+    private byte[] previousKeyOrNull() {
+        if (!StringUtils.hasText(SecretValue.load(previousKey, previousKeyFile))) {
+            return null;
+        }
+        byte[] key = cachedPreviousKey;
+        if (key != null) {
+            return key;
+        }
+        synchronized (this) {
+            if (cachedPreviousKey != null) {
+                return cachedPreviousKey;
+            }
+            byte[] decoded = Base64.getDecoder().decode(
+                SecretValue.load(previousKey, previousKeyFile).trim());
+            if (decoded.length != 32) {
+                throw new IllegalStateException(
+                    "MIM_EMAIL_KEY_PREVIOUS 必须是 32 字节的 Base64");
+            }
+            cachedPreviousKey = decoded;
+            return cachedPreviousKey;
+        }
+    }
+
+    private byte[] legacyKeyOrNull() {
+        try {
+            return legacyKey();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private byte[] legacyKey() throws Exception {
+        byte[] key = cachedLegacyKey;
+        if (key != null) {
+            return key;
+        }
+        synchronized (this) {
+            if (cachedLegacyKey != null) {
+                return cachedLegacyKey;
+            }
+            byte[] privateKey = keyConfiguration.getUserPriKey();
+            if (privateKey == null || privateKey.length == 0) {
+                return null;
+            }
+            cachedLegacyKey = MessageDigest.getInstance("SHA-256").digest(privateKey);
+            return cachedLegacyKey;
         }
     }
 

@@ -17,8 +17,13 @@ class MasterKeyCryptoTest {
         Base64.getEncoder().encodeToString("0123456789abcdef0123456789abcdef".getBytes());
 
     private static MasterKeyCrypto crypto(String key) {
+        return crypto(key, null);
+    }
+
+    private static MasterKeyCrypto crypto(String key, String previous) {
         MasterKeyCrypto crypto = new MasterKeyCrypto();
         ReflectionTestUtils.setField(crypto, "configuredKey", key);
+        ReflectionTestUtils.setField(crypto, "previousKey", previous);
         return crypto;
     }
 
@@ -45,6 +50,26 @@ class MasterKeyCryptoTest {
                 "abcdef0123456789abcdef0123456789".getBytes()));
         assertThrows(IllegalStateException.class,
             () -> wrong.decrypt("MIM:AUTH:JWT:PRI", stored));
+    }
+
+    @Test
+    @DisplayName("轮换主密钥时旧密钥可解密，并自动用新密钥重加密")
+    void rotateMasterKey() {
+        String next = Base64.getEncoder().encodeToString(
+            "fedcba9876543210fedcba9876543210".getBytes());
+        MasterKeyCrypto old = crypto(KEY);
+        String stored = old.encrypt("MIM:AUTH:JWT:PRI", "secret");
+
+        MasterKeyCrypto rotated = crypto(next, KEY);
+        assertEquals("secret", rotated.decrypt("MIM:AUTH:JWT:PRI", stored));
+        String reencrypted = rotated.reencryptIfNeeded("MIM:AUTH:JWT:PRI", stored);
+        assertNotEquals(stored, reencrypted);
+        assertEquals("secret", rotated.decrypt("MIM:AUTH:JWT:PRI", reencrypted));
+
+        MasterKeyCrypto nextOnly = crypto(next);
+        assertEquals("secret", nextOnly.decrypt("MIM:AUTH:JWT:PRI", reencrypted));
+        assertThrows(IllegalStateException.class,
+            () -> nextOnly.decrypt("MIM:AUTH:JWT:PRI", stored));
     }
 
     @Test
