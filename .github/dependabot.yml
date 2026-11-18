@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # 主版本需要人工迁移（Boot 4 / jjwt 0.13 都有破坏性 API 变更）
+      - dependency-name: "org.springframework.boot:*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "io.jsonwebtoken:*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: maven
     directory: /MIMClient
