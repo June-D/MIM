@@ -17,6 +17,8 @@ updates:
         update-types: ["version-update:semver-major"]
       - dependency-name: "org.slf4j:*"
         update-types: ["version-update:semver-major"]
+      - dependency-name: "org.kordamp.ikonli:*"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: maven
     directory: /MIMClient
