@@ -3,6 +3,7 @@ package com.junesoon.mim.service;
 import com.junesoon.mim.responses.PasswordChangeResult;
 import com.junesoon.mim.responses.TwoFactorEnableResult;
 import com.junesoon.mim.responses.TwoFactorSetupResponse;
+import java.util.List;
 
 /**
  * TOTP 二次验证管理。
@@ -25,6 +26,11 @@ public interface TwoFactorService {
      */
     PasswordChangeResult disable(String username, String deviceId, String password, String code)
         throws Exception;
+
+    /**
+     * 重新生成恢复码。需要当前密码 + 6 位验证码或一个旧恢复码。
+     */
+    List<String> regenerateRecoveryCodes(String username, String password, String code);
 
     boolean isEnabled(String username);
 }

@@ -442,12 +442,12 @@ public class LoginController {
         javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
             new javafx.scene.control.Dialog<>();
         dialog.setTitle("找回密码");
-        dialog.setHeaderText("通过注册邮箱验证码重置密码；重置会同时关闭二次验证");
+        dialog.setHeaderText("通过注册邮箱验证码或一次性恢复码重置密码；重置会同时关闭二次验证");
 
         javafx.scene.control.TextField username = new javafx.scene.control.TextField();
         username.setPromptText("用户名");
         javafx.scene.control.TextField code = new javafx.scene.control.TextField();
-        code.setPromptText("邮箱验证码");
+        code.setPromptText("邮箱验证码或恢复码");
         javafx.scene.control.PasswordField password =
             new javafx.scene.control.PasswordField();
         password.setPromptText("新密码（至少 6 位）");
@@ -460,7 +460,7 @@ public class LoginController {
         grid.setVgap(10);
         grid.add(new javafx.scene.control.Label("用户名"), 0, 0);
         grid.add(username, 1, 0);
-        grid.add(new javafx.scene.control.Label("邮箱验证码"), 0, 1);
+        grid.add(new javafx.scene.control.Label("邮箱验证码/恢复码"), 0, 1);
         grid.add(code, 1, 1);
         grid.add(new javafx.scene.control.Label("新密码"), 0, 2);
         grid.add(password, 1, 2);
@@ -469,7 +469,7 @@ public class LoginController {
         dialog.getDialogPane().setContent(grid);
 
         javafx.scene.control.ButtonType send = new javafx.scene.control.ButtonType(
-            "发送验证码", javafx.scene.control.ButtonBar.ButtonData.LEFT);
+            "发送邮箱验证码", javafx.scene.control.ButtonBar.ButtonData.LEFT);
         javafx.scene.control.ButtonType reset = new javafx.scene.control.ButtonType(
             "重置密码", javafx.scene.control.ButtonBar.ButtonData.OK_DONE);
         javafx.scene.control.ButtonType cancel = new javafx.scene.control.ButtonType(
@@ -528,11 +528,16 @@ public class LoginController {
         javafx.scene.control.ButtonType resetType, String username, String code,
         String newPassword) {
         final String recoveryCode = code == null ? "" : code.trim();
+        String normalized = recoveryCode.replaceAll("[^A-Za-z0-9]", "");
+        boolean useRecoveryCode = !recoveryCode.matches("\\d{6}") && normalized.length() >= 8;
         new Thread(() -> {
             try {
-                ObjectRestResponse<Boolean> resp = Request.connector(LoginFeign.class)
-                    .recoverReset(new com.junesoon.mim.model.RecoverResetRequest(username,
-                        recoveryCode, EncryptUtil.base64Encode(newPassword)));
+                com.junesoon.mim.model.RecoverResetRequest request =
+                    new com.junesoon.mim.model.RecoverResetRequest(username,
+                        recoveryCode, EncryptUtil.base64Encode(newPassword));
+                ObjectRestResponse<Boolean> resp = useRecoveryCode
+                    ? Request.connector(LoginFeign.class).recoverByRecoveryCode(request)
+                    : Request.connector(LoginFeign.class).recoverReset(request);
                 if (resp != null && resp.getStatus() == 200) {
                     javafx.application.Platform.runLater(() -> {
                         dialog.setResult(resetType);

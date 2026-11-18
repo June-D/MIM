@@ -7,6 +7,7 @@ import com.junesoon.mim.requests.TwoFactorCodeRequest;
 import com.junesoon.mim.requests.TwoFactorDisableRequest;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.responses.PasswordChangeResult;
+import com.junesoon.mim.responses.RecoveryCodesResponse;
 import com.junesoon.mim.responses.TwoFactorEnableResult;
 import com.junesoon.mim.responses.TwoFactorSetupResponse;
 import com.junesoon.mim.service.TwoFactorService;
@@ -57,6 +58,18 @@ public class TwoFactorController {
             request == null ? null : request.getCode());
         log.info("用户 {} 设备 {} 启用了二次验证", username, deviceId);
         return new ObjectRestResponse<TwoFactorEnableResult>().data(result).rel(true);
+    }
+
+    @PostMapping("/recovery-codes")
+    @RateLimit(limit = 5, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<RecoveryCodesResponse> regenerateRecoveryCodes(
+        @CurrentUser String username, @RequestBody TwoFactorDisableRequest request) {
+        RecoveryCodesResponse result = new RecoveryCodesResponse(
+            twoFactorService.regenerateRecoveryCodes(username,
+                request == null ? null : request.getPassword(),
+                request == null ? null : request.getCode()));
+        log.info("用户 {} 重新生成了恢复码", username);
+        return new ObjectRestResponse<RecoveryCodesResponse>().data(result).rel(true);
     }
 
     @PostMapping("/disable")

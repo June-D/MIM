@@ -111,16 +111,7 @@ public class TwoFactorServiceImpl implements TwoFactorService {
         if (!StringUtils.hasText(password) || !encoder.matches(password, user.getPassword())) {
             throw new UserInvalidException("当前密码不正确");
         }
-        String secret = emailCryptoService.decryptTotp(username, user.getTotpSecret());
-        boolean verified;
-        if (StringUtils.hasText(code) && code.trim().matches("\\d{6}")) {
-            verified = StringUtils.hasText(secret)
-                && totpVerifier.verifyAndConsume(username, secret, code);
-        } else {
-            // 丢失 TOTP 设备时，允许用一次性恢复码关闭二次验证
-            verified = recoveryCodeService.consume(username, code);
-        }
-        if (!verified) {
+        if (!verifySecondFactor(user, code)) {
             throw new UserInvalidException("二次验证码或恢复码错误");
         }
         // 选择性更新不会把 null 写回数据库，用空串显式清空
@@ -130,6 +121,33 @@ public class TwoFactorServiceImpl implements TwoFactorService {
         userMapper.updateByPrimaryKeySelective(user);
         recoveryCodeService.deleteAll(username);
         return revokeAllAndIssue(user, deviceId);
+    }
+
+    @Override
+    public List<String> regenerateRecoveryCodes(String username, String password, String code) {
+        User user = requireUser(username);
+        if (!Boolean.TRUE.equals(user.getTotpEnabled())) {
+            throw new UserInvalidException("二次验证未启用");
+        }
+        if (!StringUtils.hasText(password) || !encoder.matches(password, user.getPassword())) {
+            throw new UserInvalidException("当前密码不正确");
+        }
+        if (!verifySecondFactor(user, code)) {
+            throw new UserInvalidException("二次验证码或恢复码错误");
+        }
+        return recoveryCodeService.generate(username);
+    }
+
+    /**
+     * 6 位数字走 TOTP；其它形式按一次性恢复码处理（丢失验证器时的后备）。
+     */
+    private boolean verifySecondFactor(User user, String code) {
+        if (StringUtils.hasText(code) && code.trim().matches("\\d{6}")) {
+            String secret = emailCryptoService.decryptTotp(user.getUsername(), user.getTotpSecret());
+            return StringUtils.hasText(secret)
+                && totpVerifier.verifyAndConsume(user.getUsername(), secret, code);
+        }
+        return recoveryCodeService.consume(user.getUsername(), code);
     }
 
     @Override

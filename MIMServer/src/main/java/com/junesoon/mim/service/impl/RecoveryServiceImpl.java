@@ -194,4 +194,29 @@ public class RecoveryServiceImpl implements RecoveryService {
         }
         log.info("用户 {} 通过邮箱验证码重置了密码并关闭二次验证", username);
     }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public void resetByRecoveryCode(String username, String code, String newPassword) {
+        ValidationUtil.validateUsername(username);
+        ValidationUtil.validatePassword(newPassword);
+        if (!StringUtils.hasText(code)) {
+            throw new UserInvalidException("请输入恢复码");
+        }
+        User user = userMapper.selectOne(username);
+        if (user == null || !recoveryCodeService.consume(username, code)) {
+            throw new UserInvalidException("恢复码错误或已使用");
+        }
+        user.setPassword(encoder.encode(newPassword));
+        // 恢复码本身就是丢失 2FA 设备时的后备：重置后关闭 2FA 并清空剩余恢复码
+        user.setTotpSecret("");
+        user.setTotpEnabled(false);
+        user.setUpdTime(new Date());
+        userMapper.updateByPrimaryKeySelective(user);
+        recoveryCodeService.deleteAll(username);
+
+        deviceMapper.bumpAllTokenVersions(username);
+        sessionRegistry.closeUser(username);
+        log.info("用户 {} 使用恢复码重置了密码并关闭二次验证", username);
+    }
 }

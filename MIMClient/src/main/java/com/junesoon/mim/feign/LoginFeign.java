@@ -8,6 +8,7 @@ import com.junesoon.mim.model.PasswordChangeRequest;
 import com.junesoon.mim.model.PasswordChangeResult;
 import com.junesoon.mim.model.RecoverEmailRequest;
 import com.junesoon.mim.model.RecoverResetRequest;
+import com.junesoon.mim.model.RecoveryCodesResponse;
 import com.junesoon.mim.model.TwoFactorCodeRequest;
 import com.junesoon.mim.model.TwoFactorDisableRequest;
 import com.junesoon.mim.model.TwoFactorEnableResult;
@@ -59,6 +60,13 @@ public interface LoginFeign extends FeignAPI {
 
     @RequestLine("POST /user/2fa/disable")
     ObjectRestResponse<PasswordChangeResult> disableTwoFactor(TwoFactorDisableRequest request);
+
+    @RequestLine("POST /user/2fa/recovery-codes")
+    ObjectRestResponse<RecoveryCodesResponse> regenerateRecoveryCodes(
+        TwoFactorDisableRequest request);
+
+    @RequestLine("POST /recover/code")
+    ObjectRestResponse<Boolean> recoverByRecoveryCode(RecoverResetRequest request);
 
     @RequestLine("POST /recover/email")
     ObjectRestResponse<Boolean> recoverEmail(RecoverEmailRequest request);

@@ -43,4 +43,19 @@ public class RecoveryController {
             request.getNewPassword());
         return new ObjectRestResponse<Boolean>().data(Boolean.TRUE).rel(true);
     }
+
+    /**
+     * 使用一次性恢复码重置密码。恢复码由启用 2FA 时生成。
+     */
+    @PostMapping("/code")
+    @RateLimit(limit = 10, windowSeconds = 60, dimension = RateLimit.Dimension.IP)
+    public ObjectRestResponse<Boolean> resetByRecoveryCode(
+        @RequestBody RecoverResetRequest request) {
+        if (request == null) {
+            throw new com.junesoon.mim.exception.UserInvalidException("请求不能为空");
+        }
+        recoveryService.resetByRecoveryCode(request.getUsername(), request.getCode(),
+            request.getNewPassword());
+        return new ObjectRestResponse<Boolean>().data(Boolean.TRUE).rel(true);
+    }
 }

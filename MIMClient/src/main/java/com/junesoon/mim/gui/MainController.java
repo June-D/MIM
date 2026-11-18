@@ -384,11 +384,15 @@ public class MainController {
             new javafx.scene.control.MenuItem("二次验证");
         twoFactor.setOnAction(e -> showTwoFactorDialog());
 
+        javafx.scene.control.MenuItem recoveryCodes =
+            new javafx.scene.control.MenuItem("重新生成恢复码");
+        recoveryCodes.setOnAction(e -> showRegenerateRecoveryCodesDialog());
+
         javafx.scene.control.MenuItem logout =
             new javafx.scene.control.MenuItem("退出登录");
         logout.setOnAction(e -> confirmLogout("退出登录", false));
 
-        menu.getItems().addAll(deviceCode, myEmail, twoFactor, changePassword,
+        menu.getItems().addAll(deviceCode, myEmail, twoFactor, recoveryCodes, changePassword,
             switchAccount, logout);
         menu.show(accountMenuButton, event.getScreenX(), event.getScreenY());
     }
@@ -492,7 +496,7 @@ public class MainController {
         }
         javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
             new javafx.scene.control.Dialog<>();
-        dialog.setTitle("二次验证已启用");
+        dialog.setTitle("恢复码");
         dialog.setHeaderText("恢复码只显示一次，请离线保存");
         javafx.scene.control.TextArea area =
             new javafx.scene.control.TextArea(String.join("\n", codes));
@@ -500,12 +504,53 @@ public class MainController {
         area.setWrapText(false);
         area.setPrefRowCount(12);
         javafx.scene.control.Label warning = new javafx.scene.control.Label(
-            "每个恢复码只能使用一次。丢失验证器时，可用其中一个恢复码登录或关闭二次验证。");
+            "每个恢复码只能使用一次。丢失验证器时，可用其中一个恢复码登录、关闭二次验证或重置密码。");
         warning.setWrapText(true);
         javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(10, warning, area);
         dialog.getDialogPane().setContent(box);
         dialog.getDialogPane().getButtonTypes().add(javafx.scene.control.ButtonType.OK);
         dialog.showAndWait();
+    }
+
+    private void showRegenerateRecoveryCodesDialog() {
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+            new javafx.scene.control.Dialog<>();
+        dialog.setTitle("重新生成恢复码");
+        dialog.setHeaderText("需要当前密码，以及 6 位验证码或一个旧恢复码");
+        javafx.scene.control.PasswordField password =
+            new javafx.scene.control.PasswordField();
+        password.setPromptText("当前密码");
+        javafx.scene.control.TextField code = new javafx.scene.control.TextField();
+        code.setPromptText("6 位验证码或旧恢复码");
+        javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(10, password, code);
+        dialog.getDialogPane().setContent(box);
+        dialog.getDialogPane().getButtonTypes().addAll(
+            javafx.scene.control.ButtonType.OK, javafx.scene.control.ButtonType.CANCEL);
+        java.util.Optional<javafx.scene.control.ButtonType> result = dialog.showAndWait();
+        if (!result.isPresent() || result.get() != javafx.scene.control.ButtonType.OK) {
+            return;
+        }
+        final String rawPassword = password.getText() == null ? "" : password.getText();
+        final String value = code.getText() == null ? "" : code.getText().trim();
+        new Thread(() -> {
+            try {
+                com.junesoon.mim.components.ObjectRestResponse<
+                    com.junesoon.mim.model.RecoveryCodesResponse> resp =
+                    com.junesoon.mim.components.Request
+                        .connector(com.junesoon.mim.feign.LoginFeign.class)
+                        .regenerateRecoveryCodes(
+                            new com.junesoon.mim.model.TwoFactorDisableRequest(
+                                com.junesoon.mim.utils.EncryptUtil.base64Encode(rawPassword),
+                                value));
+                if (resp == null || resp.getStatus() != 200 || resp.getData() == null) {
+                    throw new IllegalStateException(resp == null ? "服务端无响应" : resp.getMessage());
+                }
+                Platform.runLater(() -> showRecoveryCodes(
+                    resp.getData().getRecoveryCodes()));
+            } catch (Exception e) {
+                Platform.runLater(() -> AlertUtil.show("重新生成恢复码失败", e.getMessage()));
+            }
+        }, "recovery-codes").start();
     }
 
     private void disableTwoFactorFlow() {
