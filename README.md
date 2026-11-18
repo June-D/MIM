@@ -317,6 +317,8 @@ mysql -uroot mim_core < MIMServer/sql/e2ee.sql
 - `t_one_time_prekey.claimed_by / claimed_at`：OPK 预留请求者与预留时间；
 - `t_user_key.supports_padding`：设备是否支持消息长度填充（能力协商）；
 - `t_message.padding`：该条明文是否做了长度填充；
+- `t_message.sealed / session_id`：已建立会话后是否使用盲引用隐藏明文发送者，
+  以及收件端索引棘轮用的会话 ID；旧库执行 `e2ee.sql` 末尾的 `ALTER`；
 - `t_rsa_key.key_value`：启用 `MIM_MASTER_KEY` 前扩到 `varchar(4096)`，
   旧库执行 `MODIFY`（加密后的 RSA 私钥约 2.2KB）。
 
@@ -344,6 +346,10 @@ export MIM_REDIS_PASSWORD=
 export MIM_REDIS_SSL=false
 export MIM_REDIS_REQUIRE_SECURE=false
 export MIM_MASTER_KEY=
+export MIM_SEALED_SENDER_ENABLED=true
+# 可选：独立的消息元数据盲引用密钥（Base64 32 字节）。
+# 未配置时由 JWT 私钥派生；轮换 JWT 私钥会使旧 sealed 历史索引失效。
+# export MIM_SECURITY_METADATA_KEY=
 ../mvnw spring-boot:run
 ```
 
@@ -363,6 +369,23 @@ export MIM_MASTER_KEY=
 > 非本机地址缺密码或 TLS 会直接拒绝启动。
 > Pub/Sub 推送频道本身不带签名，Redis 被攻破等同于能伪造推送信封；
 > 不要把 6379 暴露到公网。
+
+### Sealed sender Phase 1
+
+已建立会话的消息不再写入明文 `from_user` / `from_device_id`，而是：
+
+- `sealed=1`、`session_id` 标识会话；
+- `from_user` / `from_device_id` 写入 HMAC-SHA256 盲引用（64 位十六进制），
+  历史、未读、撤回、清除和多端同步按盲引用查询；
+- 首条会话消息和新旧客户端桥接消息仍走旧格式（服务端可见发送者）；
+- 服务端在提交时仍从 JWT 知道提交者，**这不是提交时匿名**；
+  完全提交匿名属于 Phase 2 的匿名令牌/发送者证书。
+
+关闭 `MIM_SEALED_SENDER_ENABLED` 会把 sealed 请求降级为旧格式存储（不再隐藏
+发送者，但不会中断已有会话）；旧客户端不受影响。
+盲引用密钥 `MIM_SECURITY_METADATA_KEY` 必须与数据库一起备份；更换它会让
+旧 sealed 消息的历史/未读/撤回索引失效。设计取舍详见
+[docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 9 节。
 
 ## 密钥轮换与备份
 
@@ -422,8 +445,8 @@ cd MIMClient
 ./verify.sh
 
 # 或分端执行（在各自目录）
-cd MIMServer && ../mvnw test      # 184 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 104 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMServer && ../mvnw test      # 186 项（含真实 MySQL 集成）
+cd MIMClient && ../mvnw test      # 107 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -450,7 +473,7 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 |---|---|
 | `MapperIntegrationTest`（25 项） | XML 与 schema 匹配、upsert 语义、`INSERT IGNORE`、`FOR UPDATE` 领取、去重分页、撤回级联 |
 | `HttpApiIntegrationTest`（17 项） | 鉴权 401、限流 429、`@CurrentUser`/`@CurrentDevice` 解析、伪造发信人、多设备扇出 |
-| `MultiDeviceE2eTest`（13 项） | 多设备注册、按设备分发、各自解密、设备隔离、按 clientMsgId 撤回、注销后停止分发 |
+| `MultiDeviceE2eTest`（26 项） | 多设备注册、按设备分发、各自解密、设备隔离、按 clientMsgId 撤回、sealed 往返/历史/撤回、注销后停止分发 |
 | `WsDevicePushE2eTest`（13 项） | WS 按设备推送：两台设备各收自己那份、多端同步副本、密文互不相同、都能解密 |
 
 ## HTTP 接口
@@ -706,23 +729,27 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 89. 联系人安全码增加 **60 位数字对照码**：双方身份公钥排序后哈希，双方对应
     设备的码应完全一致；与分组指纹一起用于首次 TOFU 的线下核对。
 90. Spring Boot **3.3.5 → 3.5.16**（Java 17、Jakarta 体系不变）；本地真实
-    MySQL 下 184 项测试通过，CI 继续覆盖单元、集成与 e2e。
+    MySQL 下 186 项测试通过，CI 继续覆盖单元、集成与 e2e。
 91. 合并次版本/补丁依赖：MyBatis 3.0.5、Druid 1.2.28；客户端 Lombok 1.18.48、
     slf4j 2.0.20、ribbon 2.7.18、Java-WebSocket 1.6.0、Feign 13.18。
 92. 引入 **Maven Wrapper 3.9.9**（`mvnw` / `.mvn`），`verify.sh` 与 CI 改用
     `mvnw`；同时启用 compiler 3.16.0 与 surefire 3.6.1，消除本机 Maven 版本差异。
 93. 客户端 dependencyManagement/打包插件从 Spring Boot 2.3.7 升到 **2.7.18**
     （客户端仍是 JavaFX 8，不引入 Boot 运行时）；依赖版本与 CVE 面同步收敛，
-    104 项测试与 e2e 通过。
-94. 新增 **sealed sender / 元数据最小化设计草案**（`docs/sealed-sender-design.md`）：
-    明确 Phase 1 会话 ID 方案、Phase 2 匿名令牌/发送者证书、兼容/回滚与测试计划；
-    当前仅设计，未改变消息行为。
+    107 项测试与 e2e 通过。
+94. 落地 **sealed sender Phase 1（盲引用兼容方案）**：已建立会话的
+    `from_user`/`from_device_id` 改为 HMAC 盲引用，新增 `sealed`/`session_id`；
+    客户端通过 `sessionId + sessionIdConfirmed` 桥接后切换，发送端历史使用本地
+    明文缓存；服务端历史/未读/撤回/清除/同步按盲引用继续工作。
+    e2e 已覆盖 sealed 往返、历史与撤回。Phase 2 的提交匿名仍未实现，
+    设计取舍见 `docs/sealed-sender-design.md` 第 9 节。
 
 ## 仍需处理
 
 - 消息长度填充只隐藏精确长度，服务端仍可见粗粒度长度、发送时间、参与者与设备。
-  sealed sender/cover traffic 的设计草案见
-  [docs/sealed-sender-design.md](docs/sealed-sender-design.md)（Phase 1 会话 ID 方案待实现）。
+  sealed sender Phase 1 使用 HMAC 盲引用保留历史/撤回索引；持有服务端密钥者
+  仍可关联，且服务端提交时仍从 JWT 知道发送者。严格无发送者索引与提交匿名
+  见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 9 节及 Phase 2。
 - 新设备首次信任仍依赖人工核对指纹/60 位安全码，这是 TOFU 的固有局限。
 - 邮箱找回密码仍依赖用户填写真实邮箱与 SMTP；恢复码已支持登录、关闭 2FA
   和重置密码，但仍需用户提前离线保存。

@@ -99,6 +99,8 @@ class ClearPersistenceTest {
                 + "consumed_opk_id int null,"
                 + "recipient_spk_id int null,"
                 + "padding tinyint not null default 0,"
+                + "sealed tinyint not null default 0,"
+                + "session_id varchar(64) null,"
                 + "sender_key_version int null,"
                 + "recipient_key_version int null,"
                 + "client_time bigint not null,"

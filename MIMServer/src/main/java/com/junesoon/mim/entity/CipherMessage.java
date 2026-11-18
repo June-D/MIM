@@ -121,6 +121,22 @@ public class CipherMessage implements Serializable {
      */
     private Boolean padding;
 
+    /**
+     * 已建立会话后是否使用盲引用隐藏明文发信人/设备。
+     */
+    private Boolean sealed;
+
+    /**
+     * sealed 会话 ID。收件端用它索引对应的双棘轮状态，无需依赖发信人字段。
+     */
+    private String sessionId;
+
+    /**
+     * 仅用于历史接口返回给发送端：这条逻辑消息是否由当前查看者发出。
+     * 不入库，也不从客户端请求读取。
+     */
+    private Boolean fromMe;
+
     private Boolean delivered;
 
     private Boolean readFlag;

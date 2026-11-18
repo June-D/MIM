@@ -207,9 +207,9 @@ public class MainController {
             com.junesoon.mim.model.CipherMessage raw =
                 (com.junesoon.mim.model.CipherMessage) notify.getData();
             String self = ApplicatonStore.getUsername();
-            // 自己发出的多端同步副本不提醒
-            String peer = self != null && self.equals(raw.getFromUsername())
-                ? raw.getToUsername() : raw.getFromUsername();
+            // 自己发出的多端同步副本不提醒；sealed 消息用 sessionId/同步签名解析对端，
+            // 不能把服务端盲引用当成用户名。
+            String peer = MessageService.getInstance().peerForMessage(raw);
             if (peer == null || peer.equals(self)) {
                 return;
             }

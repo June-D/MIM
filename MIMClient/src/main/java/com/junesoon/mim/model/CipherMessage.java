@@ -101,6 +101,22 @@ public class CipherMessage {
      */
     private Boolean padding;
 
+    /**
+     * 已建立会话后是否使用盲引用隐藏明文发信人/设备。
+     */
+    private Boolean sealed;
+
+    /**
+     * sealed 会话 ID。解密方据此索引双棘轮状态，不再依赖 fromUsername/fromDeviceId。
+     */
+    private String sessionId;
+
+    /**
+     * 服务端历史接口返回的提示：这条逻辑消息由当前账号发出。
+     * 发送端还会优先查本地发送缓存，避免依赖不可信的提示。
+     */
+    private Boolean fromMe;
+
     private Boolean delivered;
 
     private Boolean readFlag;

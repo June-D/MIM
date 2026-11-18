@@ -15,6 +15,7 @@ import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.service.MessageService;
 import com.junesoon.mim.service.PushService;
+import com.junesoon.mim.utils.MetadataRef;
 import com.junesoon.mim.utils.ValidationUtil;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -76,6 +77,16 @@ public class MessageServiceImpl implements MessageService {
     @Autowired(required = false)
     private PreKeyMapper preKeyMapper;
 
+    /**
+     * 可选注入：sealed 消息的盲引用。单元测试直接构造本类时为空，
+     * 此时只走旧版明文 from_user 路径。
+     */
+    @Autowired(required = false)
+    private MetadataRef metadataRef;
+
+    @Value("${mim.sealed-sender.enabled:true}")
+    private boolean sealedSenderEnabled;
+
     @Value("${message.max-bytes:262144}")
     private int maxCiphertextBytes;
 
@@ -126,6 +137,7 @@ public class MessageServiceImpl implements MessageService {
             if (!java.util.Objects.equals(toUsername, message.getToUsername())) {
                 throw new UserInvalidException("同一次发送的收信人必须一致");
             }
+            validateSealedFields(message);
         }
 
         validateEnvelope(authenticatedUser, toUsername, clientMsgId, messages.get(0));
@@ -169,9 +181,15 @@ public class MessageServiceImpl implements MessageService {
         for (CipherMessage message : messages) {
             String target = StringUtils.hasText(message.getTargetDeviceId())
                 ? message.getTargetDeviceId().trim() : UserKey.DEFAULT_DEVICE_ID;
+            boolean sealed = shouldSeal(message);
+            // sealed 消息不保存明文发送者/设备：from_user/from_device_id 只写盲引用。
+            // 服务端仍然通过 JWT 知道提交者，但数据库和后续历史接口不再暴露用户名。
+            // 功能开关关闭时降级为旧格式，保证已有会话仍能收发。
+            String storedFrom = sealed ? userRef(authenticatedUser) : authenticatedUser;
+            String storedFromDevice = sealed ? deviceRef(authenticatedUser, fromDevice) : fromDevice;
 
             // 幂等：同一目标设备重复发送时返回首次落库的记录
-            CipherMessage existing = messageMapper.selectByClientMsgId(authenticatedUser,
+            CipherMessage existing = messageMapper.selectByClientMsgId(storedFrom,
                 clientMsgId, target);
             if (existing != null) {
                 consumeOneTimePreKey(message, toUsername, target, authenticatedUser, fromDevice);
@@ -181,8 +199,10 @@ public class MessageServiceImpl implements MessageService {
 
             CipherMessage record = new CipherMessage();
             record.setClientMsgId(clientMsgId);
-            record.setFromUsername(authenticatedUser);
-            record.setFromDeviceId(fromDevice);
+            record.setFromUsername(storedFrom);
+            record.setFromDeviceId(storedFromDevice);
+            record.setSealed(sealed);
+            record.setSessionId(message.getSessionId());
             record.setToUsername(toUsername);
             record.setTargetDeviceId(target);
             record.setAlg(message.getAlg());
@@ -209,7 +229,7 @@ public class MessageServiceImpl implements MessageService {
                 messageMapper.insert(record);
             } catch (DuplicateKeyException e) {
                 // 并发重试时以先落库的为准
-                CipherMessage duplicate = messageMapper.selectByClientMsgId(authenticatedUser,
+                CipherMessage duplicate = messageMapper.selectByClientMsgId(storedFrom,
                     clientMsgId, target);
                 if (duplicate != null) {
                     consumeOneTimePreKey(message, toUsername, target, authenticatedUser, fromDevice);
@@ -227,8 +247,50 @@ public class MessageServiceImpl implements MessageService {
     }
 
     /**
-     * 结构校验。所有副本共享同一套校验，取第一份即可。
+     * 只判断盲引用密钥是否可用。是否**新写** sealed 由 shouldSeal 单独控制：
+     * 关闭功能开关后，已经落库的 sealed 消息仍必须能被历史/未读/撤回读取。
      */
+    private boolean metadataRefsEnabled() {
+        return metadataRef != null && metadataRef.isEnabled();
+    }
+
+    private String userRef(String username) {
+        return metadataRef.userRef(username);
+    }
+
+    private String deviceRef(String username, String deviceId) {
+        return metadataRef.deviceRef(username, deviceId);
+    }
+
+    private void validateSealedFields(CipherMessage sample) {
+        if (!Boolean.TRUE.equals(sample.getSealed())) {
+            return;
+        }
+        if (StringUtils.hasText(sample.getSessionId())
+            && !sample.getSessionId().matches("^[A-Za-z0-9-]{8,64}$")) {
+            throw new UserInvalidException("sealed 会话 ID 不合法");
+        }
+        if (!sealedSenderEnabled) {
+            // 回滚场景：开关关闭只表示不再隐藏元数据，不能拒绝已经切换到
+            // sealed 的新客户端，否则它们会永久发不出消息。send() 会把这条
+            // 请求降级为旧格式落库。
+            return;
+        }
+        if (metadataRef == null || !metadataRef.isEnabled()) {
+            throw new UserInvalidException("服务端缺少 sealed sender 元数据密钥");
+        }
+        if (!StringUtils.hasText(sample.getSessionId())) {
+            throw new UserInvalidException("sealed 会话 ID 不合法");
+        }
+    }
+
+    private boolean shouldSeal(CipherMessage message) {
+        return Boolean.TRUE.equals(message.getSealed())
+            && sealedSenderEnabled
+            && metadataRef != null
+            && metadataRef.isEnabled();
+    }
+
     private void validateEnvelope(String authenticatedUser, String toUsername, String clientMsgId,
         CipherMessage sample) {
         if (!StringUtils.hasText(toUsername)) {
@@ -351,15 +413,82 @@ public class MessageServiceImpl implements MessageService {
         String deviceId) {
         ValidationUtil.validateUsername(peer);
         int safeLimit = Math.max(1, Math.min(limit, MAX_HISTORY_LIMIT));
-        List<CipherMessage> messages = StringUtils.hasText(deviceId)
-            ? messageMapper.selectHistoryForDevice(username, peer, deviceId.trim(), beforeId, safeLimit)
-            : messageMapper.selectHistory(username, peer, beforeId, safeLimit);
-        long cursor = clearCursor(username, peer);
-        if (cursor > 0 && messages != null) {
-            messages.removeIf(message -> message.getId() != null && message.getId() <= cursor);
+        String device = StringUtils.hasText(deviceId) ? deviceId.trim() : null;
+        List<CipherMessage> messages = new ArrayList<>(safeLimit * 2);
+
+        // 旧消息（from_user 是明文用户名）继续走原查询。
+        List<CipherMessage> legacy = device == null
+            ? messageMapper.selectHistory(username, peer, beforeId, safeLimit)
+            : messageMapper.selectHistoryForDevice(username, peer, device, beforeId, safeLimit);
+        markFromMe(legacy, username);
+        if (legacy != null) {
+            messages.addAll(legacy);
         }
-        Collections.reverse(messages);
-        return messages;
+
+        // sealed 消息的 from_user 是 HMAC 引用：发件侧按「我的引用 + 对端用户名」查，
+        // 收件侧按「我的用户名 + 对端引用」查。两条都返回同一会话的不同方向。
+        if (metadataRefsEnabled()) {
+            String refViewer = userRef(username);
+            String refPeer = userRef(peer);
+            List<CipherMessage> sent = device == null
+                ? messageMapper.selectHistory(refViewer, peer, beforeId, safeLimit)
+                : messageMapper.selectHistoryForDevice(refViewer, peer, device, beforeId, safeLimit);
+            markFromMe(sent, username);
+            if (sent != null) {
+                for (CipherMessage message : sent) {
+                    message.setFromMe(true);
+                }
+                messages.addAll(sent);
+            }
+
+            List<CipherMessage> received = device == null
+                ? messageMapper.selectHistory(username, refPeer, beforeId, safeLimit)
+                : messageMapper.selectHistoryForDevice(username, refPeer, device, beforeId, safeLimit);
+            markFromMe(received, username);
+            if (received != null) {
+                for (CipherMessage message : received) {
+                    message.setFromMe(false);
+                }
+                messages.addAll(received);
+            }
+        }
+
+        // 同一逻辑消息只展示一行；设备查询已经选过副本，这里只做最终去重。
+        Map<String, CipherMessage> unique = new LinkedHashMap<>();
+        for (CipherMessage message : messages) {
+            if (message == null) {
+                continue;
+            }
+            String key = message.getClientMsgId() != null
+                ? "c:" + message.getClientMsgId()
+                : "i:" + message.getId();
+            unique.putIfAbsent(key, message);
+        }
+        List<CipherMessage> merged = new ArrayList<>(unique.values());
+        long cursor = clearCursor(username, peer);
+        if (cursor > 0) {
+            merged.removeIf(message -> message.getId() != null && message.getId() <= cursor);
+        }
+        merged.sort((left, right) -> {
+            long leftId = left.getId() == null ? 0L : left.getId();
+            long rightId = right.getId() == null ? 0L : right.getId();
+            return Long.compare(rightId, leftId);
+        });
+        if (merged.size() > safeLimit) {
+            merged = new ArrayList<>(merged.subList(0, safeLimit));
+        }
+        Collections.reverse(merged);
+        return merged;
+    }
+
+    private void markFromMe(List<CipherMessage> messages, String viewer) {
+        if (messages == null) {
+            return;
+        }
+        for (CipherMessage message : messages) {
+            message.setFromMe(message.getFromUsername() != null
+                && message.getFromUsername().equals(viewer));
+        }
     }
 
     @Override
@@ -389,6 +518,10 @@ public class MessageServiceImpl implements MessageService {
     public int markRead(String username, String peer, Long beforeId) {
         ValidationUtil.validateUsername(peer);
         int affected = messageMapper.markRead(peer, username, beforeId);
+        if (metadataRefsEnabled()) {
+            // sealed 收件消息的 from_user 是对方盲引用，单独标记一次。
+            affected += messageMapper.markRead(userRef(peer), username, beforeId);
+        }
         if (affected > 0) {
             Map<String, Object> receipt = new LinkedHashMap<>(2);
             receipt.put("peer", username);
@@ -406,10 +539,16 @@ public class MessageServiceImpl implements MessageService {
     public long countUnread(String username, String peer) {
         ValidationUtil.validateUsername(peer);
         long cursor = clearCursor(username, peer);
-        if (cursor > 0) {
-            return messageMapper.countUnreadAfter(peer, username, cursor);
+        long count = cursor > 0
+            ? messageMapper.countUnreadAfter(peer, username, cursor)
+            : messageMapper.countUnread(peer, username);
+        if (metadataRefsEnabled()) {
+            String refPeer = userRef(peer);
+            count += cursor > 0
+                ? messageMapper.countUnreadAfter(refPeer, username, cursor)
+                : messageMapper.countUnread(refPeer, username);
         }
-        return messageMapper.countUnread(peer, username);
+        return count;
     }
 
     @Override
@@ -420,13 +559,33 @@ public class MessageServiceImpl implements MessageService {
             throw new UserInvalidException("不能清除与自己的会话");
         }
         Long maxId = messageMapper.maxConversationId(username, peer);
+        String refUsername = null;
+        String refPeer = null;
+        if (metadataRefsEnabled()) {
+            refUsername = userRef(username);
+            refPeer = userRef(peer);
+            maxId = max(maxId, messageMapper.maxConversationId(refUsername, peer));
+            maxId = max(maxId, messageMapper.maxConversationId(username, refPeer));
+        }
         long cursor = maxId == null ? 0L : maxId;
         long now = System.currentTimeMillis();
         advanceCursor(username, peer, cursor, now);
+        if (refPeer != null) {
+            // 未投递消息的 SQL 用 from_user 反推会话对象；sealed 收件消息的
+            // from_user 是盲引用，因此额外维护一条引用维度的清除点。
+            advanceCursor(username, refPeer, cursor, now);
+        }
         if (forBoth) {
             advanceCursor(peer, username, cursor, now);
+            if (refUsername != null) {
+                advanceCursor(peer, refUsername, cursor, now);
+            }
             if (cursor > 0) {
                 messageMapper.wipeConversation(username, peer, cursor);
+                if (refUsername != null) {
+                    messageMapper.wipeConversation(refUsername, peer, cursor);
+                    messageMapper.wipeConversation(username, refPeer, cursor);
+                }
             }
         }
         notifyCleared(username, peer, cursor, forBoth);
@@ -440,6 +599,16 @@ public class MessageServiceImpl implements MessageService {
     private long clearCursor(String username, String peer) {
         Long cursor = conversationClearMapper.selectCursor(username, peer);
         return cursor == null ? 0L : cursor;
+    }
+
+    private Long max(Long left, Long right) {
+        if (left == null) {
+            return right;
+        }
+        if (right == null) {
+            return left;
+        }
+        return Math.max(left, right);
     }
 
     /**
@@ -477,12 +646,16 @@ public class MessageServiceImpl implements MessageService {
         if (!StringUtils.hasText(clientMsgId)) {
             throw new UserInvalidException("消息 ID 不能为空");
         }
+        String refUsername = metadataRefsEnabled() ? userRef(username) : null;
         // 撤回按 clientMsgId 作用于所有设备副本，因此找到任意一份副本即可判定权限与时限
-        CipherMessage sample = findAnyCopy(username, clientMsgId);
+        CipherMessage sample = findAnyCopy(username, refUsername, clientMsgId);
         if (sample == null) {
             throw new UserInvalidException("消息不存在");
         }
-        if (!username.equals(sample.getFromUsername())) {
+        boolean sealed = Boolean.TRUE.equals(sample.getSealed());
+        boolean own = username.equals(sample.getFromUsername())
+            || (sealed && refUsername != null && refUsername.equals(sample.getFromUsername()));
+        if (!own) {
             throw new UserInvalidException("只能撤回自己发送的消息");
         }
         if (Boolean.TRUE.equals(sample.getRecalled())) {
@@ -493,7 +666,14 @@ public class MessageServiceImpl implements MessageService {
         }
 
         long recalledAt = System.currentTimeMillis();
-        int affected = messageMapper.recall(clientMsgId, username, recalledAt);
+        int affected;
+        if (sealed) {
+            affected = messageMapper.recall(clientMsgId, refUsername, recalledAt);
+            // 同步副本仍以账号名作为 from_user（只对本账号设备可见），一并撤回。
+            affected += messageMapper.recall(clientMsgId, username, recalledAt);
+        } else {
+            affected = messageMapper.recall(clientMsgId, username, recalledAt);
+        }
         if (affected == 0) {
             // 并发撤回：另一请求已处理
             throw new UserInvalidException("消息已撤回");
@@ -502,14 +682,15 @@ public class MessageServiceImpl implements MessageService {
         try {
             Map<String, Object> payload = new LinkedHashMap<>(4);
             payload.put("clientMsgId", clientMsgId);
-            payload.put("fromUsername", sample.getFromUsername());
+            payload.put("fromUsername", sealed ? null : sample.getFromUsername());
             payload.put("toUsername", sample.getToUsername());
             payload.put("recalledAt", recalledAt);
             BaseNotify<Map<String, Object>> notify =
                 BaseNotify.of(CommonConstants.NOTIFY_TYPE_MESSAGE_RECALLED, payload);
-            // 撤回事件要通知双方<b>所有设备</b>，把各端渲染的消息都替换成占位
+            // 撤回事件要通知双方<b>所有设备</b>，把各端渲染的消息都替换成占位。
+            // sealed 消息的 sample.from 是盲引用，发件侧必须用 JWT 中的用户名推送。
             pushService.pushToUser(sample.getToUsername(), notify);
-            pushService.pushToUser(sample.getFromUsername(), notify);
+            pushService.pushToUser(username, notify);
         } catch (Exception e) {
             log.warn("撤回通知推送失败：{}", e.getMessage());
         }
@@ -567,17 +748,32 @@ public class MessageServiceImpl implements MessageService {
         if (target.equals(fromDevice)) {
             throw new UserInvalidException("不能把历史同步给当前设备");
         }
+        String refUsername = metadataRefsEnabled() ? userRef(username) : null;
         CipherMessage original = messageMapper.selectParticipantCopy(username, replica.getClientMsgId());
+        if (original == null && refUsername != null) {
+            // sealed 发件副本的 from_user 是盲引用；先按用户名查收件副本，
+            // 查不到再按引用查发件副本，避免把同步副本当原文。
+            original = messageMapper.selectParticipantCopy(refUsername, replica.getClientMsgId());
+        }
         if (original == null) {
             throw new UserInvalidException("没有可同步的原消息");
         }
-        CipherMessage existing = messageMapper.selectByClientMsgId(original.getFromUsername(),
+        boolean sentByUser = username.equals(original.getFromUsername())
+            || (refUsername != null && refUsername.equals(original.getFromUsername()));
+        // 旧消息仍沿用原收发双方，保持历史归属不变。
+        // sealed 发件副本的 from_user 是盲引用，无法被目标设备的未投递查询命中，
+        // 因此同步副本改记为“本账号 + 当前同步设备”；同步副本本身不标记 sealed。
+        boolean ownSyncSource = Boolean.TRUE.equals(original.getSealed()) && sentByUser;
+        String syncFrom = ownSyncSource ? username : original.getFromUsername();
+        String syncFromDevice = ownSyncSource ? fromDevice : original.getFromDeviceId();
+        CipherMessage existing = messageMapper.selectByClientMsgId(syncFrom,
             original.getClientMsgId(), target);
         if (existing != null) {
             return existing;
         }
-        String other = username.equals(original.getFromUsername())
-            ? original.getToUsername() : original.getFromUsername();
+        String other = sentByUser ? original.getToUsername()
+            : (StringUtils.hasText(replica.getSyncOriginalFrom())
+                ? replica.getSyncOriginalFrom() : original.getFromUsername());
         if (original.getId() != null && original.getId() <= clearCursor(username, other)) {
             CipherMessage skipped = new CipherMessage();
             skipped.setClientMsgId(original.getClientMsgId());
@@ -586,8 +782,9 @@ public class MessageServiceImpl implements MessageService {
 
         CipherMessage record = new CipherMessage();
         record.setClientMsgId(original.getClientMsgId());
-        record.setFromUsername(original.getFromUsername());
-        record.setFromDeviceId(original.getFromDeviceId());
+        record.setFromUsername(syncFrom);
+        record.setFromDeviceId(syncFromDevice);
+        record.setSealed(false);
         record.setToUsername(original.getToUsername());
         record.setTargetDeviceId(target);
         record.setSyncFromDevice(fromDevice);
@@ -641,7 +838,7 @@ public class MessageServiceImpl implements MessageService {
         try {
             messageMapper.insert(record);
         } catch (DuplicateKeyException e) {
-            CipherMessage duplicate = messageMapper.selectByClientMsgId(original.getFromUsername(),
+            CipherMessage duplicate = messageMapper.selectByClientMsgId(syncFrom,
                 original.getClientMsgId(), target);
             if (duplicate != null) {
                 return duplicate;
@@ -698,7 +895,15 @@ public class MessageServiceImpl implements MessageService {
     /**
      * 找到该 clientMsgId 的任意一份副本（不限设备）。
      */
-    private CipherMessage findAnyCopy(String fromUser, String clientMsgId) {
+    private CipherMessage findAnyCopy(String fromUser, String fromRef, String clientMsgId) {
+        // 先查 sealed 原始副本：同一 clientMsgId 还可能有以账号名为 from_user 的
+        // 本机同步副本，若先命中它会把撤回误判成旧消息，漏掉对端的所有密文。
+        if (fromRef != null) {
+            CipherMessage sealed = messageMapper.selectAnyByClientMsgId(fromRef, clientMsgId);
+            if (sealed != null) {
+                return sealed;
+            }
+        }
         return messageMapper.selectAnyByClientMsgId(fromUser, clientMsgId);
     }
 

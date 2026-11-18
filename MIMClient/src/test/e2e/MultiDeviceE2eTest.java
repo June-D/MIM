@@ -114,6 +114,7 @@ public final class MultiDeviceE2eTest {
         String plaintext = "发给两台设备的同一条消息";
 
         List<SessionState> aliceSessions = new ArrayList<>();
+        Map<String, SessionState> bobSessions = new LinkedHashMap<>();
         List<String> replicas = new ArrayList<>();
         for (PreKeyBundleView bundle : bundles) {
             RatchetService.InitiatorResult init = ratchet.initiatorSession(bobName,
@@ -173,6 +174,7 @@ public final class MultiDeviceE2eTest {
             String plain = ratchet.decrypt(state,
                 new RatchetService.Header(received.ratchetPublic, received.previousChainLength,
                     received.messageNumber), received.iv, received.ciphertext);
+            bobSessions.put(bundle.deviceId, state);
             if (plaintext.equals(plain)) {
                 decrypted++;
             }
@@ -191,6 +193,76 @@ public final class MultiDeviceE2eTest {
         String history = httpGet(BASE + "/message/history/" + bobName, aliceToken, aliceDevice);
         check("撤回后历史里显示 recalled 标记", history.contains("\"recalled\":true"));
         check("撤回后密文被清除", !history.contains("\"ciphertext\":\"" + replicas.get(0).split("\"ciphertext\":\"")[1].split("\"")[0] + "\""));
+
+        // ---- sealed sender Phase 1：回复后双方都不再落明文发送者 ----
+        int desktopIndex = 0;
+        for (int i = 0; i < bundles.size(); i++) {
+            if (bobDesktop.equals(bundles.get(i).deviceId)) {
+                desktopIndex = i;
+                break;
+            }
+        }
+        String sessionId = java.util.UUID.randomUUID().toString();
+        SessionState aliceState = aliceSessions.get(desktopIndex);
+        SessionState bobState = bobSessions.get(bobDesktop);
+
+        RatchetService.Encrypted bobReply = ratchet.encrypt(bobState, "sealed reply");
+        String replyId = java.util.UUID.randomUUID().toString();
+        String replyBody = sealedReplica(replyId, aliceName, aliceDevice, bobReply, sessionId,
+            System.currentTimeMillis());
+        String replyResp = httpPost(BASE + "/message", bobToken, bobDesktop,
+            "[" + replyBody + "]");
+        check("bob 的回复以 sealed 提交成功", replyResp.contains("\"status\":200")
+            && replyResp.contains("\"sealed\":true"));
+        check("sealed 回复不落 bob 明文用户名",
+            !replyResp.contains("\"fromUsername\":\"" + bobName + "\""));
+        check("sealed 回复带 sessionId", replyResp.contains("\"sessionId\":\"" + sessionId + "\""));
+        String replyPlain = ratchet.decrypt(aliceState,
+            new RatchetService.Header(bobReply.getHeader().getDhPublic(),
+                bobReply.getHeader().getPreviousChainLength(),
+                bobReply.getHeader().getMessageNumber()),
+            bobReply.getIv(), bobReply.getCiphertext());
+        check("alice 能解密 bob 的 sealed 回复", "sealed reply".equals(replyPlain));
+
+        RatchetService.Encrypted aliceSealed = ratchet.encrypt(aliceState, "sealed follow-up");
+        String sealedId = java.util.UUID.randomUUID().toString();
+        String sealedBody = sealedReplica(sealedId, bobName, bobDesktop, aliceSealed, sessionId,
+            System.currentTimeMillis());
+        String sealedResp = httpPost(BASE + "/message", aliceToken, aliceDevice,
+            "[" + sealedBody + "]");
+        check("alice 的后续消息以 sealed 提交成功", sealedResp.contains("\"status\":200")
+            && sealedResp.contains("\"sealed\":true"));
+        check("sealed 后续消息不落 alice 明文用户名",
+            !sealedResp.contains("\"fromUsername\":\"" + aliceName + "\""));
+        String sealedPlain = ratchet.decrypt(bobState,
+            new RatchetService.Header(aliceSealed.getHeader().getDhPublic(),
+                aliceSealed.getHeader().getPreviousChainLength(),
+                aliceSealed.getHeader().getMessageNumber()),
+            aliceSealed.getIv(), aliceSealed.getCiphertext());
+        check("bob 能解密 alice 的 sealed 后续消息", "sealed follow-up".equals(sealedPlain));
+
+        String aliceSealedHistory = httpGet(BASE + "/message/history/" + bobName,
+            aliceToken, aliceDevice);
+        check("alice 历史包含 sealed 往返消息",
+            aliceSealedHistory.contains("\"sealed\":true")
+                && aliceSealedHistory.contains("\"fromMe\":true")
+                && aliceSealedHistory.contains("\"fromMe\":false"));
+        // 首条桥接消息仍是旧格式，会保留 alice 的明文 from_user；
+        // 只要 sealed 回复不暴露 bob 的明文用户名即可。
+        check("sealed 回复在 alice 历史里不暴露 bob 明文用户名",
+            !aliceSealedHistory.contains("\"fromUsername\":\"" + bobName + "\""));
+        String bobSealedHistory = httpGet(BASE + "/message/history/" + aliceName,
+            bobToken, bobDesktop);
+        check("bob 历史按 sessionId 找回 sealed 消息",
+            bobSealedHistory.contains("\"sealed\":true")
+                && bobSealedHistory.contains("\"fromMe\":false"));
+
+        String sealedRecall = httpPost(BASE + "/message/recall/" + sealedId,
+            aliceToken, aliceDevice, null);
+        check("sealed 后续消息可撤回", sealedRecall.contains("\"status\":200"));
+        String afterSealedRecall = httpGet(BASE + "/message/history/" + aliceName,
+            bobToken, bobDesktop);
+        check("sealed 撤回后历史显示 recalled", afterSealedRecall.contains("\"recalled\":true"));
 
         // ---- 注销一台设备后不再分发 ----
         httpDelete(BASE + "/device/" + bobMobile, bobToken, bobMobile);
@@ -226,6 +298,25 @@ public final class MultiDeviceE2eTest {
         preKeys.addOneTimePreKeys(oneTime);
         uploadOneTimePreKeys(token, deviceId, oneTime);
         return new DeviceContext(deviceId, identity, preKeys, token);
+    }
+
+    /**
+     * sealed 副本：不带 fromUsername/fromDeviceId，只带 sessionId。
+     */
+    private static String sealedReplica(String clientMsgId, String toUsername,
+        String targetDeviceId, RatchetService.Encrypted encrypted, String sessionId,
+        long clientTime) {
+        return "{\"clientMsgId\":\"" + clientMsgId + "\","
+            + "\"toUsername\":\"" + toUsername + "\","
+            + "\"targetDeviceId\":\"" + targetDeviceId + "\","
+            + "\"alg\":\"" + RatchetService.ALGORITHM + "\","
+            + "\"iv\":\"" + encrypted.getIv() + "\","
+            + "\"ciphertext\":\"" + encrypted.getCiphertext() + "\","
+            + "\"ratchetPublic\":\"" + encrypted.getHeader().getDhPublic() + "\","
+            + "\"previousChainLength\":" + encrypted.getHeader().getPreviousChainLength() + ","
+            + "\"messageNumber\":" + encrypted.getHeader().getMessageNumber() + ","
+            + "\"clientTime\":" + clientTime + ","
+            + "\"sealed\":true,\"sessionId\":\"" + sessionId + "\"}";
     }
 
     // ==================== HTTP 辅助 ====================

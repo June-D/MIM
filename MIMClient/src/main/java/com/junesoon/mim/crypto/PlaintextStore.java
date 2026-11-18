@@ -26,6 +26,7 @@ public final class PlaintextStore {
     private static final String FIELD_NONCE = "nonce=";
     private static final String FIELD_DATA = "data=";
     private static final String FIELD_ITERATIONS = "iterations=";
+    private static final String SENT_PREFIX = "sent|";
 
     private final Path directory;
     private final Map<String, String> texts = new LinkedHashMap<>();
@@ -96,6 +97,24 @@ public final class PlaintextStore {
             return null;
         }
         return texts.get(clientMsgId);
+    }
+
+    /**
+     * 本机发出的明文。sealed 消息在服务端没有明文 from_user，重新打开聊天时
+     * 不能靠棘轮解自己的密文，只能用这份按 clientMsgId 索引的本地副本。
+     */
+    public String getSent(String peer, String clientMsgId) {
+        if (peer == null || clientMsgId == null) {
+            return null;
+        }
+        return texts.get(SENT_PREFIX + peer + "|" + clientMsgId);
+    }
+
+    public void putSent(String peer, String clientMsgId, String plaintext) {
+        if (peer == null) {
+            return;
+        }
+        put(SENT_PREFIX + peer + "|" + clientMsgId, plaintext);
     }
 
     public void put(String clientMsgId, String plaintext) {

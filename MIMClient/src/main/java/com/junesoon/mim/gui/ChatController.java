@@ -451,9 +451,7 @@ public class ChatController {
         if (decrypted == null) {
             return;
         }
-        String self = ApplicatonStore.getUsername();
-        String peer = self != null && self.equals(raw.getFromUsername())
-            ? raw.getToUsername() : raw.getFromUsername();
+        String peer = messageService.peerForMessage(raw);
         if (chatUser.getUsername() == null || !chatUser.getUsername().equals(peer)) {
             return;
         }

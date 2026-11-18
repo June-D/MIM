@@ -333,6 +333,10 @@ public class SessionStore {
         sb.append("prevSendCount=").append(state.getPrevSendCount()).append('\n');
         // 会话角色决定收到对方握手参数时是否要重建接收链，必须持久化
         sb.append("initiator=").append(state.isInitiator()).append('\n');
+        if (state.getSessionId() != null) {
+            sb.append("sessionId=").append(state.getSessionId()).append('\n');
+        }
+        sb.append("sessionIdConfirmed=").append(state.isSessionIdConfirmed()).append('\n');
         // 发起方的握手要整组留下，重启后发出的消息还得带上。
         // 应答方没有身份公钥，只有对方的临时公钥，用来认出同一条链。
         // 以前只在 hasPendingHandshake 为真时才写，应答方的公钥因此丢了，
@@ -401,6 +405,12 @@ public class SessionStore {
                     break;
                 case "initiator":
                     state.setInitiator(Boolean.parseBoolean(value));
+                    break;
+                case "sessionId":
+                    state.setSessionId(emptyToNull(value));
+                    break;
+                case "sessionIdConfirmed":
+                    state.setSessionIdConfirmed(Boolean.parseBoolean(value));
                     break;
                 case "hsIdKey":
                     state.setHandshakeSenderIdentityKey(emptyToNull(value));

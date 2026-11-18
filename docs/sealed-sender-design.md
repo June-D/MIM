@@ -1,7 +1,8 @@
 # Sealed Sender 与元数据最小化：设计草案
 
-> 状态：设计草案，尚未实现。先评审协议与威胁模型，再按阶段落地；
-> 当前 main 的行为不变，所有消息仍由服务端记录 `from_user` / `from_device_id`。
+> 状态：Phase 1 已落地，采用 **HMAC 盲引用** 的兼容实现（见第 9 节）。
+> 首次联系、提交时匿名、撤回 token 的严格形态仍属于后续阶段；
+> 不要把 Phase 1 宣传为完全 sealed sender。
 
 ## 1. 目标与非目标
 
@@ -80,6 +81,9 @@
 4. **Phase 3：cover traffic**（可选，需单独评估成本）。
 
 ## 6. Phase 1 详细设计
+
+> 本节保留最初的设计意图（`from_user` 置 NULL、recall token）。
+> 实际兼容实现使用盲引用与 JWT→盲引用比对撤回，差异见第 9 节。
 
 ### 数据模型
 
@@ -165,3 +169,52 @@
 它消除数据库/备份中的持久化发送者元数据，同时保留现有 E2EE、TOFU、多设备
 与撤回能力。真正的「提交时对服务端匿名」需要 Phase 2 的令牌/证书体系，
 不应在 Phase 1 中假装完成。
+
+## 9. Phase 1 实现状态（盲引用兼容方案）
+
+实际实现没有把 `from_user` / `from_device_id` 置为 NULL，而是：
+
+- 已建立会话的消息写入 `sealed=1`、`session_id`，并把 `from_user` /
+  `from_device_id` 写成 **HMAC-SHA256 盲引用**（64 位十六进制），不写用户名和设备号。
+- 历史、未读、撤回、会话清除和多端同步继续使用盲引用查询；服务端在提交时
+  仍从 JWT 知道提交者，因此这不是「提交时匿名」。
+- 旧消息和新客户端首次桥接消息仍然保留明文 `from_user` / `from_device_id`。
+- 盲引用密钥优先取 `MIM_SECURITY_METADATA_KEY`（Base64 32 字节），未配置时
+  退化为 JWT 私钥；JWT 私钥轮换会使旧 sealed 历史索引失效，当前没有轮换流程。
+- 功能开关 `mim.sealed-sender.enabled`（环境变量
+  `MIM_SEALED_SENDER_ENABLED`）默认开启；关闭后 sealed 请求降级为旧格式
+  存储（不隐藏发送者，但不会中断已切换的会话），旧客户端仍可走非 sealed 路径。
+
+### 会话建立与切换
+
+1. 发起方生成 `sessionId`，随首条 X3DH 消息以旧格式发送（此时服务端仍能看到
+   发送者）。
+2. 接收方解密后把 `sessionId` 写入应答链并持久化，回一条带同一
+   `sessionId` 的 sealed 消息。
+3. 发起方收到回包后确认 `sessionId` 已被对方知晓，下一条消息才 sealed。
+4. 升级前已存在的会话没有 `sessionId`：先发一条带 ID 的旧格式桥接消息，
+   确认后再切换；对端是旧客户端时会一直停留在桥接模式。
+
+### 客户端
+
+- `SessionState` 新增 `sessionId` / `sessionIdConfirmed`，随会话文件加密保存；
+- `PeerCipher` 记录最近成功解密的链，收件端按 `sessionId` 索引棘轮；
+- 发送端本地明文缓存按 `peer + clientMsgId` 保存，服务端历史用
+  `fromMe` 标记区分收发；发送端历史不依赖服务端明文 `from_user`；
+- `MessageService.decrypt` 对 sealed 消息优先使用本地发送缓存，收件消息才推进棘轮。
+
+### 与原草案的差异
+
+- 原草案要求 sealed 消息的 `from_user` 为 NULL，并使用一次性 `recallToken`；
+  当前兼容实现使用盲引用和 JWT 用户名 → 盲引用比对完成撤回授权。这样历史、
+  未读、同步和撤回不需要重写查询层，但会留下**可被持有服务端密钥者关联的
+  伪随机发送者索引**。
+- 如果要求严格「数据库列无任何发送者索引」，下一步需要增加
+  `from_ref`/`from_device_ref` 列 + 会话 ID 历史查询，并重做撤回 token；
+  这是尚未完成的独立改造。
+
+### 验证
+
+- 服务端 186 项（含真实 MySQL 集成）、客户端 107 项；
+- e2e：多设备 26 项（含 sealed 往返、历史、撤回）+ WebSocket 13 项；
+- 新客户端对旧客户端保持桥接模式；旧客户端对 sealed 服务端仍走明文路径。

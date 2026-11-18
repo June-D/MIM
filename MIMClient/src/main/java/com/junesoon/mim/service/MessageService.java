@@ -69,6 +69,21 @@ public class MessageService {
     private final ConcurrentHashMap<String, PeerCipher> sessions = new ConcurrentHashMap<>();
 
     /**
+     * sessionId -> 会话槽。sealed 消息不再带明文发信人/设备，收件端只能靠它找回链。
+     */
+    private final ConcurrentHashMap<String, SessionRef> sessionRefs = new ConcurrentHashMap<>();
+
+    private static final class SessionRef {
+        private final String peer;
+        private final String deviceId;
+
+        private SessionRef(String peer, String deviceId) {
+            this.peer = peer;
+            this.deviceId = deviceId;
+        }
+    }
+
+    /**
      * 发送和历史解密会碰同一条棘轮，必须串行，否则历史解到一半被发送推进，后面的消息就对不上。
      */
     private final Object cryptoLock = new Object();
@@ -151,8 +166,9 @@ public class MessageService {
         }
 
         public boolean isMine() {
-            return raw.getFromUsername() != null
-                && raw.getFromUsername().equals(ApplicatonStore.getUsername());
+            return Boolean.TRUE.equals(raw.getFromMe())
+                || (raw.getFromUsername() != null
+                    && raw.getFromUsername().equals(ApplicatonStore.getUsername()));
         }
 
         public long getTimestamp() {
@@ -182,6 +198,7 @@ public class MessageService {
     public void loadSessions(String selfUsername, String password) {
         synchronized (cryptoLock) {
             sessions.clear();
+            sessionRefs.clear();
             plaintextStore.load(selfUsername, password);
             java.util.List<String> entries = sessionStore.listPeers(selfUsername);
             log.info("准备加载 {} 个会话文件：{}", entries.size(), entries);
@@ -210,10 +227,12 @@ public class MessageService {
                     } else {
                         slot.setInbound(state);
                     }
+                    indexSession(state.getPeer(), state.getDeviceId(), state);
                     SessionState inbound = sessionStore.loadInbound(selfUsername, peer, device, password);
                     if (inbound != null) {
                         inbound.setDeviceId(device);
                         slot.setInbound(inbound);
+                        indexSession(peer, device, inbound);
                     }
                     log.info("已加载会话 {}（设备 {}）", peer, device);
                 } catch (IdentityException e) {
@@ -238,8 +257,48 @@ public class MessageService {
     public void reset() {
         synchronized (cryptoLock) {
             sessions.clear();
+            sessionRefs.clear();
             plaintextStore.clear();
         }
+    }
+
+    private void indexSession(String peer, String deviceId, SessionState state) {
+        if (state == null || state.getSessionId() == null || state.getSessionId().isEmpty()) {
+            return;
+        }
+        sessionRefs.put(state.getSessionId(), new SessionRef(peer, normalizeDevice(deviceId)));
+    }
+
+    private SessionRef sessionRef(String sessionId) {
+        return sessionId == null ? null : sessionRefs.get(sessionId);
+    }
+
+    /**
+     * 这条消息属于哪个会话（对端用户名）。
+     *
+     * <p>sealed 消息的 fromUsername 是服务端盲引用，不能直接当联系人名用；
+     * 同步副本则使用签名覆盖后的原始归属。无法判断时返回 null，调用方应忽略，
+     * 绝不能把盲引用当用户名创建会话。
+     */
+    public String peerForMessage(CipherMessage message) {
+        if (message == null) {
+            return null;
+        }
+        if (message.getSyncOriginalFrom() != null && !message.getSyncOriginalFrom().isEmpty()) {
+            String self = ApplicatonStore.getUsername();
+            return self != null && self.equals(message.getSyncOriginalFrom())
+                ? message.getSyncOriginalTo() : message.getSyncOriginalFrom();
+        }
+        if (Boolean.TRUE.equals(message.getSealed())) {
+            SessionRef ref = sessionRef(message.getSessionId());
+            return ref == null ? null : ref.peer;
+        }
+        if (message.getFromUsername() == null) {
+            return null;
+        }
+        String self = ApplicatonStore.getUsername();
+        return self != null && self.equals(message.getFromUsername())
+            ? message.getToUsername() : message.getFromUsername();
     }
 
     /**
@@ -303,6 +362,8 @@ public class MessageService {
         state.setHandshakeUsedOneTimePreKey(result.isUsedOneTimePreKey());
         state.setHandshakeOneTimePreKeyId(bundle.getOneTimePreKeyId());
         state.setHandshakeRecipientSignedPreKeyId(bundle.getSignedPreKeyId());
+        state.setSessionId(java.util.UUID.randomUUID().toString());
+        state.setSessionIdConfirmed(false);
         // 诊断：确认握手参数确实写入了状态（为空则对端永远建不出会话）
         log.info("createSession 完成：peer={} device={} hasHandshake={} idKeyLen={} ephKeyLen={}",
             bundle.getUsername(), bundle.getDeviceId(), state.hasPendingHandshake(),
@@ -323,6 +384,8 @@ public class MessageService {
         String password = currentPassword();
         SessionState outbound = slot.getOutbound();
         SessionState inbound = slot.getInbound();
+        indexSession(peer, deviceId, outbound);
+        indexSession(peer, deviceId, inbound);
         if (outbound != null) {
             sessionStore.save(self, peer, deviceId, outbound, password);
             if (inbound != null) {
@@ -414,6 +477,13 @@ public class MessageService {
                     state = createSession(bundle);
                     slot.setOutbound(state);
                 }
+                if (state.getSessionId() == null) {
+                    // 升级前已存在的会话没有会话 ID：先发一条带 ID 的旧格式桥接消息，
+                    // 等对方回一条同 ID 的消息后，下一条才开始 sealed。
+                    state.setSessionId(java.util.UUID.randomUUID().toString());
+                    state.setSessionIdConfirmed(false);
+                }
+                boolean sealed = state.isSessionIdConfirmed();
 
                 boolean padding = Boolean.TRUE.equals(device.getSupportsPadding());
                 String payload = padding ? MessagePadding.pad(plaintext) : plaintext;
@@ -425,9 +495,12 @@ public class MessageService {
 
                 CipherMessage replica = new CipherMessage();
                 replica.setClientMsgId(clientMsgId);
-                replica.setFromUsername(self);
+                replica.setFromUsername(sealed ? null : self);
+                replica.setFromDeviceId(sealed ? null : keyManager.deviceId());
                 replica.setToUsername(peer);
                 replica.setTargetDeviceId(deviceId);
+                replica.setSealed(sealed);
+                replica.setSessionId(state.getSessionId());
                 replica.setAlg(RatchetService.ALGORITHM);
                 replica.setIv(encrypted.getIv());
                 replica.setCiphertext(encrypted.getCiphertext());
@@ -473,8 +546,10 @@ public class MessageService {
         if (first.getClientMsgId() == null) {
             first.setClientMsgId(clientMsgId);
         }
+        first.setFromMe(true);
         synchronized (cryptoLock) {
             plaintextStore.put(cacheKey(self, keyManager.deviceId(), clientMsgId), plaintext);
+            plaintextStore.putSent(peer, clientMsgId, plaintext);
         }
         return new DecryptedMessage(first, plaintext, false);
     }
@@ -589,7 +664,10 @@ public class MessageService {
         String self = identity.getUsername();
         final boolean deviceSync = message.getSyncFromDevice() != null
             && !message.getSyncFromDevice().isEmpty();
-        boolean isSelf = self.equals(message.getFromUsername());
+        final boolean sealed = Boolean.TRUE.equals(message.getSealed());
+        boolean isSelf = sealed
+            ? Boolean.TRUE.equals(message.getFromMe())
+            : self.equals(message.getFromUsername());
 
         // 设备间同步先确认发送设备的身份，再用转发设备的签名覆盖服务端给的归属字段。
         // 这一步可能弹窗，放在 cryptoLock 外，避免用户思考期间阻塞其它会话解密。
@@ -605,11 +683,42 @@ public class MessageService {
         // 缓存键必须包含「谁发的、哪台设备发的」。只按 clientMsgId 会让不同发送者
         // 复用同一个 ID 时命中别人的明文，等于绕过解密直接伪造消息内容。
         final String cacheKey;
+        final String peer;
+        final String peerDevice;
         if (deviceSync) {
             cacheKey = syncCacheKey(message);
+            peer = syncSlot(message.getSyncFromDevice());
+            peerDevice = message.getSyncFromDevice();
+        } else if (sealed) {
+            SessionRef ref = sessionRef(message.getSessionId());
+            isSelf = Boolean.TRUE.equals(message.getFromMe());
+            if (isSelf) {
+                // 服务端历史把「我发出的」标成 fromMe。发送设备用本地明文；
+                // 同账号的其它设备没有这条会话，显示占位而不是尝试推进棘轮。
+                if (ref != null) {
+                    String sent = plaintextStore.getSent(ref.peer, message.getClientMsgId());
+                    if (sent != null) {
+                        peer = ref.peer;
+                        peerDevice = ref.deviceId;
+                        message.setFromMe(true);
+                        return new DecryptedMessage(message, sent, false);
+                    }
+                }
+                return new DecryptedMessage(message, "（本机未保留原文）", true);
+            }
+            if (ref == null) {
+                log.warn("sealed 消息 {} 找不到会话 {}", message.getClientMsgId(),
+                    message.getSessionId());
+                return new DecryptedMessage(message, "[此消息无法解密]", true);
+            }
+            peer = ref.peer;
+            peerDevice = ref.deviceId;
+            cacheKey = cacheKey(peer, peerDevice, message.getClientMsgId());
         } else {
             cacheKey = cacheKey(message.getFromUsername(),
                 normalizeDevice(message.getFromDeviceId()), message.getClientMsgId());
+            peer = message.getFromUsername();
+            peerDevice = normalizeDevice(message.getFromDeviceId());
         }
         String cached = readCache(message, cacheKey, deviceSync, isSelf);
         if (cached != null) {
@@ -619,16 +728,6 @@ public class MessageService {
             // 自己发出的密文是用对方的接收链加密的，本机棘轮解不开。
             // 原文只存在于发送当时写入的本地记录里。另一台设备转来的副本不走这里。
             return new DecryptedMessage(message, "（本机未保留原文）", true);
-        }
-
-        final String peer;
-        final String peerDevice;
-        if (deviceSync) {
-            peer = syncSlot(message.getSyncFromDevice());
-            peerDevice = message.getSyncFromDevice();
-        } else {
-            peer = message.getFromUsername();
-            peerDevice = normalizeDevice(message.getFromDeviceId());
         }
         boolean hasHandshake = message.getSenderIdentityKey() != null
             && !message.getSenderIdentityKey().isEmpty()
@@ -665,6 +764,22 @@ public class MessageService {
                     });
                 if (Boolean.TRUE.equals(message.getPadding())) {
                     plaintext = MessagePadding.strip(plaintext);
+                }
+                if (message.getSessionId() != null && !message.getSessionId().isEmpty()) {
+                    SessionState opened = slot.getLastOpened();
+                    if (opened != null) {
+                        if (opened.getSessionId() == null) {
+                            opened.setSessionId(message.getSessionId());
+                        }
+                        if (message.getSessionId().equals(opened.getSessionId())) {
+                            opened.setSessionIdConfirmed(true);
+                        } else {
+                            log.warn("会话 {} 的 sessionId 与消息不一致：state={} msg={}",
+                                message.getClientMsgId(), opened.getSessionId(),
+                                message.getSessionId());
+                        }
+                        indexSession(peer, peerDevice, opened);
+                    }
                 }
                 if (deviceSync) {
                     // 用转发设备的身份公钥验证「原消息归属 + 内容」的签名，
@@ -858,6 +973,10 @@ public class MessageService {
             usedOneTime);
         state.setInitiator(false);
         state.setDeviceId(peerDevice);
+        if (message.getSessionId() != null && !message.getSessionId().isEmpty()) {
+            state.setSessionId(message.getSessionId());
+            state.setSessionIdConfirmed(true);
+        }
         return state;
     }
 

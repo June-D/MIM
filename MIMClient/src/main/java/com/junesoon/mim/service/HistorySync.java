@@ -229,7 +229,7 @@ public final class HistorySync {
                     if (clientMsgId == null || done.contains(clientMsgId)) {
                         continue;
                     }
-                    CipherMessage replica = toReplica(targetDeviceId, message, bundle);
+                    CipherMessage replica = toReplica(targetDeviceId, peer, message, bundle);
                     if (replica == null) {
                         continue;
                     }
@@ -246,8 +246,8 @@ public final class HistorySync {
         }
     }
 
-    private static CipherMessage toReplica(String targetDeviceId, DecryptedMessage message,
-        PreKeyBundle bundle) {
+    private static CipherMessage toReplica(String targetDeviceId, String conversationPeer,
+        DecryptedMessage message, PreKeyBundle bundle) {
         if (message.isRecalled()) {
             CipherMessage tombstone = new CipherMessage();
             tombstone.setClientMsgId(message.getClientMsgId());
@@ -273,10 +273,23 @@ public final class HistorySync {
             if (identity == null || raw == null) {
                 return null;
             }
-            String originalFrom = raw.getFromUsername();
-            String originalTo = raw.getToUsername();
-            String originalDevice = raw.getFromDeviceId() == null
-                ? SessionStore.DEFAULT_DEVICE_ID : raw.getFromDeviceId();
+            String originalFrom;
+            String originalTo;
+            String originalDevice;
+            if (Boolean.TRUE.equals(raw.getSealed())) {
+                // sealed 消息的 from/to 中有一侧是 HMAC 盲引用，不能用它签名；
+                // 用当前会话对端 + 本机账号还原原始归属。发送设备已被隐藏，
+                // 只能使用默认设备标识。
+                String self = ApplicatonStore.getUsername();
+                originalFrom = message.isMine() ? self : conversationPeer;
+                originalTo = message.isMine() ? conversationPeer : self;
+                originalDevice = SessionStore.DEFAULT_DEVICE_ID;
+            } else {
+                originalFrom = raw.getFromUsername();
+                originalTo = raw.getToUsername();
+                originalDevice = raw.getFromDeviceId() == null
+                    ? SessionStore.DEFAULT_DEVICE_ID : raw.getFromDeviceId();
+            }
             long clientTime = message.getTimestamp();
             replica.setSyncOriginalFrom(originalFrom);
             replica.setSyncOriginalTo(originalTo);

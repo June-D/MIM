@@ -26,6 +26,11 @@ public final class PeerCipher {
     private SessionState outbound;
     private SessionState inbound;
 
+    /**
+     * 最近一次成功解密的链。调用方据此把消息里的 sessionId 写回正确的状态。
+     */
+    private SessionState lastOpened;
+
     public PeerCipher(RatchetService ratchet) {
         this.ratchet = ratchet;
     }
@@ -44,6 +49,10 @@ public final class PeerCipher {
 
     public void setInbound(SessionState inbound) {
         this.inbound = inbound;
+    }
+
+    public SessionState getLastOpened() {
+        return lastOpened;
     }
 
     /**
@@ -71,7 +80,9 @@ public final class PeerCipher {
         if (hasHandshake) {
             if (inbound != null && senderEphemeralKey != null
                 && senderEphemeralKey.equals(inbound.getHandshakeSenderEphemeralKey())) {
-                return ratchet.decrypt(inbound, header, iv, ciphertext);
+                String plaintext = ratchet.decrypt(inbound, header, iv, ciphertext);
+                lastOpened = inbound;
+                return plaintext;
             }
             // 应答方只用临时公钥认出「还是当初那条链」。旧文件没把这个公钥存下来，
             // 重启后它是空的。对方后续消息仍带着握手头，若直接重新 X3DH，
@@ -84,6 +95,7 @@ public final class PeerCipher {
                         && senderEphemeralKey != null) {
                         inbound.setHandshakeSenderEphemeralKey(senderEphemeralKey);
                     }
+                    lastOpened = inbound;
                     return plaintext;
                 } catch (IdentityException ignored) {
                     // 不是这条链上的消息
@@ -99,20 +111,25 @@ public final class PeerCipher {
             fresh.setHandshakeSenderEphemeralKey(senderEphemeralKey);
             String plaintext = ratchet.decrypt(fresh, header, iv, ciphertext);
             inbound = fresh;
+            lastOpened = fresh;
             return plaintext;
         }
 
         IdentityException last = null;
         if (inbound != null) {
             try {
-                return ratchet.decrypt(inbound, header, iv, ciphertext);
+                String plaintext = ratchet.decrypt(inbound, header, iv, ciphertext);
+                lastOpened = inbound;
+                return plaintext;
             } catch (IdentityException e) {
                 last = e;
             }
         }
         if (outbound != null) {
             try {
-                return ratchet.decrypt(outbound, header, iv, ciphertext);
+                String plaintext = ratchet.decrypt(outbound, header, iv, ciphertext);
+                lastOpened = outbound;
+                return plaintext;
             } catch (IdentityException e) {
                 last = e;
             }

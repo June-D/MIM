@@ -69,6 +69,18 @@ public class SessionState {
 
     private String dhRemotePublic;
 
+    /**
+     * 双方共享的会话 ID。发起方生成，随首条消息传给应答方；后续 sealed 消息
+     * 用它索引棘轮，不需要服务端返回发送者。
+     */
+    private String sessionId;
+
+    /**
+     * 是否已经收到过对方携带同一 sessionId 的消息。只有确认对方也知道这个 ID 后，
+     * 才把后续消息切成 sealed，避免对端旧客户端/丢首条消息时无法解密。
+     */
+    private boolean sessionIdConfirmed;
+
     private int sendCount;
 
     private int recvCount;
@@ -161,6 +173,8 @@ public class SessionState {
         handshakeOneTimePreKeyId = trial.handshakeOneTimePreKeyId;
         handshakeRecipientSignedPreKeyId = trial.handshakeRecipientSignedPreKeyId;
         initiator = trial.initiator;
+        sessionId = trial.sessionId;
+        sessionIdConfirmed = trial.sessionIdConfirmed;
         skippedKeys.clear();
         if (trial.skippedKeys != null) {
             skippedKeys.putAll(trial.skippedKeys);
@@ -191,6 +205,8 @@ public class SessionState {
         copy.handshakeOneTimePreKeyId = handshakeOneTimePreKeyId;
         copy.handshakeRecipientSignedPreKeyId = handshakeRecipientSignedPreKeyId;
         copy.initiator = initiator;
+        copy.sessionId = sessionId;
+        copy.sessionIdConfirmed = sessionIdConfirmed;
         return copy;
     }
 }

@@ -27,6 +27,10 @@ mim:
   # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
   # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
   instance-id: ${HOSTNAME:local}
+  sealed-sender:
+    # Phase 1：已建立会话的 sealed 消息使用 HMAC 盲引用，不落明文发送者。
+    # 关闭后服务端拒绝 sealed 消息，旧客户端仍走非 sealed 路径。
+    enabled: ${MIM_SEALED_SENDER_ENABLED:true}
   redis:
     # 设为 true 时，非本机 Redis 必须同时配置密码与 TLS，否则拒绝启动。
     require-secure: ${MIM_REDIS_REQUIRE_SECURE:false}

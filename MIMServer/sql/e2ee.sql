@@ -100,8 +100,8 @@ CREATE TABLE IF NOT EXISTS `t_one_time_prekey` (
 CREATE TABLE IF NOT EXISTS `t_message` (
     `id`                    bigint       NOT NULL AUTO_INCREMENT COMMENT '自增主键',
     `client_msg_id`         varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '客户端生成的唯一消息 ID（同一逻辑消息的多个设备副本共用）',
-    `from_user`             varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '发信人',
-    `from_device_id`        varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'default' COMMENT '发信设备',
+    `from_user`             varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '发信人；sealed 会话中为 HMAC 盲引用，不是用户名',
+    `from_device_id`        varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'default' COMMENT '发信设备；sealed 会话中为 HMAC 盲引用，不是设备号',
     `to_user`               varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '收信人',
     `target_device_id`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'default' COMMENT '这条密文的目标设备',
     `alg`                   varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '加密算法标识',
@@ -116,6 +116,8 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     `consumed_opk_id`       int          NULL DEFAULT NULL COMMENT 'X3DH 握手：被消耗的一次性预密钥编号',
     `recipient_spk_id`      int          NULL DEFAULT NULL COMMENT 'X3DH 握手：使用接收方哪一把签名预密钥',
     `padding`               tinyint(1)   NOT NULL DEFAULT 0 COMMENT '明文是否做了长度填充',
+    `sealed`                tinyint(1)   NOT NULL DEFAULT 0 COMMENT '已建立会话后是否隐藏了明文发信人/设备（使用盲引用）',
+    `session_id`            varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT 'sealed 会话 ID，收件端据此索引棘轮状态',
     `sender_key_version`    int          NULL DEFAULT NULL COMMENT '发信人身份公钥版本（兼容旧算法）',
     `recipient_key_version` int          NULL DEFAULT NULL COMMENT '收信人身份公钥版本（兼容旧算法）',
     `client_time`           bigint       NOT NULL COMMENT '客户端时间戳（毫秒），参与 AAD',
@@ -214,3 +216,16 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 -- ALTER TABLE `t_message`
 --     ADD COLUMN `padding` tinyint(1) NOT NULL DEFAULT 0
 --         COMMENT '明文是否做了长度填充';
+
+-- ------------------------------------------------------------
+-- 从旧版本升级（取消注释后执行）：sealed sender Phase 1
+--
+-- 只对已建立会话的消息生效：服务端把 from_user/from_device_id 写成
+-- HMAC 盲引用（MIM_METADATA_KEY，未配置时由 JWT 私钥派生），不再保存
+-- 明文发送者/设备。旧消息保持原值，历史查询会同时兼容两种形式。
+-- ------------------------------------------------------------
+-- ALTER TABLE `t_message`
+--     ADD COLUMN `sealed` tinyint(1) NOT NULL DEFAULT 0
+--         COMMENT '已建立会话后是否隐藏了明文发信人/设备',
+--     ADD COLUMN `session_id` varchar(64) NULL
+--         COMMENT 'sealed 会话 ID，收件端据此索引棘轮状态';
