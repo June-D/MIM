@@ -1,6 +1,7 @@
 package com.junesoon.mim.service;
 
 import com.junesoon.mim.responses.PasswordChangeResult;
+import com.junesoon.mim.responses.TwoFactorEnableResult;
 import com.junesoon.mim.responses.TwoFactorSetupResponse;
 
 /**
@@ -15,8 +16,9 @@ public interface TwoFactorService {
 
     /**
      * 校验验证码后启用，并使该用户所有设备的旧 JWT 失效。
+     * 返回恢复码（只显示一次）。
      */
-    PasswordChangeResult enable(String username, String deviceId, String code) throws Exception;
+    TwoFactorEnableResult enable(String username, String deviceId, String code) throws Exception;
 
     /**
      * 校验当前口令与验证码后关闭二次验证。

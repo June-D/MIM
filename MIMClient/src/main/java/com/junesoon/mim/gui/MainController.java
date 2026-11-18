@@ -470,7 +470,7 @@ public class MainController {
         final String value = code.getText() == null ? "" : code.getText().trim();
         new Thread(() -> {
             try {
-                com.junesoon.mim.components.ObjectRestResponse<com.junesoon.mim.model.PasswordChangeResult>
+                com.junesoon.mim.components.ObjectRestResponse<com.junesoon.mim.model.TwoFactorEnableResult>
                     resp = com.junesoon.mim.components.Request
                         .connector(com.junesoon.mim.feign.LoginFeign.class)
                         .enableTwoFactor(new com.junesoon.mim.model.TwoFactorCodeRequest(value));
@@ -478,25 +478,47 @@ public class MainController {
                     throw new IllegalStateException(resp == null ? "服务端无响应" : resp.getMessage());
                 }
                 applyTwoFactorToken(resp.getData().getToken());
-                Platform.runLater(() -> AlertUtil.show("已启用",
-                    "二次验证已启用；其它设备需要重新登录。"));
+                Platform.runLater(() -> showRecoveryCodes(resp.getData().getRecoveryCodes()));
             } catch (Exception e) {
                 Platform.runLater(() -> AlertUtil.show("启用二次验证失败", e.getMessage()));
             }
         }, "2fa-enable").start();
     }
 
+    private void showRecoveryCodes(java.util.List<String> codes) {
+        if (codes == null || codes.isEmpty()) {
+            AlertUtil.show("已启用", "二次验证已启用；其它设备需要重新登录。");
+            return;
+        }
+        javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
+            new javafx.scene.control.Dialog<>();
+        dialog.setTitle("二次验证已启用");
+        dialog.setHeaderText("恢复码只显示一次，请离线保存");
+        javafx.scene.control.TextArea area =
+            new javafx.scene.control.TextArea(String.join("\n", codes));
+        area.setEditable(false);
+        area.setWrapText(false);
+        area.setPrefRowCount(12);
+        javafx.scene.control.Label warning = new javafx.scene.control.Label(
+            "每个恢复码只能使用一次。丢失验证器时，可用其中一个恢复码登录或关闭二次验证。");
+        warning.setWrapText(true);
+        javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(10, warning, area);
+        dialog.getDialogPane().setContent(box);
+        dialog.getDialogPane().getButtonTypes().add(javafx.scene.control.ButtonType.OK);
+        dialog.showAndWait();
+    }
+
     private void disableTwoFactorFlow() {
         javafx.scene.control.Dialog<javafx.scene.control.ButtonType> dialog =
             new javafx.scene.control.Dialog<>();
         dialog.setTitle("关闭二次验证");
-        dialog.setHeaderText("需要当前密码与身份验证器中的 6 位验证码");
+        dialog.setHeaderText("需要当前密码与 6 位验证码，或一个一次性恢复码");
 
         javafx.scene.control.PasswordField password =
             new javafx.scene.control.PasswordField();
         password.setPromptText("当前密码");
         javafx.scene.control.TextField code = new javafx.scene.control.TextField();
-        code.setPromptText("6 位验证码");
+        code.setPromptText("6 位验证码或恢复码");
         javafx.scene.layout.VBox box = new javafx.scene.layout.VBox(10, password, code);
         dialog.getDialogPane().setContent(box);
         dialog.getDialogPane().getButtonTypes().addAll(

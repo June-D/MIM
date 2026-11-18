@@ -10,6 +10,7 @@ import com.junesoon.mim.model.RecoverEmailRequest;
 import com.junesoon.mim.model.RecoverResetRequest;
 import com.junesoon.mim.model.TwoFactorCodeRequest;
 import com.junesoon.mim.model.TwoFactorDisableRequest;
+import com.junesoon.mim.model.TwoFactorEnableResult;
 import com.junesoon.mim.model.TwoFactorSetup;
 import feign.Headers;
 import feign.Param;
@@ -54,7 +55,7 @@ public interface LoginFeign extends FeignAPI {
     ObjectRestResponse<TwoFactorSetup> setupTwoFactor();
 
     @RequestLine("POST /user/2fa/enable")
-    ObjectRestResponse<PasswordChangeResult> enableTwoFactor(TwoFactorCodeRequest request);
+    ObjectRestResponse<TwoFactorEnableResult> enableTwoFactor(TwoFactorCodeRequest request);
 
     @RequestLine("POST /user/2fa/disable")
     ObjectRestResponse<PasswordChangeResult> disableTwoFactor(TwoFactorDisableRequest request);

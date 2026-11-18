@@ -12,6 +12,7 @@ import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.service.AuthService;
 import com.junesoon.mim.service.PushService;
+import com.junesoon.mim.service.RecoveryCodeService;
 import com.junesoon.mim.service.UserService;
 import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.JwtTokenUtil;
@@ -46,6 +47,9 @@ public class AuthServiceImpl implements AuthService {
     @Resource
     private PushService pushService;
 
+    @Resource
+    private RecoveryCodeService recoveryCodeService;
+
     @Override
     public String login(JwtAuthenticationRequest authenticationRequest, String deviceId)
         throws Exception {
@@ -56,14 +60,20 @@ public class AuthServiceImpl implements AuthService {
             if (user != null && Boolean.TRUE.equals(user.getTotpEnabled())) {
                 String code = authenticationRequest.getCode();
                 if (!StringUtils.hasText(code)) {
-                    throw new UserInvalidException("请输入二次验证码",
+                    throw new UserInvalidException("请输入二次验证码或恢复码",
                         CommonConstants.EX_2FA_REQUIRED_CODE);
                 }
-                String secret = emailCryptoService.decryptTotp(user.getUsername(),
-                    user.getTotpSecret());
-                if (!StringUtils.hasText(secret)
-                    || !totpVerifier.verifyAndConsume(user.getUsername(), secret, code)) {
-                    throw new UserInvalidException("二次验证码错误或已被使用");
+                String value = code.trim();
+                if (value.matches("\\d{6}")) {
+                    String secret = emailCryptoService.decryptTotp(user.getUsername(),
+                        user.getTotpSecret());
+                    if (!StringUtils.hasText(secret)
+                        || !totpVerifier.verifyAndConsume(user.getUsername(), secret, value)) {
+                        throw new UserInvalidException("二次验证码错误或已被使用");
+                    }
+                } else if (!recoveryCodeService.consume(user.getUsername(), value)) {
+                    // 丢失 TOTP 设备时，使用启用时保存的一次性恢复码登录
+                    throw new UserInvalidException("二次验证码或恢复码错误");
                 }
             }
             int tokenVersion = 0;

@@ -7,6 +7,7 @@ import com.junesoon.mim.requests.TwoFactorCodeRequest;
 import com.junesoon.mim.requests.TwoFactorDisableRequest;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.responses.PasswordChangeResult;
+import com.junesoon.mim.responses.TwoFactorEnableResult;
 import com.junesoon.mim.responses.TwoFactorSetupResponse;
 import com.junesoon.mim.service.TwoFactorService;
 import java.util.LinkedHashMap;
@@ -49,13 +50,13 @@ public class TwoFactorController {
 
     @PostMapping("/enable")
     @RateLimit(limit = 10, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
-    public ObjectRestResponse<PasswordChangeResult> enable(@CurrentUser String username,
+    public ObjectRestResponse<TwoFactorEnableResult> enable(@CurrentUser String username,
         @CurrentDevice String deviceId, @RequestBody TwoFactorCodeRequest request)
         throws Exception {
-        PasswordChangeResult result = twoFactorService.enable(username, deviceId,
+        TwoFactorEnableResult result = twoFactorService.enable(username, deviceId,
             request == null ? null : request.getCode());
         log.info("用户 {} 设备 {} 启用了二次验证", username, deviceId);
-        return new ObjectRestResponse<PasswordChangeResult>().data(result).rel(true);
+        return new ObjectRestResponse<TwoFactorEnableResult>().data(result).rel(true);
     }
 
     @PostMapping("/disable")

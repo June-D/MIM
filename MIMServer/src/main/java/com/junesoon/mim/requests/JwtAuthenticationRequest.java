@@ -17,7 +17,7 @@ public class JwtAuthenticationRequest implements Serializable {
     private String password;
 
     /**
-     * 启用 TOTP 二次验证后登录必须携带的 6 位验证码。
+     * 启用 TOTP 二次验证后登录必须携带：6 位动态验证码，或一次性恢复码。
      */
     private String code;
 

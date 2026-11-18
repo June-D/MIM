@@ -751,7 +751,7 @@ public class LoginController {
             new javafx.scene.control.TextInputDialog();
         dialog.setTitle("二次验证");
         dialog.setHeaderText("该账号已启用二次验证");
-        dialog.setContentText("请输入身份验证器中的 6 位验证码：");
+        dialog.setContentText("请输入 6 位动态验证码，或一个一次性恢复码：");
         java.util.Optional<String> code = dialog.showAndWait();
         if (!code.isPresent() || code.get().trim().isEmpty()) {
             lodingBar.requestFocus();

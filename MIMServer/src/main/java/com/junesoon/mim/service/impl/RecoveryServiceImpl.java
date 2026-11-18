@@ -5,6 +5,7 @@ import com.junesoon.mim.entity.User;
 import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.UserMapper;
+import com.junesoon.mim.service.RecoveryCodeService;
 import com.junesoon.mim.service.RecoveryService;
 import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.EmailSender;
@@ -57,19 +58,22 @@ public class RecoveryServiceImpl implements RecoveryService {
     private final StringRedisTemplate redisTemplate;
     private final EmailCryptoService emailCryptoService;
     private final EmailSender emailSender;
+    private final RecoveryCodeService recoveryCodeService;
     private final BCryptPasswordEncoder encoder =
         new BCryptPasswordEncoder(CommonConstants.PW_ENCORDER_SALT);
     private final SecureRandom random = new SecureRandom();
 
     public RecoveryServiceImpl(UserMapper userMapper, DeviceMapper deviceMapper,
         SessionRegistry sessionRegistry, StringRedisTemplate redisTemplate,
-        EmailCryptoService emailCryptoService, EmailSender emailSender) {
+        EmailCryptoService emailCryptoService, EmailSender emailSender,
+        RecoveryCodeService recoveryCodeService) {
         this.userMapper = userMapper;
         this.deviceMapper = deviceMapper;
         this.sessionRegistry = sessionRegistry;
         this.redisTemplate = redisTemplate;
         this.emailCryptoService = emailCryptoService;
         this.emailSender = emailSender;
+        this.recoveryCodeService = recoveryCodeService;
     }
 
     @Override
@@ -177,6 +181,7 @@ public class RecoveryServiceImpl implements RecoveryService {
         user.setTotpEnabled(false);
         user.setUpdTime(new Date());
         userMapper.updateByPrimaryKeySelective(user);
+        recoveryCodeService.deleteAll(username);
 
         deviceMapper.bumpAllTokenVersions(username);
         sessionRegistry.closeUser(username);

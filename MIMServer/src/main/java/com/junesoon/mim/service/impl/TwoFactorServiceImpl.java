@@ -8,7 +8,9 @@ import com.junesoon.mim.jwt.JWTInfo;
 import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.responses.PasswordChangeResult;
+import com.junesoon.mim.responses.TwoFactorEnableResult;
 import com.junesoon.mim.responses.TwoFactorSetupResponse;
+import com.junesoon.mim.service.RecoveryCodeService;
 import com.junesoon.mim.service.TwoFactorService;
 import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.JwtTokenUtil;
@@ -16,6 +18,7 @@ import com.junesoon.mim.utils.TotpUtil;
 import com.junesoon.mim.utils.TotpVerifier;
 import com.junesoon.mim.websocket.SessionRegistry;
 import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -38,19 +41,21 @@ public class TwoFactorServiceImpl implements TwoFactorService {
     private final SessionRegistry sessionRegistry;
     private final TotpVerifier totpVerifier;
     private final EmailCryptoService emailCryptoService;
+    private final RecoveryCodeService recoveryCodeService;
 
     private final BCryptPasswordEncoder encoder =
         new BCryptPasswordEncoder(CommonConstants.PW_ENCORDER_SALT);
 
     public TwoFactorServiceImpl(UserMapper userMapper, DeviceMapper deviceMapper,
         JwtTokenUtil jwtTokenUtil, SessionRegistry sessionRegistry, TotpVerifier totpVerifier,
-        EmailCryptoService emailCryptoService) {
+        EmailCryptoService emailCryptoService, RecoveryCodeService recoveryCodeService) {
         this.userMapper = userMapper;
         this.deviceMapper = deviceMapper;
         this.jwtTokenUtil = jwtTokenUtil;
         this.sessionRegistry = sessionRegistry;
         this.totpVerifier = totpVerifier;
         this.emailCryptoService = emailCryptoService;
+        this.recoveryCodeService = recoveryCodeService;
     }
 
     @Override
@@ -69,7 +74,7 @@ public class TwoFactorServiceImpl implements TwoFactorService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public PasswordChangeResult enable(String username, String deviceId, String code)
+    public TwoFactorEnableResult enable(String username, String deviceId, String code)
         throws Exception {
         User user = requireUser(username);
         if (Boolean.TRUE.equals(user.getTotpEnabled())) {
@@ -90,7 +95,9 @@ public class TwoFactorServiceImpl implements TwoFactorService {
         user.setTotpSecret(emailCryptoService.encryptTotp(username, secret));
         user.setUpdTime(new Date());
         userMapper.updateByPrimaryKeySelective(user);
-        return revokeAllAndIssue(user, deviceId);
+        List<String> recoveryCodes = recoveryCodeService.generate(username);
+        PasswordChangeResult result = revokeAllAndIssue(user, deviceId);
+        return new TwoFactorEnableResult(result.getToken(), recoveryCodes);
     }
 
     @Override
@@ -105,17 +112,23 @@ public class TwoFactorServiceImpl implements TwoFactorService {
             throw new UserInvalidException("当前密码不正确");
         }
         String secret = emailCryptoService.decryptTotp(username, user.getTotpSecret());
-        if (!StringUtils.hasText(secret)) {
-            throw new UserInvalidException("二次验证密钥不可用，请使用邮箱找回密码重置");
+        boolean verified;
+        if (StringUtils.hasText(code) && code.trim().matches("\\d{6}")) {
+            verified = StringUtils.hasText(secret)
+                && totpVerifier.verifyAndConsume(username, secret, code);
+        } else {
+            // 丢失 TOTP 设备时，允许用一次性恢复码关闭二次验证
+            verified = recoveryCodeService.consume(username, code);
         }
-        if (!totpVerifier.verifyAndConsume(username, secret, code)) {
-            throw new UserInvalidException("二次验证码错误或已被使用");
+        if (!verified) {
+            throw new UserInvalidException("二次验证码或恢复码错误");
         }
         // 选择性更新不会把 null 写回数据库，用空串显式清空
         user.setTotpSecret("");
         user.setTotpEnabled(false);
         user.setUpdTime(new Date());
         userMapper.updateByPrimaryKeySelective(user);
+        recoveryCodeService.deleteAll(username);
         return revokeAllAndIssue(user, deviceId);
     }
 
