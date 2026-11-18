@@ -706,6 +706,9 @@ mvn test
     设备的码应完全一致；与分组指纹一起用于首次 TOFU 的线下核对。
 90. Spring Boot **3.3.5 → 3.5.16**（Java 17、Jakarta 体系不变）；本地真实
     MySQL 下 184 项测试通过，CI 继续覆盖单元、集成与 e2e。
+91. 合并次版本/补丁依赖：MyBatis 3.0.5、Druid 1.2.28；客户端 Lombok 1.18.48、
+    slf4j 2.0.20、ribbon 2.7.18、Java-WebSocket 1.6.0、Feign 13.18。
+    surefire 3.6.1 / compiler 3.16 需要 Maven 3.6.3+，暂留 3.2.5 / 3.8.1。
 
 ## 仍需处理
 
