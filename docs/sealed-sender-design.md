@@ -324,7 +324,7 @@ UNIQUE KEY uk_client_target (client_msg_id, target_device_id)
 
 ### 验证
 
-- 服务端 211 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
+- 服务端 217 项：新增 `RecallTokenTest`、sealed 落库、唯一索引、按引用历史/
   未读、token 撤回、Phase 1 存量行兼容与清除点过滤；
 - 客户端 112 项：`recallToken` 落盘、凭证信封格式与请求体改动；
 - e2e 多设备 29 项：新增「响应不回显撤回凭证」「缺 token 撤回 sealed 被拒」与
@@ -360,12 +360,20 @@ Phase 1.5 消除的是**持久化**发送者元数据。首次联系与桥接消
 
 ### 分步计划
 
-**2a（建议先做）：证书签发与验证**
+**2a（已落地，默认关闭）：证书签发与验证**
 - 服务端用独立密钥签名 `{username, deviceId, identityKey, issuedAt, expiresAt, keyId}`；
   `username` 取自 JWT，客户端无法伪造。
 - `GET /cert/key` 返回公钥与 keyId；客户端首次拉取后 pin 住（TOFU），
   之后公钥变化必须显式确认，否则拒绝验证证书。
-- 开关 `MIM_SENDER_CERT_ENABLED`，默认关闭。
+- 开关 `MIM_SENDER_CERT_ENABLED`，默认关闭；关闭时接口返回「未启用」且不生成密钥。
+- 实现在 `SenderCertServiceImpl`：密钥存 `t_rsa_key`
+  （`MIM:AUTH:SENDER-CERT:PRI/PUB`，主密钥加密），与 JWT 密钥分离，
+  首次使用时惰性生成；有效期 24 小时。
+- 验签用的规范化串见 `SenderCertificate.canonical()`，
+  客户端必须逐字节复现（2b 落地时再实现）。
+- 测试：`SenderCertServiceTest` 5 项（签名可验、篡改三类字段被拒、
+  有效期 24h、关闭时不产生密钥、密钥只生成一次）；
+  `HttpApiIntegrationTest` 1 项（默认关闭返回未启用）。
 - 此步不改变消息格式，也不宣称匿名。
 
 **2b：首条消息 sealed**

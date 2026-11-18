@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **211** 项、客户端 **112** 项、e2e **29 + 13** 项
+- 回归基线：服务端 **217** 项、客户端 **112** 项、e2e **29 + 13** 项
 
 ### 已完成
 
@@ -20,6 +20,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 - X3DH + Double Ratchet、按设备多端、TOFU/60 位安全码、OPK 预留后消费。
 - 2FA、恢复码、邮箱/TOTP 密钥轮换、JWT 主密钥加密、Redis 安全边界、WS 过期断连。
 - 消息长度填充（能力协商）、跨设备历史同步、sealed sender Phase 1.5（含跨设备撤回）。
+- Phase 2a：发送者证书签发与公钥分发（`/cert/*`，默认关闭，未接入消息路径）。
 - Maven Wrapper 3.9.9；CI 覆盖单元、真实 MySQL 集成和 e2e。
 
 ### Sealed sender 的实际边界（Phase 1.5）
@@ -35,21 +36,26 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
 - 同账号另一台设备可通过历史同步拿到凭证并撤回同一条消息，
   能力位 `supportsRecallToken` 决定是否下发带凭证的加密副本；
 - 首条会话消息、首次桥接消息仍走旧格式，服务端此时可见发送者；
+- sealed 行不保存身份公钥与握手参数，避免用「公钥目录 join」反查用户名；
 - 服务端提交时仍从 JWT 知道提交者。**不要宣传为提交匿名或完全 sealed**；
-- 提交匿名仍是 Phase 2。
+- 提交匿名仍是 2c。2a 已提供发送者证书签发（默认关闭），
+  但尚未接入消息路径，因此首条消息的归属仍依赖明文字段。
 
 ## 交接给下一个 Agent
 
 ### 建议接手顺序
 
 1. **先读**：
-   - `docs/sealed-sender-design.md`（重点第 9、10 节，实际实现与草案差异）
+   - `docs/sealed-sender-design.md`（重点第 9、10、11 节，实际实现与草案差异）
    - `MIMServer/src/main/java/com/junesoon/mim/service/impl/MessageServiceImpl.java`
    - `MIMClient/src/main/java/com/junesoon/mim/service/MessageService.java`
+   - `MIMServer/src/main/java/com/junesoon/mim/service/impl/SenderCertServiceImpl.java`
+     与 `responses/SenderCertificate.java`（2a 的规范化串）
    - `MIMClient/src/main/java/com/junesoon/mim/service/HistorySync.java` 与
      `MIMClient/src/main/java/com/junesoon/mim/crypto/SyncEnvelope.java`（跨设备撤回归属这条链路）
    - `MIMServer/sql/e2ee.sql` 末尾的升级补丁
-2. **Phase 2（下一步）**：按第 11 节拆成 2a 证书签发/验证 → 2b 首条消息 sealed
+2. **Phase 2（下一步）**：2a 已完成（默认关闭）；接着做 **2b 首条消息 sealed**
+   （证书进加密正文 + 客户端验签/pin + `supportsSenderCert` 能力位），
    → 2c 匿名提交（需单独评审，先不做）；见设计文档第 7、11 节。
 3. **运维收尾**：KMS SDK 直连（目前只有 CLI 命令桥接）、真实 SMTP、TOFU 人工核对流程。
 4. **长期迁移**：客户端 JavaFX 8/Boot 2.7 BOM 暂不升级；服务端保持 Java 17。
@@ -209,7 +215,7 @@ MIMServer/
                           PresenceService、PushService
   websocket/              SessionRegistry（本机会话）、WebSocketServer（生命周期+心跳）
   config/                 WebMvc、RedisSubscriber、WebSocket、TLS
-  src/test/java/          211 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
+  src/test/java/          217 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
 MIMClient/
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
@@ -462,6 +468,8 @@ export MIM_REDIS_SSL=false
 export MIM_REDIS_REQUIRE_SECURE=false
 export MIM_MASTER_KEY=
 export MIM_SEALED_SENDER_ENABLED=true
+# Phase 2a：发送者证书，默认关闭。开启后 /cert/* 才可用。
+# export MIM_SENDER_CERT_ENABLED=false
 # 可选：独立的消息元数据盲引用密钥（Base64 32 字节）。
 # 未配置时由 JWT 私钥派生；轮换 JWT 私钥会使旧 sealed 历史索引失效。
 # export MIM_SECURITY_METADATA_KEY=
@@ -570,7 +578,7 @@ cd MIMClient
 ./verify.sh
 
 # 或分端执行（在各自目录）
-cd MIMServer && ../mvnw test      # 211 项（含真实 MySQL 集成）
+cd MIMServer && ../mvnw test      # 217 项（含真实 MySQL 集成）
 cd MIMClient && ../mvnw test      # 112 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
@@ -597,7 +605,7 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 | 测试/脚本 | 覆盖点 |
 |---|---|
 | `MapperIntegrationTest`（35 项） | XML 与 schema 匹配、upsert 语义、`INSERT IGNORE`、`FOR UPDATE` 领取、去重分页、撤回级联、sealed 盲引用与 token 撤回 |
-| `HttpApiIntegrationTest`（19 项） | 鉴权 401、限流 429、`@CurrentUser`/`@CurrentDevice` 解析、伪造发信人、多设备扇出 |
+| `HttpApiIntegrationTest`（20 项） | 鉴权 401、限流 429、`@CurrentUser`/`@CurrentDevice` 解析、伪造发信人、多设备扇出 |
 | `MultiDeviceE2eTest`（29 项） | 多设备注册、按设备分发、各自解密、设备隔离、按 clientMsgId 撤回、sealed 往返/历史/撤回、缺 token 撤回被拒、注销后停止分发 |
 | `WsDevicePushE2eTest`（13 项） | WS 按设备推送：两台设备各收自己那份、多端同步副本、密文互不相同、都能解密 |
 
@@ -880,6 +888,14 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     撤回凭证装进 `SyncEnvelope` 信封，随已加密的同步副本送到本账号其它设备，
     接收端解密后收进本地加密存储。服务端仍只看到密文与哈希，旧客户端只收纯文本
     副本。服务端 210 项、客户端 112 项、e2e 29 + 13 项通过。
+97. **sealed 元数据收紧**：`sender_identity_key` 可与 `t_user_key.public_key`
+    join 出用户名，因此 sealed 行不再落库身份公钥/临时公钥/OPK 编号，
+    客户端也不再在 sealed 消息上携带握手参数；桥接期消息不变。
+98. 落地 **Phase 2a 发送者证书**（默认关闭）：独立 RSA 密钥
+    （`t_rsa_key` 中的 `MIM:AUTH:SENDER-CERT:*`，主密钥加密，与 JWT 密钥分离）
+    签发 `{username, deviceId, identityKey, issuedAt, expiresAt, keyId}`，
+    `GET /cert/key` 分发验签公钥、`POST /cert/sender` 按 JWT 身份签发。
+    24 小时有效期，关闭时不生成任何密钥。服务端 217 项通过。
 
 ## 仍需处理
 
@@ -900,8 +916,9 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
 - 服务端已迁移到 Boot 3.5.16 + Java 17；客户端仍为 JavaFX 8，
   CI/部署需要同时准备两个 JDK。
-- **Phase 2（未做）**：发送者证书 + 首条消息 sealed + 匿名提交，分 2a/2b/2c
-  三步交付；见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 11 节。
+- **Phase 2（进行中）**：2a 发送者证书已落地但默认关闭、未接入消息路径；
+  下一步 2b 首条消息 sealed，最后 2c 匿名提交（需单独评审）。
+  见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 11 节。
 - KMS 目前只有外部命令桥接（Vault/AWS/GCP CLI），尚未接 SDK；生产 SMTP
   仍需真实邮件服务器。
 - 跨设备历史仍受上面那条限制：没有原文的消息补不回来。

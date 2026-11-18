@@ -448,6 +448,26 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
             .andExpect(jsonPath("$.data.recallTokenHash").doesNotExist());
     }
 
+    // ==================== 发送者证书 ====================
+
+    @Test
+    @DisplayName("发送者证书默认关闭：接口返回未启用")
+    void senderCertDisabledByDefault() throws Exception {
+        mockMvc.perform(get("/cert/key"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(40001))
+            .andExpect(jsonPath("$.message").value(
+                org.hamcrest.Matchers.containsString("未启用")));
+
+        String token = registerAndLogin("alice");
+        registerDevice(token, "alice-dev");
+        mockMvc.perform(post("/cert/sender")
+                .header("Authorization", "Bearer " + token)
+                .header("X-Device-Id", "alice-dev"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.status").value(40001));
+    }
+
     // ==================== 限流与异常映射 ====================
 
     @Test
