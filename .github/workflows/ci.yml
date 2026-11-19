@@ -103,6 +103,10 @@ jobs:
           java-package: jdk+fx
           cache: maven
 
+      - name: 协议核心（mim-core）测试并安装
+        working-directory: MIMCore
+        run: ../mvnw -B test && ../mvnw -B install -DskipTests
+
       - name: 编译与测试
         working-directory: MIMClient
         run: ../mvnw -B clean compile && ../mvnw -B test
@@ -197,6 +201,10 @@ jobs:
           grep -q "Started MIMServerStarter" /tmp/server.log || { cat /tmp/server.log; exit 1; }
           code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/user/info || true)
           [ "$code" = "401" ] || { cat /tmp/server.log; exit 1; }
+
+      - name: 协议核心（mim-core）安装
+        working-directory: MIMCore
+        run: ../mvnw -B -q install -DskipTests
 
       - name: 编译客户端
         working-directory: MIMClient

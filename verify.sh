@@ -17,6 +17,7 @@ set -uo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$ROOT_DIR/MIMServer"
 CLIENT_DIR="$ROOT_DIR/MIMClient"
+CORE_DIR="$ROOT_DIR/MIMCore"
 
 RUN_E2E=0
 for arg in "$@"; do
@@ -130,6 +131,23 @@ section "服务端：编译 + 单元测试"
   fi
   "$ROOT_DIR/mvnw" -o test 2>&1 | tail -30
 ) || fail "服务端测试失败"
+
+# ---------------- 协议核心 ----------------
+
+section "协议核心 mim-core：编译 + 单元测试"
+(
+  cd "$CORE_DIR" || exit 1
+  export JAVA_HOME="$CLIENT_JH"
+  export PATH="$JAVA_HOME/bin:$PATH"
+  "$ROOT_DIR/mvnw" -q -o install -DskipTests
+) && ok "安装到本地仓库" || fail "mim-core 安装失败"
+
+(
+  cd "$CORE_DIR" || exit 1
+  export JAVA_HOME="$CLIENT_JH"
+  export PATH="$JAVA_HOME/bin:$PATH"
+  "$ROOT_DIR/mvnw" -o test 2>&1 | tail -30
+) || fail "mim-core 测试失败"
 
 # ---------------- 客户端 ----------------
 

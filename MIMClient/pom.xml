@@ -20,6 +20,15 @@
     </properties>
 
     <dependencies>
+        <!--
+          协议核心：X3DH、双棘轮、会话/预密钥存储与消息信封。
+          它不依赖 UI/传输，后续 Android/iOS（Compose）与 Rust 移植都以它为准。
+        -->
+        <dependency>
+            <groupId>com.junesoon.mim</groupId>
+            <artifactId>mim-core</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
         <!--lombok-->
         <dependency>
             <groupId>org.projectlombok</groupId>

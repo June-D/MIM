@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **210** 项、客户端 **140** 项、e2e **30 + 18 + 7 + 13** 项
+- 回归基线：服务端 **210** 项、协议核心 **129** 项、客户端 **11** 项、e2e **30 + 9 + 18 + 7 + 13** 项
 
 ### 已完成
 
@@ -221,16 +221,21 @@ MIMServer/
   config/                 WebMvc、RedisSubscriber、WebSocket、TLS
   src/test/java/          210 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
-MIMClient/
+MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Rust 移植的基准）
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
-                          SessionStore、PreKeyStore、IdentityStore、SecretBox、TrustStore
+                          SessionStore、PreKeyStore、IdentityStore、SecretBox、TrustStore、
+                          SyncEnvelope、SenderCertEnvelope、TagEnvelope、BlindRsaToken
+  src/test/java/          129 项协议单测
+
+MIMClient/
+  crypto/                 DemoBot（联调用的演示客户端，依赖 WebSocket，故留在客户端）
   service/                DeviceIdentity（设备标识）、KeyManager、PreKeyManager、
                           MessageService（按设备收发+棘轮）
   feign/                  Login / Register / Device / Key / PreKey / Message
   websocket/              WSClient（只收推送）
   utils/                  TlsSupport（HTTPS/WSS 信任配置）
   gui/                    Login / Main / Chat / Loading
-  src/test/java/          140 项单元测试
+  src/test/java/          11 项单元测试（其余协议测试在 MIMCore）
   src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```
 
@@ -580,7 +585,11 @@ cd MIMClient
 
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 140 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、信封、盲签名
+cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 mim-core）
+
+# 首次构建顺序：先安装协议核心，再构建客户端
+cd MIMCore && ../mvnw install -DskipTests && cd ../MIMClient && ../mvnw test
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -964,6 +973,12 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+116. 抽出协议核心 **MIMCore**（`mim-core`）：把 26 个纯协议类（X3DH、双棘轮、
+    会话/预密钥存储、同步/证书/标签信封、盲签名）与 `SenderCertificateView`
+    迁出客户端，只依赖 JDK + Lombok + slf4j；129 项协议单测随之迁移。
+    `MIMClient` 改为依赖 mim-core，`verify.sh` 与 CI 增加 install/test 步骤。
+    这层是 Android/iOS（Compose）与 Rust 移植的协议基准，不含任何 UI/传输代码。
+    服务端 210 项、核心 129 项、客户端 11 项、e2e 全绿。
 115. 完成 **Phase 2 人工验收**（2026-11-19）：清单 6 项全部通过
     （首次联系、证书关闭报错、匿名真机发送、屏蔽/解除、多设备历史、
     会话丢失提示）。过程中修复：OkHttp/kotlin 冲突、离线消息未拉取、
