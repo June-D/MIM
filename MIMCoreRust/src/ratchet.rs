@@ -36,7 +36,7 @@ impl Header {
 ///
 /// 字节字段一律用十六进制，避免 JSON/文本协议里的编码差异。
 /// 快照含私钥与链密钥：落盘前必须由平台密钥库加密。
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct StateSnapshot {
     pub root_key: String,
     pub send_chain_key: Option<String>,
@@ -50,7 +50,7 @@ pub struct StateSnapshot {
     pub skipped: Vec<SkippedKeySnapshot>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SkippedKeySnapshot {
     pub dh_public: String,
     pub message_number: u32,

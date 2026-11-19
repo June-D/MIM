@@ -82,8 +82,12 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 - 服务端按 sealed + tag 契约落库
 - B 拉 `/message/undelivered`，用 Rust 重建会话并解出明文与证书
 
+同一用例还会把双方会话写入 Rust 的会话存储，再走一轮 sealed 回信
+（JNI 往返），验证棘轮推进与标签收敛。
+
 同样需要 `MIM_SERVER_URL` 与 `MIM_NATIVE_LIB`。测试使用固定账号
-（首次创建，后续复用），避免撞注册限流。
+（首次创建，后续复用），避免撞注册限流。连续反复跑会撞登录限流
+（每 IP 每分钟 10 次），等一分钟即可。
 
 ## 接 Android / iOS
 

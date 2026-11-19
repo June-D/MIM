@@ -23,6 +23,7 @@ pub mod jni_api;
 pub mod ratchet;
 pub mod secure_store;
 pub mod sender_cert;
+pub mod session_store;
 pub mod session;
 
 type HmacSha256 = Hmac<Sha256>;

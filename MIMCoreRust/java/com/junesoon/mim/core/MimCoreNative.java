@@ -105,6 +105,29 @@ public final class MimCoreNative {
     public static native byte[] openFirstMessage(byte[] requestJson);
 
     /**
+     * 把首条消息解出的会话写入存储。
+     *
+     * @param requestJson {store, session_id, peer, device_id, state, tags}
+     */
+    public static native byte[] sessionStoreInsert(byte[] requestJson);
+
+    /**
+     * 组装 sealed 消息。
+     *
+     * @param requestJson {store, session_id, plaintext, iv}
+     * @return {store, wire}
+     */
+    public static native byte[] composeSealed(byte[] requestJson);
+
+    /**
+     * 拆 sealed 消息。
+     *
+     * @param requestJson {store, session_id, wire}
+     * @return {store, plaintext}
+     */
+    public static native byte[] openSealed(byte[] requestJson);
+
+    /**
      * 加密状态快照。
      *
      * @param key   32 字节密钥（必须由平台 Keystore / Keychain 保管）

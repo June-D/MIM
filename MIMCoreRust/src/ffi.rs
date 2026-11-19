@@ -499,3 +499,84 @@ pub unsafe extern "C" fn mim_signed_pre_key_verify(
         MIM_ERR_STATE
     }
 }
+
+// ==================== 会话存储与 sealed 消息 ====================
+
+unsafe fn json_round_trip<Req, Res>(
+    input: *const u8,
+    input_len: usize,
+    out_json: *mut *mut u8,
+    out_len: *mut usize,
+    call: impl FnOnce(Req) -> Option<Res>,
+) -> i32
+where
+    Req: serde::de::DeserializeOwned,
+    Res: serde::Serialize,
+{
+    let bytes = match input_slice(input, input_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let request: Req = match serde_json::from_slice(bytes) {
+        Ok(v) => v,
+        Err(_) => return MIM_ERR_INVALID_ARG,
+    };
+    match call(request) {
+        Some(response) => match serde_json::to_vec(&response) {
+            Ok(json) => give_bytes(json, out_json, out_len),
+            Err(_) => MIM_ERR_STATE,
+        },
+        None => MIM_ERR_STATE,
+    }
+}
+
+/// 把首条消息解出的会话写入存储；输入/输出均为 JSON。
+#[no_mangle]
+pub unsafe extern "C" fn mim_session_store_insert(
+    request_json: *const u8,
+    request_len: usize,
+    out_json: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    json_round_trip(
+        request_json,
+        request_len,
+        out_json,
+        out_len,
+        |request| Some(crate::session_store::insert_session(request)),
+    )
+}
+
+/// 组装 sealed 消息；输入/输出均为 JSON。
+#[no_mangle]
+pub unsafe extern "C" fn mim_compose_sealed(
+    request_json: *const u8,
+    request_len: usize,
+    out_json: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    json_round_trip(
+        request_json,
+        request_len,
+        out_json,
+        out_len,
+        crate::session_store::compose_sealed_message,
+    )
+}
+
+/// 拆 sealed 消息；输入/输出均为 JSON。
+#[no_mangle]
+pub unsafe extern "C" fn mim_open_sealed(
+    request_json: *const u8,
+    request_len: usize,
+    out_json: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    json_round_trip(
+        request_json,
+        request_len,
+        out_json,
+        out_len,
+        crate::session_store::open_sealed_message,
+    )
+}

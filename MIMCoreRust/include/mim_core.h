@@ -90,6 +90,19 @@ int32_t mim_signed_pre_key_verify(const uint8_t *identity_public, size_t identit
                                   const uint8_t *signature, size_t signature_len);
 
 /*
+ * 会话存储与 sealed 消息（JSON 进、JSON 出）：
+ *   mim_session_store_insert  {store,session_id,peer,device_id,state,tags}
+ *   mim_compose_sealed        {store,session_id,plaintext,iv} -> {store,wire}
+ *   mim_open_sealed           {store,session_id,wire} -> {store,plaintext}
+ */
+int32_t mim_session_store_insert(const uint8_t *request_json, size_t request_len,
+                                 uint8_t **out_json, size_t *out_len);
+int32_t mim_compose_sealed(const uint8_t *request_json, size_t request_len,
+                           uint8_t **out_json, size_t *out_len);
+int32_t mim_open_sealed(const uint8_t *request_json, size_t request_len,
+                        uint8_t **out_json, size_t *out_len);
+
+/*
  * 加密状态存储：密钥必须来自平台 Keystore / Keychain（32 字节），
  * nonce 必须每次新生成（12 字节）。输出为三行文本：
  *   MIM-STATE-1 / Base64(nonce) / Base64(密文+tag)

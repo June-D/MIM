@@ -498,3 +498,71 @@ pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_openFirstMessage
         }
     }
 }
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_sessionStoreInsert<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    request: JByteArray<'local>,
+) -> jbyteArray {
+    json_call(&mut env, &request, |value| {
+        Some(crate::session_store::insert_session(value))
+    })
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_composeSealed<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    request: JByteArray<'local>,
+) -> jbyteArray {
+    json_call(&mut env, &request, crate::session_store::compose_sealed_message)
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_openSealed<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    request: JByteArray<'local>,
+) -> jbyteArray {
+    json_call(&mut env, &request, crate::session_store::open_sealed_message)
+}
+
+/// JSON 进、JSON 出的小工具：统一错误处理，避免每个方法重复。
+fn json_call<Req, Res>(
+    env: &mut JNIEnv,
+    request: &JByteArray,
+    call: impl FnOnce(Req) -> Option<Res>,
+) -> jbyteArray
+where
+    Req: serde::de::DeserializeOwned,
+    Res: serde::Serialize,
+{
+    let json = match bytes(env, request) {
+        Some(v) => v,
+        None => {
+            throw(env, "无法读取请求");
+            return std::ptr::null_mut();
+        }
+    };
+    let parsed: Req = match serde_json::from_slice(&json) {
+        Ok(v) => v,
+        Err(_) => {
+            throw(env, "请求 JSON 不合法");
+            return std::ptr::null_mut();
+        }
+    };
+    match call(parsed) {
+        Some(response) => match serde_json::to_vec(&response) {
+            Ok(bytes) => array(env, bytes),
+            Err(_) => {
+                throw(env, "响应序列化失败");
+                std::ptr::null_mut()
+            }
+        },
+        None => {
+            throw(env, "操作失败：会话不存在、缺少标签或密文不匹配");
+            std::ptr::null_mut()
+        }
+    }
+}

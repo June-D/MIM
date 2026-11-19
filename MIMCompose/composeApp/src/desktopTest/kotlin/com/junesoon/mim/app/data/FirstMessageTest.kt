@@ -15,7 +15,9 @@ import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.serializer
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import java.util.Base64
 import java.util.UUID
 import kotlin.test.Test
@@ -153,6 +155,50 @@ class FirstMessageTest {
         assertEquals(aliceDevice, opened.certificate.device_id)
         assertEquals(composed.conversation_tag, opened.conversation_tag)
         assertTrue(opened.certificate.identity_key == cert.identityKey, "证书身份公钥必须一致")
+
+        // 会话存储 + sealed 回信：两端都不重启，验证棘轮与标签收敛。
+        val emptyStore = json.parseToJsonElement("{\"sessions\":[]}")
+        val aliceStore = invoke<InsertRequestJson, StoreResponseJson>(
+            { MimCoreNative.sessionStoreInsert(it) },
+            InsertRequestJson(
+                store = emptyStore,
+                session_id = sessionId,
+                peer = bob,
+                device_id = bobDevice,
+                state = composed.state,
+                tags = listOf(composed.conversation_tag),
+            ),
+        ).store
+        val bobStore = invoke<InsertRequestJson, StoreResponseJson>(
+            { MimCoreNative.sessionStoreInsert(it) },
+            InsertRequestJson(
+                store = emptyStore,
+                session_id = sessionId,
+                peer = alice,
+                device_id = aliceDevice,
+                state = opened.state,
+                tags = listOfNotNull(opened.conversation_tag),
+            ),
+        ).store
+
+        val sealedReply = invoke<ComposeSealedRequestJson, ComposeSealedResponseJson>(
+            { MimCoreNative.composeSealed(it) },
+            ComposeSealedRequestJson(
+                store = bobStore,
+                session_id = sessionId,
+                plaintext = "sealed 回信",
+                iv = "22".repeat(12),
+            ),
+        )
+        val openedReply = invoke<OpenSealedRequestJson, OpenSealedResponseJson>(
+            { MimCoreNative.openSealed(it) },
+            OpenSealedRequestJson(
+                store = aliceStore,
+                session_id = sessionId,
+                wire = sealedReply.wire,
+            ),
+        )
+        assertEquals("sealed 回信", openedReply.plaintext)
     }
 
     private suspend fun provision(
@@ -203,6 +249,14 @@ class FirstMessageTest {
     private inline fun <reified T> unwrap(envelope: Envelope<T>): T {
         assertEquals(200, envelope.status, envelope.message)
         return envelope.data ?: throw IllegalStateException("响应缺少数据")
+    }
+
+    private inline fun <reified Req, reified Res> invoke(
+        call: (ByteArray) -> ByteArray,
+        request: Req,
+    ): Res {
+        val response = call(json.encodeToString(serializer<Req>(), request).toByteArray(Charsets.UTF_8))
+        return json.decodeFromString(serializer<Res>(), response.toString(Charsets.UTF_8))
     }
 
     private fun withServer(block: suspend (String) -> Unit) {
@@ -298,6 +352,7 @@ class FirstMessageTest {
     @Serializable
     private data class ComposeResponseJson(
         val wire: WireJson,
+        val state: JsonElement,
         val alg: String,
         val conversation_tag: String,
         val session_id: String,
@@ -328,6 +383,7 @@ class FirstMessageTest {
         val plaintext: String,
         val certificate: CertJson,
         val conversation_tag: String? = null,
+        val state: JsonElement,
     )
 
     @Serializable
@@ -370,4 +426,38 @@ class FirstMessageTest {
         val recipientSignedPreKeyId: Int? = null,
         val sessionId: String? = null,
     )
+@Serializable
+    private data class InsertRequestJson(
+        val store: JsonElement,
+        val session_id: String,
+        val peer: String,
+        val device_id: String,
+        val state: JsonElement,
+        val tags: List<String> = emptyList(),
+    )
+
+    @Serializable
+    private data class StoreResponseJson(val store: JsonElement)
+
+    @Serializable
+    private data class ComposeSealedRequestJson(
+        val store: JsonElement,
+        val session_id: String,
+        val plaintext: String,
+        val iv: String? = null,
+    )
+
+    @Serializable
+    private data class ComposeSealedResponseJson(val store: JsonElement, val wire: WireJson)
+
+    @Serializable
+    private data class OpenSealedRequestJson(
+        val store: JsonElement,
+        val session_id: String,
+        val wire: WireJson,
+    )
+
+    @Serializable
+    private data class OpenSealedResponseJson(val store: JsonElement, val plaintext: String)
+
 }
