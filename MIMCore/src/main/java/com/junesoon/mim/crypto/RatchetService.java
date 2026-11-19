@@ -158,7 +158,7 @@ public class RatchetService {
     public InitiatorResult initiatorSession(String peer, PrivateKey selfIdentity,
         String selfIdentityPub, String peerIdentityPub, String peerSignedPreKeyPub,
         String peerOneTimePreKeyPub) {
-        KeyPair ephemeral = DhKeyUtil.generateKeyPair();
+        KeyPair ephemeral = keyPairSupplier.get();
         PublicKey peerIdentity = DhKeyUtil.decodePublicKey(peerIdentityPub);
         PublicKey peerSigned = DhKeyUtil.decodePublicKey(peerSignedPreKeyPub);
 

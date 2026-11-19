@@ -15,6 +15,7 @@ use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
 pub mod ratchet;
+pub mod session;
 
 type HmacSha256 = Hmac<Sha256>;
 

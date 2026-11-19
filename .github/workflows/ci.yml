@@ -122,6 +122,9 @@ jobs:
         working-directory: MIMCoreRust
         run: cargo test --locked
 
+      - name: Rust ⇄ Java 互通联调
+        run: ./MIMCoreRust/tools/interop.sh /tmp/mim-interop
+
   # ------------------------------------------------------------
   # 客户端：加密层单元测试
   # ------------------------------------------------------------

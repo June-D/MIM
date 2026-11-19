@@ -587,7 +587,8 @@ cd MIMClient
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
 cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、信封、盲签名
-cd MIMCoreRust && cargo test      # 9 项：HKDF/AES-GCM/ECDH/X3DH/信封/证书串/双棘轮状态机
+cd MIMCoreRust && cargo test      # 10 项：HKDF/AES-GCM/ECDH/X3DH/握手/信封/证书串/双棘轮
+cd MIMCoreRust && ./tools/interop.sh   # Rust 发起 → Java 解密回信 → Rust 解密（真实互通）
 cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 mim-core）
 
 # 首次构建顺序：先安装协议核心，再构建客户端
@@ -975,6 +976,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+120. Rust spike 完成 **真实跨语言互通**：Rust 作为发起方用 X3DH 建会话并加密
+    首条消息，Java 侧 `RatchetService` 解密后回信，Rust 再解密该回信。
+    两边实现独立，只共享线上格式；`tools/interop.sh` 串起三步，CI 与
+    `verify.sh` 都会执行。同时把 `RatchetState` 补上 `snapshot()/from_snapshot()`
+    与 `WireMessage`（dh/pn/n/iv/ciphertext），这就是未来 FFI 的状态与消息边界。
 119. Rust spike 补齐 **双棘轮状态机**：`RatchetState` 对齐 `RatchetService`，
     覆盖发送/接收链推进、DH 换步、跳键缓存、乱序解密与重放拒绝。
     `RatchetVectors` 用真实 `RatchetService` 驱动一段确定性对话

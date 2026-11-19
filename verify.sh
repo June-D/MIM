@@ -157,6 +157,11 @@ if command -v cargo >/dev/null 2>&1; then
     cd "$ROOT_DIR/MIMCoreRust" || exit 1
     cargo test --quiet 2>&1 | tail -12
   ) || fail "Rust 对拍失败"
+
+  section "Rust ⇄ Java 互通联调"
+  CLIENT_JAVA_HOME="$CLIENT_JH" "$ROOT_DIR/MIMCoreRust/tools/interop.sh" /tmp/mim-interop > /tmp/mim-interop.log 2>&1 \
+    && ok "Rust → Java → Rust 双向互通" \
+    || fail "互通联调失败（日志：/tmp/mim-interop.log）"
 else
   echo
   echo "跳过 Rust 对拍：未找到 cargo（CI 中会执行）"

@@ -10,14 +10,30 @@
 
 use base64::Engine;
 use mim_core_rust::ratchet::{Header, RatchetState};
+use mim_core_rust::session::{initiator_session, responder_session};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
 #[derive(Deserialize)]
 struct Vectors {
-    a_initial: StateVec,
-    b_initial: StateVec,
+    handshake: HandshakeVec,
     steps: Vec<Step>,
+}
+
+#[derive(Deserialize)]
+struct HandshakeVec {
+    a_identity_priv: String,
+    a_identity_pub: String,
+    a_ephemeral_priv: String,
+    a_ephemeral_pub: String,
+    b_identity_priv: String,
+    b_identity_pub: String,
+    b_signed_pre_key_priv: String,
+    b_signed_pre_key_pub: String,
+    b_one_time_pre_key_priv: String,
+    b_one_time_pre_key_pub: String,
+    a_state: StateVec,
+    b_state: StateVec,
 }
 
 #[derive(Deserialize, Clone)]
@@ -142,13 +158,64 @@ fn assert_state(actual: &RatchetState, expected: &StateVec, label: &str) {
     expected_skipped.clear();
 }
 
+/// 用向量里的固定密钥复算 X3DH，握手状态必须与 Java 完全一致。
+fn handshake(v: &Vectors) -> (RatchetState, RatchetState) {
+    let h = &v.handshake;
+    let a_identity_priv = hex::decode(&h.a_identity_priv).unwrap();
+    let a_identity_pub = hex::decode(&h.a_identity_pub).unwrap();
+    let a_ephemeral_priv = hex::decode(&h.a_ephemeral_priv).unwrap();
+    let a_ephemeral_pub = hex::decode(&h.a_ephemeral_pub).unwrap();
+    let b_identity_priv = hex::decode(&h.b_identity_priv).unwrap();
+    let b_identity_pub = hex::decode(&h.b_identity_pub).unwrap();
+    let b_spk_priv = hex::decode(&h.b_signed_pre_key_priv).unwrap();
+    let b_spk_pub = hex::decode(&h.b_signed_pre_key_pub).unwrap();
+    let b_opk_priv = hex::decode(&h.b_one_time_pre_key_priv).unwrap();
+    let b_opk_pub = hex::decode(&h.b_one_time_pre_key_pub).unwrap();
+
+    let initiator = initiator_session(
+        &a_identity_priv,
+        &a_identity_pub,
+        &b_identity_pub,
+        &b_spk_pub,
+        Some(&b_opk_pub),
+        &a_ephemeral_priv,
+        &a_ephemeral_pub,
+    )
+    .expect("initiator");
+    assert_eq!(initiator.sender_ephemeral_key, a_ephemeral_pub);
+    assert_eq!(initiator.sender_identity_key, a_identity_pub);
+    assert!(initiator.used_one_time_pre_key);
+    assert_state(&initiator.state, &h.a_state, "handshake a");
+
+    let responder = responder_session(
+        &b_identity_priv,
+        &b_identity_pub,
+        &b_spk_priv,
+        &b_spk_pub,
+        Some(&b_opk_priv),
+        &a_identity_pub,
+        &a_ephemeral_pub,
+        true,
+    )
+    .expect("responder");
+    assert_state(&responder, &h.b_state, "handshake b");
+    (initiator.state, responder)
+}
+
+#[test]
+fn x3dh_handshake_matches_java() {
+    let v = vectors();
+    let _ = handshake(&v);
+}
+
 #[test]
 fn double_ratchet_matches_java() {
     let v = vectors();
-    let mut a = from_vec(&v.a_initial);
-    let mut b = from_vec(&v.b_initial);
-    assert_state(&a, &v.a_initial, "a_initial");
-    assert_state(&b, &v.b_initial, "b_initial");
+    let (a_state, b_state) = handshake(&v);
+    let mut a = a_state;
+    let mut b = b_state;
+    assert_state(&a, &v.handshake.a_state, "a_initial");
+    assert_state(&b, &v.handshake.b_state, "b_initial");
 
     for (index, step) in v.steps.iter().enumerate() {
         let label = format!("#{} {} {}", index + 1, step.actor, step.op);
@@ -195,8 +262,9 @@ fn double_ratchet_matches_java() {
 #[test]
 fn replayed_skipped_message_is_rejected() {
     let v = vectors();
-    let mut a = from_vec(&v.a_initial);
-    let mut b = from_vec(&v.b_initial);
+    let (a_state, b_state) = handshake(&v);
+    let mut a = a_state;
+    let mut b = b_state;
 
     // 只重放真实会话里的「乱序解密」那一步：先解 m3，再用缓存解 m2。
     for step in &v.steps {
@@ -230,7 +298,7 @@ fn replayed_skipped_message_is_rejected() {
 fn base64_header_matches_state() {
     // 消息头里的 dh 必须是当前棘轮公钥的 Base64(SPKI)，否则对端无法换步。
     let v = vectors();
-    let a = from_vec(&v.a_initial);
+    let a = handshake(&v).0;
     let expected = base64::engine::general_purpose::STANDARD.encode(&a.dh_self_public);
     let first = v.steps.iter().find(|s| s.actor == "A" && s.op == "encrypt").unwrap();
     assert_eq!(first.header.dh, expected);
