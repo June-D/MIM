@@ -1,5 +1,6 @@
 package com.junesoon.mim.model;
 
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -21,4 +22,7 @@ import lombok.NoArgsConstructor;
 public class RecallRequest {
 
     private String recallToken;
+
+    /** 会话标签。停写盲引用后，服务端靠它定位本人参与的副本。 */
+    private List<String> tags;
 }

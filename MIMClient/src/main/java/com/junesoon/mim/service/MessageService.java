@@ -1301,7 +1301,8 @@ public class MessageService {
         try {
             String token = plaintextStore.getRecallToken(peer, clientMsgId);
             com.junesoon.mim.model.RecallRequest body =
-                new com.junesoon.mim.model.RecallRequest(token);
+                new com.junesoon.mim.model.RecallRequest(token,
+                    plaintextStore.getConversationTags(peer));
             ObjectRestResponse<CipherMessage> response =
                 Request.connector(MessageFeign.class).recall(clientMsgId, body);
             if (response == null || response.getStatus() != 200) {

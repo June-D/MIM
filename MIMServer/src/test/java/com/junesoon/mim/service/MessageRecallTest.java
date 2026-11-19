@@ -46,6 +46,8 @@ class MessageRecallTest {
         boolean recallCalled;
         boolean tokenPath;
         boolean senderPath;
+        boolean tagLookupCalled;
+        CipherMessage tagsLookupResult;
         String usedTokenHash;
 
         @Override
@@ -135,6 +137,18 @@ class MessageRecallTest {
         public int wipeTagConversation(List<String> tags, String viewer, String peer,
             long beforeId) {
             return 0;
+        }
+
+        @Override
+        public List<CipherMessage> selectTagHistoryForDevice(List<String> tags, String viewer,
+            String peer, String deviceId, Long beforeId, int limit) {
+            return java.util.Collections.emptyList();
+        }
+
+        @Override
+        public CipherMessage selectOwnedCopyByTags(List<String> tags, String clientMsgId) {
+            tagLookupCalled = true;
+            return tagsLookupResult;
         }
 
         @Override
@@ -396,6 +410,25 @@ class MessageRecallTest {
         assertSame(messageMapper.anyCopy, result);
         assertTrue(Boolean.TRUE.equals(result.getRecalled()));
         assertTrue(result.getCiphertext() == null, "撤回后快照里的密文应被清空");
+    }
+
+    @Test
+    @DisplayName("停写盲引用后，撤回用会话标签定位副本并走 token 校验")
+    void recallByTagWithToken() {
+        String token = "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+        CipherMessage tagged = message(null, System.currentTimeMillis());
+        tagged.setFromRef(null);
+        tagged.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
+        tagged.setRecallTokenHash(RecallToken.hash(token));
+        messageMapper.tagsLookupResult = tagged;
+
+        CipherMessage result = service.recall("alice", CLIENT_MSG_ID, token,
+            java.util.Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1"));
+
+        assertTrue(messageMapper.tagLookupCalled, "无引用时必须回退到标签定位");
+        assertTrue(messageMapper.tokenPath, "仍必须走 token 授权");
+        assertFalse(messageMapper.senderPath, "不能退回发信人引用路径");
+        assertTrue(Boolean.TRUE.equals(result.getRecalled()));
     }
 
     @Test

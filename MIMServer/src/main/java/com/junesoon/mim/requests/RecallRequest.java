@@ -1,5 +1,6 @@
 package com.junesoon.mim.requests;
 
+import java.util.List;
 import lombok.Data;
 
 /**
@@ -21,4 +22,9 @@ public class RecallRequest {
      * 发送时生成的一次性撤回凭证（Base64，16~128 字符）。
      */
     private String recallToken;
+
+    /**
+     * 客户端持有的会话标签。停写盲引用后，服务端靠它定位本人参与的副本。
+     */
+    private List<String> tags;
 }

@@ -838,6 +838,42 @@ class MapperIntegrationTest extends IntegrationTestBase {
     }
 
     @Test
+    @DisplayName("标签历史按设备选副本，不能返回别的设备解不开的密文")
+    void tagHistoryPrefersOwnDeviceCopy() {
+        CipherMessage forA = message(null, null, BOB, DEVICE_A, "msg-tag-dev-01", 0);
+        forA.setSealed(true);
+        forA.setSessionId("session-tag");
+        forA.setConversationTag(TAG_ONE);
+        messageMapper.insert(forA);
+
+        CipherMessage forB = message(null, null, BOB, DEVICE_B, "msg-tag-dev-01", 0);
+        forB.setSealed(true);
+        forB.setSessionId("session-tag");
+        forB.setConversationTag(TAG_ONE);
+        messageMapper.insert(forB);
+
+        List<CipherMessage> viewA = messageMapper.selectTagHistoryForDevice(
+            Collections.singletonList(TAG_ONE), BOB, ALICE, DEVICE_A, null, 50);
+        assertEquals(1, viewA.size());
+        assertEquals(DEVICE_A, viewA.get(0).getTargetDeviceId(), "必须选本设备的那份");
+
+        List<CipherMessage> viewB = messageMapper.selectTagHistoryForDevice(
+            Collections.singletonList(TAG_ONE), BOB, ALICE, DEVICE_B, null, 50);
+        assertEquals(1, viewB.size());
+        assertEquals(DEVICE_B, viewB.get(0).getTargetDeviceId());
+    }
+
+    @Test
+    @DisplayName("按标签取本人副本：标签匹配才返回")
+    void ownedCopyByTags() {
+        insertTagged("msg-tag-owned", TAG_ONE);
+        assertNotNull(messageMapper.selectOwnedCopyByTags(
+            Collections.singletonList(TAG_ONE), "msg-tag-owned"));
+        assertNull(messageMapper.selectOwnedCopyByTags(
+            Collections.singletonList(TAG_TWO), "msg-tag-owned"), "错误标签不能取到副本");
+    }
+
+    @Test
     @DisplayName("双写期未读数对同一逻辑消息只算一次")
     void unreadDedupesRefAndTag() {
         CipherMessage both = sealedMessage("msg-dedupe-01", BOB, DEVICE_A, REF_ALICE);

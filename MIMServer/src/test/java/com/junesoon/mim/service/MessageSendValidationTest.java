@@ -149,6 +149,17 @@ class MessageSendValidationTest {
         }
 
         @Override
+        public List<CipherMessage> selectTagHistoryForDevice(List<String> tags, String viewer,
+            String peer, String deviceId, Long beforeId, int limit) {
+            return java.util.Collections.emptyList();
+        }
+
+        @Override
+        public CipherMessage selectOwnedCopyByTags(List<String> tags, String clientMsgId) {
+            return null;
+        }
+
+        @Override
         public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
             Long beforeId, int limit) {
             // 标签查询由 MapperIntegrationTest 用真实 MySQL 覆盖；
@@ -558,6 +569,32 @@ class MessageSendValidationTest {
         assertEquals(64, stored.getRecallTokenHash().length());
         assertFalse(stored.getRecallTokenHash().contains("3q2+7w"),
             "数据库里只能出现哈希，不能出现原始 token");
+    }
+
+    @Test
+    @DisplayName("带标签的 sealed 消息停写盲引用；未带标签仍写，兼容旧客户端")
+    void taggedSealedMessageStopsWritingRef() throws Exception {
+        enableSealedSender();
+
+        CipherMessage tagged = replica(BOB_DEVICE_A);
+        tagged.setSealed(true);
+        tagged.setSessionId("session-tag-ref");
+        tagged.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
+        tagged.setRecallToken("3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        CipherMessage stored = service.send(ALICE, ALICE_DEVICE,
+            Collections.singletonList(tagged)).get(0);
+        assertNull(stored.getFromRef(), "标签消息不再写盲引用");
+        assertNull(stored.getFromDeviceRef());
+        assertEquals("tagAAAAAAAAAAAAAAAAAAAAAAAA1", stored.getConversationTag());
+        assertNull(stored.getFromUsername());
+
+        CipherMessage untagged = replica(BOB_DEVICE_A);
+        untagged.setClientMsgId("client-no-tag-01");
+        untagged.setSealed(true);
+        untagged.setSessionId("session-no-tag");
+        CipherMessage legacy = service.send(ALICE, ALICE_DEVICE,
+            Collections.singletonList(untagged)).get(0);
+        assertNotNull(legacy.getFromRef(), "没有标签的消息仍写盲引用，旧查询路径才可用");
     }
 
     @Test

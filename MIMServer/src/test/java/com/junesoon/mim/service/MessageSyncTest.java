@@ -404,6 +404,17 @@ class MessageSyncTest {
         }
 
         @Override
+        public List<CipherMessage> selectTagHistoryForDevice(List<String> tags, String viewer,
+            String peer, String deviceId, Long beforeId, int limit) {
+            return java.util.Collections.emptyList();
+        }
+
+        @Override
+        public CipherMessage selectOwnedCopyByTags(List<String> tags, String clientMsgId) {
+            return null;
+        }
+
+        @Override
         public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
             Long beforeId, int limit) {
             // 标签查询由 MapperIntegrationTest 用真实 MySQL 覆盖；

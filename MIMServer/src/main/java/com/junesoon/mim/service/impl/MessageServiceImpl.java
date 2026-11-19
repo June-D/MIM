@@ -192,8 +192,12 @@ public class MessageServiceImpl implements MessageService {
             // 功能开关关闭时降级为旧格式，保证已有会话仍能收发。
             String storedFrom = sealed ? null : authenticatedUser;
             String storedFromDevice = sealed ? null : fromDevice;
-            String storedFromRef = sealed ? userRef(authenticatedUser) : null;
-            String storedFromDeviceRef = sealed ? deviceRef(authenticatedUser, fromDevice) : null;
+            String tag = normalizeTag(message.getConversationTag());
+            // 会话标签存在时不再写「可从用户名推导」的盲引用：
+            // 历史/未读/清除/未投递/同步都已支持标签查询。
+            String storedFromRef = sealed && tag == null ? userRef(authenticatedUser) : null;
+            String storedFromDeviceRef =
+                sealed && tag == null ? deviceRef(authenticatedUser, fromDevice) : null;
 
             // 幂等：同一目标设备重复发送时返回首次落库的记录
             CipherMessage existing = messageMapper.selectByClientMsgId(clientMsgId, target);
@@ -210,7 +214,7 @@ public class MessageServiceImpl implements MessageService {
             record.setFromRef(storedFromRef);
             record.setFromDeviceRef(storedFromDeviceRef);
             record.setRecallTokenHash(recallTokenHash);
-            record.setConversationTag(normalizeTag(message.getConversationTag()));
+            record.setConversationTag(tag);
             record.setSealed(sealed);
             record.setSessionId(message.getSessionId());
             record.setToUsername(toUsername);
@@ -484,8 +488,10 @@ public class MessageServiceImpl implements MessageService {
         // 标签查询不需要用户名，因此是 2c 匿名提交的历史查询基础。
         List<String> safeTags = normalizeTags(tags);
         if (!safeTags.isEmpty()) {
-            List<CipherMessage> tagged = messageMapper.selectTagHistory(safeTags, username, peer,
-                beforeId, safeLimit);
+            List<CipherMessage> tagged = device == null
+                ? messageMapper.selectTagHistory(safeTags, username, peer, beforeId, safeLimit)
+                : messageMapper.selectTagHistoryForDevice(safeTags, username, peer, device,
+                    beforeId, safeLimit);
             if (tagged != null) {
                 for (CipherMessage message : tagged) {
                     message.setFromMe(peer.equals(message.getToUsername()));
@@ -708,7 +714,8 @@ public class MessageServiceImpl implements MessageService {
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public CipherMessage recall(String username, String clientMsgId, String recallToken) {
+    public CipherMessage recall(String username, String clientMsgId, String recallToken,
+        List<String> tags) {
         if (!StringUtils.hasText(clientMsgId)) {
             throw new UserInvalidException("消息 ID 不能为空");
         }
@@ -716,6 +723,13 @@ public class MessageServiceImpl implements MessageService {
         // 撤回按 clientMsgId 作用于所有设备副本，因此找到任意一份本人拥有的副本
         // 即可判定权限与时限。
         CipherMessage sample = messageMapper.selectOwnedCopy(clientMsgId, username, refUsername);
+        if (sample == null) {
+            // 停写盲引用后，用客户端持有的会话标签定位本人参与的副本。
+            List<String> safeTags = normalizeTags(tags);
+            if (!safeTags.isEmpty()) {
+                sample = messageMapper.selectOwnedCopyByTags(safeTags, clientMsgId);
+            }
+        }
         if (sample == null) {
             throw new UserInvalidException("消息不存在");
         }
@@ -856,6 +870,12 @@ public class MessageServiceImpl implements MessageService {
         boolean sealed = Boolean.TRUE.equals(original.getSealed());
         boolean sentByUser = username.equals(original.getFromUsername())
             || (refUsername != null && refUsername.equals(original.getFromRef()));
+        if (!sentByUser && original.getConversationTag() != null
+            && StringUtils.hasText(original.getToUsername())) {
+            // 标签消息没有发送者列：to_user 是自己说明这是收到的，
+            // 否则就是自己发出的（to_user 即对端）。
+            sentByUser = !username.equals(original.getToUsername());
+        }
         // 旧消息仍沿用原收发双方，保持历史归属不变。
         // sealed 发件副本的 from_user 为 NULL：发给自己的其它设备时改记为
         // “本账号 + 当前同步设备”，这样未投递查询能按账号名命中；

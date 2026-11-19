@@ -93,6 +93,7 @@ public final class SenderCertE2eTest {
         // ---- 首条消息：真实双棘轮 + 证书信封 ----
         String plaintext = "首条 sealed 消息";
         String conversationTag = "tagE2EAAAAAAAAAAAAAAAAAAAA1";
+        String recallToken = "3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
         String payload = SenderCertEnvelope.pack(cert, conversationTag, plaintext);
         RatchetService ratchet = new RatchetService();
         RatchetService.InitiatorResult init = ratchet.initiatorSession(bob, 
@@ -114,6 +115,7 @@ public final class SenderCertE2eTest {
             + "\"messageNumber\":" + encrypted.getHeader().getMessageNumber() + ","
             + "\"clientTime\":" + System.currentTimeMillis() + ","
             + "\"conversationTag\":\"" + conversationTag + "\","
+            + "\"recallToken\":\"" + recallToken + "\","
             + "\"sealed\":true,\"sessionId\":\"session-cert-01\","
             + "\"senderIdentityKey\":\"" + aliceIdentity.getPublicKeyBase64() + "\","
             + "\"senderEphemeralKey\":\"" + init.getSenderEphemeralKey() + "\","
@@ -163,8 +165,9 @@ public final class SenderCertE2eTest {
         String deliveredId = lastNumberOrNull(inbox, "\"id\":");
         requireOk(httpPost(BASE + "/message/delivered?beforeId=" + deliveredId, bobToken,
             bobDevice, null), "投递确认");
-        String history = httpGet(BASE + "/message/history/" + alice + "?limit=50", bobToken,
-            bobDevice);
+        // 停写盲引用后，历史必须带会话标签；不带标签只对旧消息有效
+        String history = httpGet(BASE + "/message/history/" + alice + "?limit=50&tags="
+            + conversationTag, bobToken, bobDevice);
         check("首条 sealed 消息在收信端历史里可查", history.contains(clientMsgId));
         check("投递后握手参数已从历史中擦除",
             !history.contains("\"senderIdentityKey\":\"")
@@ -193,6 +196,14 @@ public final class SenderCertE2eTest {
         String cleared = httpGet(BASE + "/message/history/" + alice + "?limit=50&tags="
             + conversationTag, bobToken, bobDevice);
         check("按标签清除后历史为空", !cleared.contains(clientMsgId));
+
+        // ---- 无盲引用时的撤回：靠标签定位副本 + token 授权 ----
+        String recallResponse = httpPost(BASE + "/message/recall/" + clientMsgId, aliceToken,
+            aliceDevice, "{\"recallToken\":\"" + recallToken + "\",\"tags\":[\""
+                + conversationTag + "\"]}");
+        requireOk(recallResponse, "按标签撤回");
+        check("停写盲引用后仍可凭标签 + token 撤回",
+            recallResponse.contains("\"recalled\":true"));
 
         System.out.println();
         System.out.println("通过 " + passed + " 项，失败 " + failed + " 项");

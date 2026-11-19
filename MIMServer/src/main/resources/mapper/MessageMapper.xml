@@ -91,6 +91,43 @@
     </insert>
 
     <!--
+      按会话标签查历史的「按设备」变体：
+      - 收件侧优先取发给本设备的那份副本（别的设备副本我解不开）；
+      - 发件侧取任意一份即可（原文来自本地缓存）。
+    -->
+    <select id="selectTagHistoryForDevice" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where id in (
+            select chosen from (
+                select coalesce(
+                    min(case
+                        when target_device_id = #{deviceId,jdbcType=VARCHAR}
+                         and to_user = #{viewer,jdbcType=VARCHAR}
+                        then id end),
+                    min(case
+                        when to_user = #{peer,jdbcType=VARCHAR}
+                        then id end),
+                    min(id)
+                ) as chosen
+                from t_message
+                where conversation_tag in
+                <foreach collection="tags" item="tag" open="(" separator="," close=")">
+                    #{tag,jdbcType=VARCHAR}
+                </foreach>
+                  and to_user in (#{viewer,jdbcType=VARCHAR}, #{peer,jdbcType=VARCHAR})
+                group by client_msg_id
+            ) picked
+        )
+        <if test="beforeId != null">
+            and id &lt; #{beforeId,jdbcType=BIGINT}
+        </if>
+        order by id desc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <!--
       按会话标签查历史（Phase 2c 前置）。
       标签由客户端生成、双方共享，服务端只当不透明值；因此这里不需要
       from_ref，也无法从标签反推用户名。
@@ -166,6 +203,23 @@
               or from_ref = #{userRef,jdbcType=VARCHAR}
               or to_user = #{username,jdbcType=VARCHAR}
           )
+        order by id asc
+        limit 1
+    </select>
+
+    <!--
+      按会话标签取「本人参与的」一份副本（撤回权限判定用）。
+      标签是双方共享的随机值，知道标签即视为会话参与者。
+    -->
+    <select id="selectOwnedCopyByTags" resultMap="BaseResultMap">
+        select
+        <include refid="Base_Column_List"/>
+        from t_message
+        where client_msg_id = #{clientMsgId,jdbcType=VARCHAR}
+          and conversation_tag in
+          <foreach collection="tags" item="tag" open="(" separator="," close=")">
+              #{tag,jdbcType=VARCHAR}
+          </foreach>
         order by id asc
         limit 1
     </select>

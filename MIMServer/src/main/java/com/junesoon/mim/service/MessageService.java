@@ -77,10 +77,15 @@ public interface MessageService {
      *
      * @return 撤回后的消息快照；null 表示不存在
      */
-    CipherMessage recall(String username, String clientMsgId, String recallToken);
+    CipherMessage recall(String username, String clientMsgId, String recallToken,
+        List<String> tags);
+
+    default CipherMessage recall(String username, String clientMsgId, String recallToken) {
+        return recall(username, clientMsgId, recallToken, null);
+    }
 
     default CipherMessage recall(String username, String clientMsgId) {
-        return recall(username, clientMsgId, null);
+        return recall(username, clientMsgId, null, null);
     }
 
     /**

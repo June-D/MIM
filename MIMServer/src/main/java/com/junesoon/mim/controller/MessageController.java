@@ -143,8 +143,9 @@ public class MessageController {
         @PathVariable String clientMsgId,
         @RequestBody(required = false) RecallRequest request) {
         String recallToken = request == null ? null : request.getRecallToken();
+        java.util.List<String> tags = request == null ? null : request.getTags();
         return new ObjectRestResponse<CipherMessage>()
-            .data(messageService.recall(username, clientMsgId, recallToken))
+            .data(messageService.recall(username, clientMsgId, recallToken, tags))
             .rel(true);
     }
 

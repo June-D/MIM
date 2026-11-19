@@ -66,6 +66,20 @@ public interface MessageMapper {
      * to_user 限定在会话双方，避免标签被复用后串到别的会话。
      */
     /**
+     * 按会话标签查历史的按设备变体：收件侧必须选发给本设备的副本。
+     */
+    List<CipherMessage> selectTagHistoryForDevice(@Param("tags") List<String> tags,
+        @Param("viewer") String viewer, @Param("peer") String peer,
+        @Param("deviceId") String deviceId, @Param("beforeId") Long beforeId,
+        @Param("limit") int limit);
+
+    /**
+     * 按会话标签取本人参与的一份副本（撤回权限判定）。
+     */
+    CipherMessage selectOwnedCopyByTags(@Param("tags") List<String> tags,
+        @Param("clientMsgId") String clientMsgId);
+
+    /**
      * 按会话标签取原消息（跨设备同步的授权依据）。
      */
     CipherMessage selectParticipantCopyByTag(@Param("clientMsgId") String clientMsgId,
