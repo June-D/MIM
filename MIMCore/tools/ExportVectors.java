@@ -177,6 +177,32 @@ public final class ExportVectors {
             .append("\",\"new_root\":\"").append(hex(dhRoot))
             .append("\",\"chain\":\"").append(hex(dhChain)).append("\"},\n");
 
+        // ---------- 发送者证书（真实 RSA 签名） ----------
+        SenderCertificateView rsaCert = new SenderCertificateView();
+        rsaCert.setUsername("alice");
+        rsaCert.setDeviceId("alice-desktop");
+        rsaCert.setIdentityKey("QUJDREVGRw==");
+        rsaCert.setIssuedAt(1795056000000L);
+        rsaCert.setExpiresAt(1795142400000L);
+        rsaCert.setKeyId("518d14873ea4aefc55cdf811c54aed94a9905faa92fa7938016346ffb90699c2");
+        rsaCert.setSignature("sMbbUAfqqjIA8Kosy1K1L9LQqbnGOPmcxn+IVFOUb6IC78oxfuyD8PFVdqteaz7VYkPtmXyb4JHXLr/GmGYocP3U5sHquvNiaWxX9wQrvq3NSUI61Wy552cTWNul03F6VRhgFimY7FbEtj8bhG5gS8WFJHK/kIsZTw0rOzSilKVMnvx8CZzNphZ3dNtnFVyfWvpeyXxlFmcGNIerLSZQ0q/choIuRKkVZT2h1BOwDfgWpGQ1e3km8/vxtuwTsnZpVIc8sKYZQrKLyr4D/LxoVg1x/GFBzorlnZi+1ku7LgFgMvEaK81i/1ETPUTRCyQqUVA6Gw8qtjUvn+wadX/nAw==");
+        byte[] certCanonical = rsaCert.canonical().getBytes(StandardCharsets.UTF_8);
+        json.append("  \"cert_rsa\": {\"public_key\":\"30820122300d06092a864886f70d01010105000382010f003082010a0282010100b957bd58c2ad1f8a5caf4759f6bc4472d0013035e3fbc5a247d2e7efc79d863cb2fe7a99c16aa90dead69bd6c3a76fd88c606e94d21fd3f8feaa1d51470c19ae0c655017dfc6d5c8b25d4d007159f539ba2c3a125d767891050db7e850086cfb3c9d5e70c2c9f36dfea009f3c0b77bdd5bc5d360cab1b7f916a94a8e5e216e86878d4fe835c4770a2520f2b94d08bdb00e52ed91b8ecc014c91bd377c1235964da5dd41ba62389e9af020ad46e0f8ea13f6433e656317365bbe80920ad8ce17ba53ead0cd3cc0db3dbe3a8c03ee4363e0d82801eb3ddb337d258cef1800ba8f1dd3b9eebe065da78d3f5c65437f53e8b8ceb51d0e0fc7c5a0c2aa180966cf9930203010001\",\"now\":1795070000000,")
+            .append("\"canonical\":\"").append(hex(certCanonical)).append("\",")
+            .append("\"cert\":{\"username\":\"alice\",\"device_id\":\"alice-desktop\",")
+            .append("\"identity_key\":\"QUJDREVGRw==\",\"issued_at\":1795056000000,")
+            .append("\"expires_at\":1795142400000,\"key_id\":\"518d14873ea4aefc55cdf811c54aed94a9905faa92fa7938016346ffb90699c2\",")
+            .append("\"signature\":\"sMbbUAfqqjIA8Kosy1K1L9LQqbnGOPmcxn+IVFOUb6IC78oxfuyD8PFVdqteaz7VYkPtmXyb4JHXLr/GmGYocP3U5sHquvNiaWxX9wQrvq3NSUI61Wy552cTWNul03F6VRhgFimY7FbEtj8bhG5gS8WFJHK/kIsZTw0rOzSilKVMnvx8CZzNphZ3dNtnFVyfWvpeyXxlFmcGNIerLSZQ0q/choIuRKkVZT2h1BOwDfgWpGQ1e3km8/vxtuwTsnZpVIc8sKYZQrKLyr4D/LxoVg1x/GFBzorlnZi+1ku7LgFgMvEaK81i/1ETPUTRCyQqUVA6Gw8qtjUvn+wadX/nAw==\"}},\n");
+
+        // ---------- 证书信封（7 段 / 带会话标签的 8 段） ----------
+        String certBody = "首条消息正文";
+        String certTag = "tagRustAAAAAAAAAAAAAAAAAAAA1";
+        json.append("  \"cert_envelope\": {\"body\":\"").append(hex(certBody.getBytes(StandardCharsets.UTF_8)))
+            .append("\",\"tag\":\"").append(certTag).append("\",")
+            .append("\"packed7\":\"").append(hex(SenderCertEnvelope.pack(rsaCert, null, certBody).getBytes(StandardCharsets.UTF_8)))
+            .append("\",\"packed8\":\"").append(hex(SenderCertEnvelope.pack(rsaCert, certTag, certBody).getBytes(StandardCharsets.UTF_8)))
+            .append("\"},\n");
+
         // ---------- SHA-256 十六进制（撤回凭证哈希的格式） ----------
         json.append("  \"sha256_hex\": {\"input\":\"")
             .append(hex(recallToken.getBytes(StandardCharsets.UTF_8)))

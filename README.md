@@ -222,6 +222,8 @@ MIMServer/
   src/test/java/          210 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
 MIMCoreRust/             Rust 可行性 spike：对拍 + 互通 + C ABI（需要 cargo）
+  src/envelope.rs        标签 / 同步副本 / 发送者证书信封（格式与 Java 逐字节一致）
+  src/sender_cert.rs     证书规范化串与 SHA256withRSA 验签、keyId 指纹校验
   include/mim_core.h     C ABI 头文件（Android JNI / iOS cinterop 的公共底座）
   tools/interop.sh       Rust ⇄ Java 真实收发联调
   tools/ffi_test.sh      链接 Rust 静态库的 C 冒烟测试
@@ -980,6 +982,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+122. Rust spike 补齐 **信封层与证书验签**：标签信封、同步副本信封、
+    发送者证书信封（7 段 / 带会话标签的 8 段）全部按 Java 格式解析与打包；
+    证书用 `SHA256withRSA` 验签，并校验 `keyId = SHA-256(服务端公钥 DER)`、
+    5 分钟时钟偏差与身份公钥一致性。真实 RSA 密钥与签名入库为基准向量，
+    篡改字段/过期/错误 keyId/非法签名均被拒绝。`cargo test` 12/12。
 121. Rust 核心暴露 **C ABI**（`include/mim_core.h`）：不透明 `MimSession` 句柄、
     握手/加密/解密/状态保存恢复、库分配缓冲与错误码；消息与状态用 JSON，
     新增字段不破坏 ABI。`tests/c/ffi_test.c` 链接 Rust 静态库跑完整会话、

@@ -14,8 +14,10 @@ use p256::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
+pub mod envelope;
 pub mod ffi;
 pub mod ratchet;
+pub mod sender_cert;
 pub mod session;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -25,8 +27,6 @@ const INFO_CHAIN: &str = "MIM/v2/chain";
 const CHAIN_MESSAGE: u8 = 0x01;
 const CHAIN_NEXT: u8 = 0x03;
 
-const TAG_MAGIC: &str = "\u{1}mimtag1\u{1}";
-const SYNC_MAGIC: &str = "\u{1}mimsync1\u{1}";
 
 /// P-256 ECDH：返回共享点的 X 坐标（32 字节），与 JDK ECDH 的输出一致。
 pub fn dh(private_pkcs8: &[u8], public_spki: &[u8]) -> Option<Vec<u8>> {
@@ -95,32 +95,6 @@ fn hmac(key: &[u8], marker: u8) -> Vec<u8> {
 /// 消息头 AAD：`dh|pn|n`，字段顺序固定。
 pub fn header_aad(dh: &str, previous_chain_length: u32, message_number: u32) -> String {
     format!("{}|{}|{}", dh, previous_chain_length, message_number)
-}
-
-/// 标签信封（已确认会话的每条消息都带）。
-pub fn tag_envelope_pack(tag: &str, payload: &str) -> String {
-    if tag.is_empty() {
-        return payload.to_string();
-    }
-    format!("{}{}\n{}", TAG_MAGIC, tag, payload)
-}
-
-pub fn tag_envelope_unpack(text: &str) -> Option<(&str, &str)> {
-    let rest = text.strip_prefix(TAG_MAGIC)?;
-    let sep = rest.find('\n')?;
-    let (tag, body) = rest.split_at(sep);
-    if tag.is_empty() || tag.len() > 64 {
-        return None;
-    }
-    Some((tag, &body[1..]))
-}
-
-/// 同步副本里的撤回凭证信封。
-pub fn sync_envelope_pack(token: &str, payload: &str) -> String {
-    if token.is_empty() {
-        return payload.to_string();
-    }
-    format!("{}{}\n{}", SYNC_MAGIC, token, payload)
 }
 
 /// 发送者证书的规范化串；改一个字节都会让签名失效。

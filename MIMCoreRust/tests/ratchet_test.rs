@@ -85,24 +85,6 @@ fn vectors() -> Vectors {
         .expect("ratchet-vectors.json 解析失败")
 }
 
-fn from_vec(v: &StateVec) -> RatchetState {
-    let mut state = RatchetState::new(
-        hex::decode(&v.root).unwrap(),
-        v.send.as_ref().map(|s| hex::decode(s).unwrap()),
-        v.recv.as_ref().map(|s| hex::decode(s).unwrap()),
-        hex::decode(&v.dh_self_private).unwrap(),
-        hex::decode(&v.dh_self_public).unwrap(),
-        v.dh_remote_public.as_ref().map(|s| hex::decode(s).unwrap()),
-    );
-    state.send_count = v.send_count;
-    state.recv_count = v.recv_count;
-    state.prev_send_count = v.prev_send_count;
-    for entry in &v.skipped {
-        state.restore_skipped(&entry.dh, entry.n, hex::decode(&entry.key).unwrap());
-    }
-    state
-}
-
 fn assert_state(actual: &RatchetState, expected: &StateVec, label: &str) {
     assert_eq!(hex::encode(&actual.root_key), expected.root, "{} root", label);
     assert_eq!(
