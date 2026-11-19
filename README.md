@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **210** 项、客户端 **135** 项、e2e **30 + 18 + 7 + 13** 项
+- 回归基线：服务端 **210** 项、客户端 **136** 项、e2e **30 + 18 + 7 + 13** 项
 
 ### 已完成
 
@@ -230,7 +230,7 @@ MIMClient/
   websocket/              WSClient（只收推送）
   utils/                  TlsSupport（HTTPS/WSS 信任配置）
   gui/                    Login / Main / Chat / Loading
-  src/test/java/          135 项单元测试
+  src/test/java/          136 项单元测试
   src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```
 
@@ -580,7 +580,7 @@ cd MIMClient
 
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 135 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMClient && ../mvnw test      # 136 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -960,6 +960,13 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     **任何失败都回退普通发送**（令牌申请失败/服务端未启用/被拒）。
     CI 启动服务端时默认打开证书/令牌/匿名三个开关，让对应 e2e 真正执行而不是 SKIP。
     客户端 134 项、服务端 234 项、e2e 30 + 18 + 7 + 13 项通过。
+109. 修复客户端**依赖冲突导致登录无反应**：`feign-okhttp 13.18` 解析到
+    OkHttp 5.5.1，而 Spring Boot 2.7 BOM 把 `kotlin-stdlib` 锁在 1.6.21，
+    运行时缺 `kotlin.enums.EnumEntriesKt`（`NoClassDefFoundError`），
+    Feign 初始化即失败。`pom.xml` 的 `dependencyManagement` 把
+    `kotlin-stdlib` / `-common` / `-jdk8` 固定到 1.8.21（仍兼容 Java 8），
+    并新增 `HttpClientDependencyTest` 在测试阶段拦同类冲突。
+    客户端 136 项通过。
 108. **Phase 2 协议断代**：彻底移除 `from_user` / `from_device_id` /
     `from_ref` / `from_device_ref` 与 `MetadataRef`（HMAC 盲引用机制）：
     `send` 只接受 sealed + 会话标签，历史/未读/已读/清除/未投递/同步/撤回
