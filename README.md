@@ -221,6 +221,7 @@ MIMServer/
   config/                 WebMvc、RedisSubscriber、WebSocket、TLS
   src/test/java/          210 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
+MIMCoreRust/             Rust 可行性 spike：与 Java 的基准向量逐字节对拍（需要 cargo）
 MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Rust 移植的基准）
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
                           SessionStore、PreKeyStore、IdentityStore、SecretBox、TrustStore、
@@ -586,6 +587,7 @@ cd MIMClient
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
 cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、信封、盲签名
+cd MIMCoreRust && cargo test      # 与 Java 逐字节对拍（HKDF/AES-GCM/棘轮 KDF/信封/证书串）
 cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 mim-core）
 
 # 首次构建顺序：先安装协议核心，再构建客户端
@@ -973,6 +975,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+117. 新增 **MIMCoreRust** 可行性 spike：Rust 实现 HKDF、AES-256-GCM、
+    棘轮根/链 KDF、AAD 序列化、标签/同步信封、证书规范化串与 SHA-256，
+    由 `MIMCore/tools/ExportVectors.java` 生成 Java 基准向量，
+    `cargo test` 逐字节对拍。用于验证 Android/iOS 的 Rust + FFI 路线。
+    尚未覆盖 P-256 ECDH 与完整棘轮状态机；二者是下一步。
 116. 抽出协议核心 **MIMCore**（`mim-core`）：把 26 个纯协议类（X3DH、双棘轮、
     会话/预密钥存储、同步/证书/标签信封、盲签名）与 `SenderCertificateView`
     迁出客户端，只依赖 JDK + Lombok + slf4j；129 项协议单测随之迁移。

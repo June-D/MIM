@@ -1,0 +1,16 @@
+[package]
+name = "mim-core-rust"
+version = "0.1.0"
+edition = "2021"
+description = "MiM 协议核心的 Rust spike：用 Java 基准向量逐字节对拍，验证 Android/iOS 复用路线"
+
+[dependencies]
+sha2 = "0.10"
+hmac = "0.12"
+hkdf = "0.12"
+aes-gcm = "0.10"
+hex = "0.4"
+
+[dev-dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

@@ -84,6 +84,43 @@ jobs:
           if-no-files-found: ignore
 
   # ------------------------------------------------------------
+  # Rust 核心：与 Java 基准向量逐字节对拍
+  #
+  # 这层是 Android/iOS 的 Rust + FFI 路线可行性验证。
+  # 先由 Java 核心重新生成向量并与仓库里的 fixture 比较（防漂移），
+  # 再让 Rust 端解析同一份向量做逐字节断言。
+  # ------------------------------------------------------------
+  rust-core:
+    name: Rust 核心对拍
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 重新生成基准向量并检查是否漂移
+        working-directory: MIMCore
+        run: |
+          ../mvnw -B -q package -DskipTests
+          ../mvnw -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/core-cp.txt
+          CP="target/classes:$(cat /tmp/core-cp.txt)"
+          javac -encoding UTF-8 -cp "$CP" -d /tmp/vec tools/ExportVectors.java
+          java -cp "/tmp/vec:$CP" ExportVectors /tmp/vectors.json
+          diff -u ../MIMCoreRust/tests/fixtures/vectors.json /tmp/vectors.json
+
+      - name: Rust 对拍
+        working-directory: MIMCoreRust
+        run: cargo test --locked
+
+  # ------------------------------------------------------------
   # 客户端：加密层单元测试
   # ------------------------------------------------------------
   client:
