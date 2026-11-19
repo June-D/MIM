@@ -428,3 +428,73 @@ pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_verifySignedPreK
         }
     }
 }
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_composeFirstMessage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    request: JByteArray<'local>,
+) -> jbyteArray {
+    let json = match bytes(&mut env, &request) {
+        Some(v) => v,
+        None => {
+            throw(&mut env, "无法读取请求");
+            return std::ptr::null_mut();
+        }
+    };
+    let parsed: crate::messaging::ComposeRequest = match serde_json::from_slice(&json) {
+        Ok(v) => v,
+        Err(_) => {
+            throw(&mut env, "请求 JSON 不合法");
+            return std::ptr::null_mut();
+        }
+    };
+    match crate::messaging::compose_first_message(&parsed) {
+        Some(response) => match serde_json::to_vec(&response) {
+            Ok(json) => array(&mut env, json),
+            Err(_) => {
+                throw(&mut env, "响应序列化失败");
+                std::ptr::null_mut()
+            }
+        },
+        None => {
+            throw(&mut env, "组装首条消息失败：密钥材料不合法");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_openFirstMessage<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    request: JByteArray<'local>,
+) -> jbyteArray {
+    let json = match bytes(&mut env, &request) {
+        Some(v) => v,
+        None => {
+            throw(&mut env, "无法读取请求");
+            return std::ptr::null_mut();
+        }
+    };
+    let parsed: crate::messaging::OpenFirstRequest = match serde_json::from_slice(&json) {
+        Ok(v) => v,
+        Err(_) => {
+            throw(&mut env, "请求 JSON 不合法");
+            return std::ptr::null_mut();
+        }
+    };
+    match crate::messaging::open_first_message(&parsed) {
+        Some(response) => match serde_json::to_vec(&response) {
+            Ok(json) => array(&mut env, json),
+            Err(_) => {
+                throw(&mut env, "响应序列化失败");
+                std::ptr::null_mut()
+            }
+        },
+        None => {
+            throw(&mut env, "解密首条消息失败：密文或密钥不匹配");
+            std::ptr::null_mut()
+        }
+    }
+}

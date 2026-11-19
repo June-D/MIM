@@ -28,11 +28,11 @@ class KeyRegistryTest {
 
     @Test
     fun provision_uploads_identity_and_prekeys() = withServer { server ->
-        val username = "keys" + System.currentTimeMillis().toString().takeLast(9)
-        val password = "ComposePass1234"
-        val deviceId = "compose-dev-" + System.currentTimeMillis().toString().takeLast(6)
+        val username = "composekeys"
+        val password = TestAccounts.PASSWORD
+        val deviceId = TestAccounts.uniqueDevice("keys")
 
-        registerUser(server, username, password)
+        TestAccounts.ensure(server, username)
         val login = HttpBackend(server).login(username, password, deviceId)
 
         val registry = KeyRegistry(server)

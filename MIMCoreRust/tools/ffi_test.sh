@@ -19,8 +19,8 @@ command -v "$CC" >/dev/null 2>&1 || { echo "需要 C 编译器（CC=$CC）" >&2;
 
 mkdir -p "$WORK_DIR"
 
-echo "== 构建 Rust 静态库 =="
-(cd "$RUST_DIR" && cargo build --release --quiet)
+echo "== 构建 Rust 静态库（带 JNI 特性，避免与 jni_test.sh 互相覆盖） =="
+(cd "$RUST_DIR" && cargo build --release --features jni --quiet)
 
 if [ "$(uname -s)" = "Darwin" ]; then
   EXTRA_LIBS=""

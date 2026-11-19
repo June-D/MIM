@@ -89,6 +89,22 @@ public final class MimCoreNative {
         byte[] signature);
 
     /**
+     * 组装首条消息：X3DH + 发送者证书信封（含会话标签）+ 双棘轮加密。
+     *
+     * @param requestJson 见 `MIMCoreRust/src/messaging.rs` 的 `ComposeRequest`
+     * @return `ComposeResponse` JSON（wire/state/握手参数）
+     */
+    public static native byte[] composeFirstMessage(byte[] requestJson);
+
+    /**
+     * 拆解首条消息：X3DH 回应 + 解密 + 拆证书信封。
+     *
+     * @param requestJson 见 `OpenFirstRequest`
+     * @return `OpenFirstResponse` JSON（明文/证书/标签/状态）
+     */
+    public static native byte[] openFirstMessage(byte[] requestJson);
+
+    /**
      * 加密状态快照。
      *
      * @param key   32 字节密钥（必须由平台 Keystore / Keychain 保管）

@@ -181,6 +181,18 @@ impl RatchetState {
         })
     }
 
+    /// 解密线上消息格式，换步密钥由调用方提供（对拍与确定性测试用）。
+    pub fn decrypt_wire_with_keys(
+        &mut self,
+        message: &WireMessage,
+        next_dh_private: Option<&[u8]>,
+        next_dh_public: Option<&[u8]>,
+    ) -> Option<String> {
+        let iv = message.iv_bytes()?;
+        let ciphertext = message.ciphertext_bytes()?;
+        self.decrypt_with_ratchet_key(&message.header(), &iv, &ciphertext, next_dh_private, next_dh_public)
+    }
+
     /// 解密线上消息格式，必要时自行生成新的棘轮密钥对。
     ///
     /// 这是生产/FFI 路径：调用方不需要管密钥生成。
@@ -343,7 +355,7 @@ pub fn new_ratchet_keypair() -> Option<(Vec<u8>, Vec<u8>)> {
 }
 
 /// None 表示字段缺省，Some 但解码失败表示快照损坏。
-fn decode_optional(value: &Option<String>) -> Option<Option<Vec<u8>>> {
+pub(crate) fn decode_optional(value: &Option<String>) -> Option<Option<Vec<u8>>> {
     match value {
         None => Some(None),
         Some(text) => hex::decode(text).ok().map(Some),

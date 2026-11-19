@@ -74,6 +74,17 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 
 服务端校验的是**明文口令**（BCrypt）；上传 Base64 会一直失败。
 
+### 首条消息联调
+
+`FirstMessageTest` 打通「A 组装 → 服务端 → B 拆解」：
+
+- A 用 Rust 生成 X3DH 首条消息（证书信封 + 会话标签 + 双棘轮密文）
+- 服务端按 sealed + tag 契约落库
+- B 拉 `/message/undelivered`，用 Rust 重建会话并解出明文与证书
+
+同样需要 `MIM_SERVER_URL` 与 `MIM_NATIVE_LIB`。测试使用固定账号
+（首次创建，后续复用），避免撞注册限流。
+
 ## 接 Android / iOS
 
 1. **Android**：在 `composeApp/build.gradle.kts` 的 `kotlin { }` 里加

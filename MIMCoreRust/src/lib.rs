@@ -17,6 +17,7 @@ use sha2::{Digest, Sha256};
 pub mod envelope;
 pub mod ffi;
 pub mod keys;
+pub mod messaging;
 #[cfg(feature = "jni")]
 pub mod jni_api;
 pub mod ratchet;

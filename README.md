@@ -226,6 +226,7 @@ MIMCoreRust/             Rust 可行性 spike：对拍 + 互通 + C ABI（需要
   src/sender_cert.rs     证书规范化串与 SHA256withRSA 验签、keyId 指纹校验
   src/secure_store.rs    状态加密落盘（AES-256-GCM，密钥来自平台密钥库）
   src/keys.rs            设备密钥管理（身份密钥、签名预密钥、一次性预密钥、轮换）
+  src/messaging.rs       首条消息组装/拆解（X3DH + 证书信封 + 标签 + 双棘轮）
   java/com/junesoon/mim/core/MimCoreNative.java  JNI 绑定（Android 直接复用）
   include/mim_core.h     C ABI 头文件（Android JNI / iOS cinterop 的公共底座）
   tools/interop.sh       Rust ⇄ Java 真实收发联调
@@ -601,7 +602,7 @@ cd MIMClient
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
 cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、信封、盲签名
-cd MIMCoreRust && cargo test      # 26 项：原语/ECDH/X3DH/握手/双棘轮/信封/证书验签/状态加密/密钥管理
+cd MIMCoreRust && cargo test      # 28 项：原语/ECDH/X3DH/握手/双棘轮/信封/证书验签/状态加密/密钥管理
 cd MIMCoreRust && ./tools/interop.sh   # Rust 发起 → Java 解密回信 → Rust 解密（真实互通）
 cd MIMCoreRust && ./tools/ffi_test.sh  # C 程序经 C ABI 跑完整会话与状态恢复
 cd MIMCoreRust && ./tools/jni_test.sh  # 桌面 JVM 经 JNI 跑完整会话（Android 同款）
@@ -999,6 +1000,12 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+129. Rust 补齐 **首条消息组装与拆解**：`compose_first_message` 完成 X3DH、
+    把服务端签发的发送者证书与会话标签放进密文、再用双棘轮加密，输出服务端
+    可直接接收的字段（含握手参数与一次性预密钥消耗）；`open_first_message`
+    由接收方重建会话、解密并拆证书信封。C ABI/JNI 以 JSON 进出。
+    Kotlin 联调测试打通真实链路：A 组装 → 服务端落库 → B 拉离线消息 → B 拆解，
+    断言明文、证书用户名/设备、身份公钥一致与会话标签。Rust 测试 28 项。
 128. Compose 侧打通 **设备登记与密钥上传**：新增 `KeyRegistry`，按服务端契约
     登记设备、上传身份公钥（`POST /key`）、签名预密钥与一次性预密钥；
     密钥材料由 Rust 核心经 JNI 生成，私钥不出进程。联调测试在真实服务端上
