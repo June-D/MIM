@@ -109,12 +109,14 @@ jobs:
       - name: 重新生成基准向量并检查是否漂移
         working-directory: MIMCore
         run: |
-          ../mvnw -B -q package -DskipTests
+          ../mvnw -B -q test-compile
           ../mvnw -B -q dependency:build-classpath -Dmdep.outputFile=/tmp/core-cp.txt
-          CP="target/classes:$(cat /tmp/core-cp.txt)"
+          CP="target/test-classes:target/classes:$(cat /tmp/core-cp.txt)"
           javac -encoding UTF-8 -cp "$CP" -d /tmp/vec tools/ExportVectors.java
           java -cp "/tmp/vec:$CP" ExportVectors /tmp/vectors.json
+          java -cp "$CP" com.junesoon.mim.crypto.RatchetVectors /tmp/ratchet-vectors.json
           diff -u ../MIMCoreRust/tests/fixtures/vectors.json /tmp/vectors.json
+          diff -u ../MIMCoreRust/tests/fixtures/ratchet-vectors.json /tmp/ratchet-vectors.json
 
       - name: Rust 对拍
         working-directory: MIMCoreRust

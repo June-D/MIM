@@ -47,6 +47,18 @@ public class RatchetService {
     private static final String INFO_CHAIN = "MIM/v2/chain";
     private static final String INFO_INITIAL = "MIM/v2/initial";
 
+    /**
+     * DH 棘轮新密钥对的来源。默认每次随机生成；测试可注入固定序列，
+     * 让基准向量可复现。生产路径不受影响。
+     */
+    private java.util.function.Supplier<java.security.KeyPair> keyPairSupplier =
+        DhKeyUtil::generateKeyPair;
+
+    /**
+     * 随机字节来源。默认安全随机；基准向量生成时注入固定 IV。
+     */
+    private java.util.function.IntFunction<byte[]> randomSupplier = DhKeyUtil::randomBytes;
+
     private static final byte CHAIN_ADVANCE_MESSAGE = 0x01;
     private static final byte CHAIN_ADVANCE_NEXT = 0x03;
 
@@ -337,7 +349,7 @@ public class RatchetService {
         Header header = new Header(state.getDhSelfPublic(), state.getPrevSendCount(), state.getSendCount());
 
         try {
-            byte[] iv = DhKeyUtil.randomBytes(GCM_IV_BYTES);
+            byte[] iv = randomSupplier.apply(GCM_IV_BYTES);
             byte[] ciphertext = AesGcm.encrypt(messageKey, iv, header.toAad(), plaintext);
             // 推进链密钥：本条消息的密钥用完即弃（前向安全的关键）
             state.setSendChainKey(nextChainKey);
@@ -445,7 +457,7 @@ public class RatchetService {
         state.setRecvChainKey(recvDerived.chainKey);
 
         // 换自己的棘轮密钥对，建立新的发送链
-        KeyPair newPair = DhKeyUtil.generateKeyPair();
+        KeyPair newPair = keyPairSupplier.get();
         byte[] dhSend = DhKeyUtil.agree(newPair.getPrivate(), DhKeyUtil.decodePublicKey(remotePublic));
         DerivedKeys sendDerived = kdfRoot(state.getRootKey(), dhSend);
         Hkdf.wipe(dhSend);
@@ -509,6 +521,20 @@ public class RatchetService {
 
     public String fingerprint(String publicKeyBase64) {
         return fingerprint(Base64.getDecoder().decode(publicKeyBase64));
+    }
+
+    /**
+     * 注入 DH 棘轮新密钥对的来源（包内可见，仅供基准向量生成与测试使用）。
+     */
+    void setKeyPairSupplier(java.util.function.Supplier<java.security.KeyPair> supplier) {
+        this.keyPairSupplier = supplier;
+    }
+
+    /**
+     * 注入随机字节来源（包内可见，仅供基准向量生成与测试使用）。
+     */
+    void setRandomSupplier(java.util.function.IntFunction<byte[]> supplier) {
+        this.randomSupplier = supplier;
     }
 
     /**

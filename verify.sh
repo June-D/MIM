@@ -149,6 +149,19 @@ section "协议核心 mim-core：编译 + 单元测试"
   "$ROOT_DIR/mvnw" -o test 2>&1 | tail -30
 ) || fail "mim-core 测试失败"
 
+# ---------------- Rust 协议核心（可选） ----------------
+
+if command -v cargo >/dev/null 2>&1; then
+  section "Rust 协议核心：与 Java 基准向量对拍"
+  (
+    cd "$ROOT_DIR/MIMCoreRust" || exit 1
+    cargo test --quiet 2>&1 | tail -12
+  ) || fail "Rust 对拍失败"
+else
+  echo
+  echo "跳过 Rust 对拍：未找到 cargo（CI 中会执行）"
+fi
+
 # ---------------- 客户端 ----------------
 
 section "客户端：编译 + 单元测试"

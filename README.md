@@ -587,7 +587,7 @@ cd MIMClient
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
 cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、信封、盲签名
-cd MIMCoreRust && cargo test      # 与 Java 逐字节对拍（HKDF/AES-GCM/棘轮 KDF/信封/证书串）
+cd MIMCoreRust && cargo test      # 9 项：HKDF/AES-GCM/ECDH/X3DH/信封/证书串/双棘轮状态机
 cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 mim-core）
 
 # 首次构建顺序：先安装协议核心，再构建客户端
@@ -975,6 +975,14 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+119. Rust spike 补齐 **双棘轮状态机**：`RatchetState` 对齐 `RatchetService`，
+    覆盖发送/接收链推进、DH 换步、跳键缓存、乱序解密与重放拒绝。
+    `RatchetVectors` 用真实 `RatchetService` 驱动一段确定性对话
+    （A 发起 → B 回信 → A 连发 → B 乱序先解后一条）导出 8 步完整状态；
+    Rust 逐步断言明文、消息头、密文与根/链/棘轮密钥/计数/跳键。
+    为让向量可复现，`RatchetService` 增加包内可见的换步密钥与 IV 注入点
+    （默认仍是安全随机，生产路径不变）。`cargo test` 9/9；CI 同时重新
+    生成两份向量并 `diff`，防 Java 侧悄悄漂移。
 118. Rust spike 补齐 **P-256 ECDH 与 X3DH**：固定密钥材料入库，
     Rust 端解析 PKCS#8/SPKI 计算 DH1–DH4，并与 Java 的初始共享密钥
     （`HKDF("MIM/v2/initial")`）逐字节一致；DH 棘轮步（ECDH → root/chain）

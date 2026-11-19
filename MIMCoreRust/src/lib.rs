@@ -14,6 +14,8 @@ use p256::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
+pub mod ratchet;
+
 type HmacSha256 = Hmac<Sha256>;
 
 const INFO_ROOT: &str = "MIM/v2/root";
