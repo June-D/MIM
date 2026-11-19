@@ -53,6 +53,16 @@ class SenderCertEnvelopeTest {
     }
 
     @Test
+    @DisplayName("信封包裹填充后的正文：先拆信封再剥 padding 才能还原")
+    void envelopeAroundPaddedPayload() {
+        String padded = MessagePadding.pad("你还爱");
+        SenderCertEnvelope.Parsed parsed =
+            SenderCertEnvelope.unpack(SenderCertEnvelope.pack(certificate(), "tagAAAA", padded));
+        assertNotNull(parsed);
+        assertEquals("你还爱", MessagePadding.strip(parsed.getText()));
+    }
+
+    @Test
     @DisplayName("会话标签随信封送达，解包后可读")
     void conversationTagRoundTrip() {
         String packed = SenderCertEnvelope.pack(certificate(),

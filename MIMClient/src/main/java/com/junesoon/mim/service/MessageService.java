@@ -830,7 +830,17 @@ public class MessageService {
         }
         String cached = readCache(message, cacheKey, deviceSync, isSelf);
         if (cached != null) {
-            return finish(peer, message, unwrapSync(message, cached, deviceSync));
+            String display = unwrapSync(message, cached, deviceSync);
+            if (!deviceSync && sealed) {
+                // 兼容旧版本缓存：早期版本把未拆包的证书信封直接缓存了。
+                try {
+                    display = openPayload(display, message, peer,
+                        Boolean.TRUE.equals(message.getPadding()));
+                } catch (IdentityException e) {
+                    log.debug("缓存内容拆信封失败：{}", e.getMessage());
+                }
+            }
+            return finish(peer, message, display);
         }
         if (isSelf && !deviceSync) {
             // 自己发出的密文是用对方的接收链加密的，本机棘轮解不开。
@@ -870,7 +880,10 @@ public class MessageService {
                         }
                         return buildResponderSession(peer, peerDevice, message);
                     });
-                if (Boolean.TRUE.equals(message.getPadding())) {
+                if (!deviceSync) {
+                    plaintext = openPayload(plaintext, message, peer,
+                        Boolean.TRUE.equals(message.getPadding()));
+                } else if (Boolean.TRUE.equals(message.getPadding())) {
                     plaintext = MessagePadding.strip(plaintext);
                 }
                 if (message.getSessionId() != null && !message.getSessionId().isEmpty()) {
@@ -989,6 +1002,31 @@ public class MessageService {
     private static String syncCacheKey(CipherMessage message) {
         return "sync|" + normalizeDevice(message.getSyncFromDevice()) + "|"
             + (message.getClientMsgId() == null ? "" : message.getClientMsgId());
+    }
+
+    /**
+     * 拆「发送者证书信封」并按需剥离 padding。
+     *
+     * <p>信封不只在首条消息里出现：发送端只要自己的会话还没确认，就会继续
+     * 把证书带在消息里；而接收端可能早已有会话，走的是普通解密路径。
+     * 因此这里必须在所有原始消息上统一拆包，否则界面会显示信封原文。
+     */
+    private String openPayload(String raw, CipherMessage message, String peer, boolean padding)
+        throws IdentityException {
+        String text = raw;
+        SenderCertEnvelope.Parsed parsed = SenderCertEnvelope.unpack(text);
+        if (parsed != null) {
+            SenderCertificateView cert = parsed.getCertificate();
+            if (!SenderCertVerifier.matchesHandshake(cert, message.getSenderIdentityKey())
+                || !SenderCertVerifier.verify(cert, senderCertService.pinnedPublicKey())) {
+                throw new IdentityException("发送者证书校验失败");
+            }
+            if (parsed.getConversationTag() != null) {
+                plaintextStore.addConversationTag(peer, parsed.getConversationTag());
+            }
+            text = parsed.getText();
+        }
+        return padding ? MessagePadding.strip(text) : text;
     }
 
     /**

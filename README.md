@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **210** 项、客户端 **136** 项、e2e **30 + 18 + 7 + 13** 项
+- 回归基线：服务端 **210** 项、客户端 **137** 项、e2e **30 + 18 + 7 + 13** 项
 
 ### 已完成
 
@@ -230,7 +230,7 @@ MIMClient/
   websocket/              WSClient（只收推送）
   utils/                  TlsSupport（HTTPS/WSS 信任配置）
   gui/                    Login / Main / Chat / Loading
-  src/test/java/          136 项单元测试
+  src/test/java/          137 项单元测试
   src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```
 
@@ -580,7 +580,7 @@ cd MIMClient
 
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 136 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMClient && ../mvnw test      # 137 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -960,6 +960,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     **任何失败都回退普通发送**（令牌申请失败/服务端未启用/被拒）。
     CI 启动服务端时默认打开证书/令牌/匿名三个开关，让对应 e2e 真正执行而不是 SKIP。
     客户端 134 项、服务端 234 项、e2e 30 + 18 + 7 + 13 项通过。
+112. 修复**证书信封在普通解密路径被当成正文显示**：发送端在会话未确认时会
+    继续把证书带在消息里，而接收端可能已有会话，走的是普通解密路径。
+    现在所有非同步消息解密后统一拆 `SenderCertEnvelope`，再剥离 padding；
+    旧版本已缓存的信封原文也会在读取缓存时自动拆包。
+    客户端 137 项通过。
 111. 修复**离线消息不再被拉取**：`/message/undelivered` 之前没有任何调用点。
     标签化历史后这会导致死循环：新会话的标签藏在那条离线消息里，
     不拉消息就学不到标签，历史永远是空的。现在登录后立即补拉一次，
