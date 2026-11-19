@@ -24,30 +24,6 @@ public class CipherMessage implements Serializable {
      */
     private String clientMsgId;
 
-    private String fromUsername;
-
-    /**
-     * 发信设备。多设备下用于区分同一用户的多个设备。
-     * sealed 消息这两项都是 NULL，发信人/设备改由下面的盲引用列表达。
-     */
-    private String fromDeviceId;
-
-    /**
-     * sealed 消息的发信人 HMAC 盲引用（64 位十六进制）。
-     * 服务端只按它做历史、未读、清除与撤回索引，不保存明文用户名。
-     * 盲引用属于服务端索引，绝不回传给客户端：旧客户端没有该字段，
-     * 一旦下发就会在反序列化时报未知字段，破坏新旧版本混跑。
-     */
-    @JsonIgnore
-    private String fromRef;
-
-    /**
-     * sealed 消息的发信设备 HMAC 盲引用。用于发件侧多设备历史区分。
-     * 与 fromRef 一样只留在服务端。
-     */
-    @JsonIgnore
-    private String fromDeviceRef;
-
     /**
      * 客户端生成的会话标签（不透明，24~64 位 Base64URL 字符）。
      * 服务端只按它建索引，不落任何可从用户名推导的形式；

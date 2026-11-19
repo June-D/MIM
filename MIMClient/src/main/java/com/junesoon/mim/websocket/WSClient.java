@@ -229,15 +229,11 @@ public class WSClient extends WebSocketClient {
         // 防御性过滤：服务端已按设备路由，这里再校验一次。
         // 收到的密文要么是发给"我这台设备"的，要么是自己其它设备发出的同步副本。
         if (self != null && myDevice != null) {
+            // 服务端只把密文推给收信人的目标设备，这里再做一次防御性过滤。
             boolean forMyDevice = self.equals(payload.getToUsername())
                 && myDevice.equals(payload.getTargetDeviceId());
-            boolean ownSync = self.equals(payload.getFromUsername());
-            if (!forMyDevice && !ownSync) {
+            if (!forMyDevice) {
                 log.debug("忽略不属于本设备的密文 target={}", payload.getTargetDeviceId());
-                return;
-            }
-            // 自己那台设备发出的副本不需要在本设备重复解密/渲染
-            if (ownSync && myDevice.equals(payload.getFromDeviceId())) {
                 return;
             }
         }

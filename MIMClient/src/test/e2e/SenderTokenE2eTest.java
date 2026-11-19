@@ -84,7 +84,7 @@ public final class SenderTokenE2eTest {
             .getBytes(StandardCharsets.UTF_8));
         String sendResponse = read(connection);
         requireOk(sendResponse, "匿名提交");
-        check("匿名消息落库无明文发送者", sendResponse.contains("\"fromUsername\":null"));
+        check("匿名消息落库无明文发送者", !sendResponse.contains("\"fromUsername\""));
         check("匿名消息不落盲引用", !sendResponse.contains("fromRef"));
         check("匿名提交不回传会话标签", !sendResponse.contains("conversationTag"));
 
@@ -103,7 +103,7 @@ public final class SenderTokenE2eTest {
             + conversationTag, bobToken, bobDevice);
         check("收信端可按标签查到匿名消息", history.contains(clientMsgId));
         check("匿名消息的历史响应不含发送者与标签",
-            !history.contains("\"fromUsername\":\"")
+            !history.contains("\"fromUsername\"")
                 && !history.contains("\"conversationTag\""));
 
         System.out.println();

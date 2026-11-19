@@ -49,7 +49,7 @@ public class SenderCertServiceImpl implements SenderCertService {
 
     private final UserKeyMapper userKeyMapper;
 
-    @Value("${mim.sender-cert.enabled:false}")
+    @Value("${mim.sender-cert.enabled:true}")
     private boolean enabled;
 
     private volatile PrivateKey privateKey;

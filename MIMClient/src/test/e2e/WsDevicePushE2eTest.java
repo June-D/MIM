@@ -99,11 +99,13 @@ public final class WsDevicePushE2eTest {
         // ---- 等待推送到达 ----
         boolean bobDesktopGot = bobDesktopWs.awaitMessage(8);
         boolean bobMobileGot = bobMobileWs.awaitMessage(8);
-        boolean aliceLaptopGot = aliceLaptopWs.awaitMessage(8);
+        aliceLaptopWs.awaitMessage(2);
 
         check("bob 桌面设备收到推送", bobDesktopGot);
         check("bob 手机设备收到推送", bobMobileGot);
-        check("alice 笔记本收到多端同步副本", aliceLaptopGot);
+        // 协议断代后不再向发送者其它设备推送原始密文（它们解不开），
+        // 多端历史统一走设备间同步。
+        check("发送者其它设备不再收到 raw 密文推送", aliceLaptopWs.messageCount() == 0);
 
         // ---- 关键断言：每台设备收到的密文是针对自己的 ----
         check("bob 桌面收到的密文目标是自己",
@@ -327,6 +329,8 @@ public final class WsDevicePushE2eTest {
         if (bundle.oneTimePreKeyId != null) {
             sb.append(",\"consumedOneTimePreKeyId\":").append(bundle.oneTimePreKeyId);
         }
+        sb.append(",\"sealed\":true,\"sessionId\":\"session-ws-01\"")
+            .append(",\"conversationTag\":\"tagWSAAAAAAAAAAAAAAAAAAAAAA1\"");
         return sb.append('}').toString();
     }
 

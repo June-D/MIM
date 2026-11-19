@@ -12,41 +12,37 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **234** 项、客户端 **135** 项、e2e **30 + 18 + 7 + 13** 项
+- 回归基线：服务端 **210** 项、客户端 **135** 项、e2e **30 + 18 + 7 + 13** 项
 
 ### 已完成
 
 - 服务端 Java 17 / Spring Boot 3.5.16；客户端仍为 Java 8 + JavaFX 8。
 - X3DH + Double Ratchet、按设备多端、TOFU/60 位安全码、OPK 预留后消费。
 - 2FA、恢复码、邮箱/TOTP 密钥轮换、JWT 主密钥加密、Redis 安全边界、WS 过期断连。
-- 消息长度填充（能力协商）、跨设备历史同步、sealed sender Phase 1.5（含跨设备撤回）。
-- Phase 2a/2b：发送者证书签发、分发、TOFU 固定，并接入首条消息（默认关闭）。
-- Phase 2c：盲签名令牌签发/消费 + 匿名提交（服务端与客户端都已接入，默认关闭）。
+- 消息长度填充（能力协商）、跨设备历史同步、协议断代（发送者列彻底移除）。
+- Phase 2a/2b：发送者证书签发/分发/TOFU 固定，证书是消息归属的唯一来源。
+- Phase 2c：盲签名令牌 + 匿名提交（默认关闭），客户端接入并支持降级。
 - 客户端本地屏蔽名单（匿名消息下唯一可用的滥用拦截手段）。
 - Maven Wrapper 3.9.9；CI 覆盖单元、真实 MySQL 集成和 e2e。
 
-### Sealed sender 的实际边界（Phase 1.5）
+### Phase 2 协议断代后的实际边界
 
-Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
+本版本已完成**协议断代**：消息只有一条存储路径，没有「旧格式」分支。
 
-- 已建立会话的消息写 `sealed=1`、`session_id`，`from_user` / `from_device_id` 为 NULL；
-- HMAC-SHA256 盲引用改存独立列 `from_ref` / `from_device_ref`，历史、未读、
-  清除、多端同步按盲引用查询，旧消息仍按 `from_user` 兼容；
-- 唯一索引改为 `(client_msg_id, target_device_id)`，发送者不再参与幂等判定；
-- 撤回改用发送时生成的一次性 `recallToken`，服务端只保存 SHA-256；
-  没有凭证哈希的旧消息回退到「JWT 用户名 → 盲引用」授权；
-- 同账号另一台设备可通过历史同步拿到凭证并撤回同一条消息，
-  能力位 `supportsRecallToken` 决定是否下发带凭证的加密副本；
-- 首条消息在双方都升级且服务端开启 `MIM_SENDER_CERT_ENABLED` 时也 sealed；
-  任一条件不满足就退回旧格式（服务端可见发送者），绝不阻断首次联系；
-- 握手参数只活到投递：首条消息必须带，收信设备确认收到后服务端立刻擦除
-  身份公钥/临时公钥/OPK 编号，避免用「公钥目录 join」反查用户名；
-- 首条消息可带服务端签发的发送者证书（2b）：证书在密文里，服务端仍不知道归属；
-- 会话标签随证书信封送达（2c 前置）：客户端生成、双方共享，服务端只当不透明值；
-  当前是双写期——标签与 `from_ref` 并存，历史同时按两者查询并去重；
-- 服务端提交时仍从 JWT 知道提交者。**不要宣传为提交匿名或完全 sealed**；
-- 提交匿名仍是 2c：服务端提交时仍从 JWT 知道发送者；
-  2b 只让「已落库的首条消息」不再写 from_user。
+- 每条消息都写 `sealed=1` 与 `conversation_tag`，服务端不保存
+  `from_user` / `from_device_id` / `from_ref` / `from_device_ref` 任何一列；
+- 会话标签由客户端生成（24 字节 Base64URL），随首条消息的证书信封送到对端，
+  之后双方每条消息都带上；历史、未读、已读、清除、未投递、同步、撤回全部按标签；
+- 发信人归属由服务端签名的**发送者证书**确定（证书在端到端密文里）：
+  `MIM_SENDER_CERT_ENABLED` 默认开启，关闭后客户端无法建立新会话；
+- 撤回只认发送时生成的一次性 `recallToken` 的哈希，不再有「发信人引用」回退；
+- 握手参数只活到投递：首条消息必须带，收信设备确认收到后立刻擦除；
+- 同账号其它设备通过已加密的同步副本拿到撤回凭证与会话标签，
+  服务端只看到密文与哈希；
+- 服务端提交时仍从 JWT 知道提交者；匿名提交（2c）默认关闭，
+  且**不等于完全匿名**（预密钥领取与多端同步仍可关联账号）；
+- 旧消息（没有会话标签）无法迁移：标签是随机值，服务端无从推导。
+  升级前必须执行 `MIMServer/sql/e2ee.sql` 末尾的 Phase 2 清理补丁（会归档并删除）。
 
 ## 交接给下一个 Agent
 
@@ -72,27 +68,22 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
 
 ### 关键实现点
 
-- `sessionId` 由发起方生成并写入 `SessionState`，接收方在首条桥接消息中学习；
-- `sessionIdConfirmed` 为真后，下一条消息才切 sealed；对端是旧客户端时永远停留在桥接模式；
+- `sessionId` 由发起方生成并写入 `SessionState`；首条消息就把证书与标签
+  一起放进密文，收信端解出后才知道对端是谁；
 - 收件端按 `sessionId -> (peer, device)` 索引棘轮；找不到会话时不要猜测发送者；
-- 发送端历史用本地 `PlaintextStore` 的 `sent|peer|clientMsgId`；棘轮不能解自己发出的密文；
-- 服务端历史通过 `fromMe` 和盲引用查询区分收发；
-- 客户端为每条逻辑消息生成 32 字节随机 `recallToken`，随副本提交；
-  本地用 `PlaintextStore` 加密保存 `token|peer|clientMsgId`，服务端只存 SHA-256；
-- 撤回优先走 token：消息有 `recall_token_hash` 就必须提交匹配的原始 token；
-  没有哈希的旧消息才回退到发信人引用；
-- 设备间同步副本共用原消息的 `recall_token_hash`，一次撤回覆盖所有副本；
-- 握手参数（`sender_identity_key` / 临时公钥 / OPK 编号）只在投递前存在：
-  身份公钥能与 `t_user_key.public_key` 直接 join 出用户名，所以
-  `/message/delivered` 会在标记已投递的同一条 UPDATE 里把它们清空；
-  已建立会话的新客户端不再发送这些参数；
-- 跨设备撤回：设备声明 `supportsRecallToken` 后，历史同步会把凭证装进
-  `SyncEnvelope` 信封，随**已加密**的同步副本送到本账号其它设备；
-  服务端仍只看到密文与哈希，旧客户端只收纯文本副本；
-- UI/历史同步必须走 `MessageService.peerForMessage`，不能把 HMAC 盲引用当用户名；
-- 多端同步副本使用 `syncOriginalFrom/To` 签名还原归属；
-- `MIM_SEALED_SENDER_ENABLED=false` 会把新 sealed 请求降级为旧格式，但**已落库 sealed 仍可读**；不要改成直接拒绝，否则已切换的客户端会永久发不出消息；
-- 盲引用密钥优先 `MIM_SECURITY_METADATA_KEY`（Base64 32 字节），未配置回退 JWT 私钥；更换它会使旧 sealed 历史/未读/撤回索引失效。
+- 发送端历史用本地 `PlaintextStore` 的 `sent|peer|clientMsgId`；
+  棘轮不能解自己发出的密文；
+- 服务端历史按客户端提供的标签查询，用 `to_user` 判断方向（对端 = 我发的）；
+- 客户端为每条逻辑消息生成 32 字节随机 `recallToken`，本地加密保存，
+  服务端只存 SHA-256；撤回必须原样带回；
+- 设备间同步副本共用原消息的 `recall_token_hash` 与标签，一次撤回覆盖所有副本；
+  同步副本的 `to_user` 改写为本账号，未投递查询才能命中；
+- 握手参数（身份公钥/临时公钥/OPK 编号）在 `/message/delivered` 时清空；
+- 跨设备撤回：设备声明 `supportsRecallToken` 后，历史同步把凭证装进
+  `SyncEnvelope` 随加密副本送达；
+- 多端同步副本使用 `syncOriginalFrom/To` 签名还原归属，不依赖服务端字段；
+- 客户端本地屏蔽名单（`blocked|peer`）是匿名消息下唯一的滥用拦截手段；
+- 服务端不再有任何「从用户名推导」的索引，也不需要盲引用密钥。
 
 ### 运行与验证
 
@@ -118,11 +109,12 @@ export MIM_TEST_DB_PASSWORD=
 
 ### 当前已知限制
 
-- 盲引用可被持有服务端密钥者关联；服务端提交时仍知道发送者；
-- 撤回凭证保存在发送端本地：同账号其它设备只有跑过历史同步、且同步时目标设备
-  已声明 `supportsRecallToken` 才拿得到凭证；本机数据被清除后只能走旧版兼容路径；
-- 多端 sender 的其它设备不会解密 raw sealed 推送，依赖历史同步；这是现有边界；
-- 跨设备历史只补本机留有原文的最近 50 条；
+- 服务端提交时仍从 JWT 知道发送者；匿名提交默认关闭，且不等于完全匿名；
+- 撤回凭证保存在发送端本地：同账号其它设备只有跑过历史同步、且目标设备
+  声明了 `supportsRecallToken` 才拿得到；本机数据被清除后只能由发送设备撤回；
+- 多端 sender 的其它设备不再接收 raw 密文推送，只能靠历史同步补齐；
+- 旧消息（没有会话标签）在升级时会被归档并删除，无法迁移；
+- 混合版本的多设备用户：旧版本设备不认识标签，看不到新会话的历史；
 - 首次 TOFU 仍靠人工核对；邮箱找回依赖真实 SMTP。
 
 ## 加密方案
@@ -203,10 +195,11 @@ KDF_CK(ck)        : mk     = HMAC-SHA256(ck, 0x01)   // 本条消息密钥，用
 
 ### 已知局限
 
-- **sealed sender Phase 1 不是提交匿名**：已建立会话的 `from_user`/`from_device_id`
-  是 HMAC 盲引用，不是明文；但服务端提交时仍从 JWT 知道提交者，持有盲引用密钥者
-  仍可关联。严格无发送者索引与提交匿名属于 Phase 1.5 / Phase 2。
-- **首条消息仍暴露发送者**：新会话必须先用旧格式完成 X3DH 桥接，确认后才切 sealed。
+- **协议断代后的存储**：数据库里没有任何发送者列，只有客户端生成的会话标签；
+  但服务端提交时仍从 JWT 知道提交者，预密钥领取也会暴露「A 想联系 B」。
+  完全匿名提交（2c）默认关闭，且受这两个边界限制。
+- **首条消息依赖发送者证书**：证书关闭或对方版本过旧时无法建立新会话；
+  这是用「可归属」换「无发送者列」的直接代价。
 - **跨设备历史只补本机留有原文的最近 50 条**：旧设备不在线，或这台设备从没解开过的消息，新设备补不回来。
 - **发送端多端 sealed 历史依赖同步**：其它设备收到 raw sealed 推送时无法解密，需走已授权设备历史同步。
 - **首次信任依赖人工核对**：TOFU 的固有局限，需要用户比对安全码。
@@ -226,7 +219,7 @@ MIMServer/
                           PresenceService、PushService
   websocket/              SessionRegistry（本机会话）、WebSocketServer（生命周期+心跳）
   config/                 WebMvc、RedisSubscriber、WebSocket、TLS
-  src/test/java/          234 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
+  src/test/java/          210 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
 MIMClient/
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
@@ -445,17 +438,15 @@ mysql -uroot mim_core < MIMServer/sql/e2ee.sql
 - `t_user_key.supports_sender_cert`：设备能否解析首条消息里的发送者证书；
   不声明时继续收明文发送者格式，旧库执行对应的 `ALTER`；
 - `t_message.padding`：该条明文是否做了长度填充；
-- `t_message.sealed / session_id`：已建立会话后是否隐藏明文发送者，
-  以及收件端索引棘轮用的会话 ID；旧库执行 `e2ee.sql` 末尾的 Phase 1 `ALTER`；
-- `t_message.from_ref / from_device_ref`：sealed 消息的 HMAC 盲引用，
-  `from_user` / `from_device_id` 对 sealed 消息为 NULL；
-- `t_message.recall_token_hash`：一次性撤回凭证的 SHA-256；有值时撤回必须
-  提交原始 token，旧库执行 Phase 1.5 的 `ALTER` 与回填；
+- `t_message.sealed / session_id`：消息一律 sealed，`session_id` 供收件端索引棘轮；
+- `t_message.recall_token_hash`：一次性撤回凭证的 SHA-256，撤回必须提交原始 token；
 - `t_message.conversation_tag`：客户端生成的会话标签（不透明），
-  按 `(tag, to_user, id)` 建索引，供 2c 阶段替代盲引用查历史；
-  旧库执行对应的 `ALTER`；
-- 唯一索引 `uk_client_target` 已改为 `(client_msg_id, target_device_id)`；
-  迁移前先跑注释里的重复检查，避免旧数据冲突导致 `ADD UNIQUE` 失败；
+  按 `(tag, id)` 与 `(tag, to_user, id)` 建索引，是历史/未读/清除/同步的唯一索引；
+- `t_message` **不再有** `from_user` / `from_device_id` / `from_ref` /
+  `from_device_ref` 四列，也没有对应的三个旧索引；
+- 唯一索引是 `(client_msg_id, target_device_id)`，不含发送者；
+- 升级必须执行 `e2ee.sql` 末尾的 Phase 2 补丁：归档无标签旧消息 → 删除 →
+  删列与旧索引 → 清理按用户名记录的清除点。**不可逆**，脚本默认注释状态；
 - `t_rsa_key.key_value`：启用 `MIM_MASTER_KEY` 前扩到 `varchar(4096)`，
   旧库执行 `MODIFY`（加密后的 RSA 私钥约 2.2KB）。
 
@@ -483,15 +474,11 @@ export MIM_REDIS_PASSWORD=
 export MIM_REDIS_SSL=false
 export MIM_REDIS_REQUIRE_SECURE=false
 export MIM_MASTER_KEY=
-export MIM_SEALED_SENDER_ENABLED=true
+# 发送者证书默认为 true；关闭后客户端无法建立新会话。
+export MIM_SENDER_CERT_ENABLED=true
 # Phase 2c：盲签名令牌与匿名提交，默认关闭（两者要一起开）。
 # export MIM_SENDER_TOKEN_ENABLED=false
 # export MIM_ANONYMOUS_SEND_ENABLED=false
-# Phase 2a：发送者证书，默认关闭。开启后 /cert/* 才可用。
-# export MIM_SENDER_CERT_ENABLED=false
-# 可选：独立的消息元数据盲引用密钥（Base64 32 字节）。
-# 未配置时由 JWT 私钥派生；轮换 JWT 私钥会使旧 sealed 历史索引失效。
-# export MIM_SECURITY_METADATA_KEY=
 ../mvnw spring-boot:run
 ```
 
@@ -512,32 +499,27 @@ export MIM_SEALED_SENDER_ENABLED=true
 > Pub/Sub 推送频道本身不带签名，Redis 被攻破等同于能伪造推送信封；
 > 不要把 6379 暴露到公网。
 
-### Sealed sender Phase 1.5
+### 消息存储：会话标签与发送者证书
 
-已建立会话的消息不再写入明文 `from_user` / `from_device_id`：
+协议断代后消息只有一条存储路径：
 
-- `sealed=1`、`session_id` 标识会话，`from_user` / `from_device_id` 写 NULL；
-- `from_ref` / `from_device_ref` 保存 HMAC-SHA256 盲引用（64 位十六进制），
-  历史、未读、撤回、清除和多端同步按盲引用查询；
-- 幂等唯一键是 `(client_msg_id, target_device_id)`，发送者不参与；
-- 客户端发送时为每条逻辑消息生成一次性 `recallToken`，服务端只存 SHA-256；
-  撤回必须提交匹配的 token；没有哈希的旧消息回退到发信人引用授权；
-- 首条会话消息和新旧客户端桥接消息仍走旧格式（服务端可见发送者）；
+- 每条消息都写 `sealed=1` 与 `conversation_tag`，服务端不保存任何发送者列；
+- 会话标签由客户端生成，随首条消息的证书信封送达；历史/未读/已读/清除/
+  未投递/同步/撤回全部按标签查询，服务端无法从标签反推用户名；
+- 发信人归属由服务端签名的发送者证书决定，证书在端到端密文里；
+- 幂等唯一键是 `(client_msg_id, target_device_id)`；
+- 撤回只认一次性 `recallToken` 的哈希，没有回退路径；
 - 服务端在提交时仍从 JWT 知道提交者，**这不是提交时匿名**；
-  完全提交匿名属于 Phase 2 的匿名令牌/发送者证书。
+  匿名提交（2c）默认关闭，且受预密钥领取与多端同步的限制。
 
-关闭 `MIM_SEALED_SENDER_ENABLED` 会把 sealed 请求降级为旧格式存储（不再隐藏
-发送者，但不会中断已有会话）；旧客户端不受影响。
-盲引用密钥 `MIM_SECURITY_METADATA_KEY` 必须与数据库一起备份；更换它会让
-旧 sealed 消息的历史/未读/撤回索引失效。设计取舍详见
-[docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 9、10 节。
+> `MIM_SENDER_CERT_ENABLED` 必须保持开启。关闭后客户端拿不到证书，
+> 无法建立新会话（服务端会拒绝没有标签的消息）。
 
-**从 Phase 1 升级**：必须执行 `MIMServer/sql/e2ee.sql` 末尾的 Phase 1.5 补丁。
-顺序不能颠倒：加列 → 回填 `from_ref` → 改唯一索引 → 置 NULL。
-只加列不回填会让旧 sealed 历史在迁移后查不到；先跑注释里的重复检查，
-确认没有「同一 clientMsgId + 目标设备」的冲突数据再改唯一索引。
-回滚到 Phase 1 代码前，先保留 `from_ref` / `from_device_ref` 的副本，
-否则旧代码读不到盲引用。
+**升级**：必须执行 `MIMServer/sql/e2ee.sql` 末尾的 Phase 2 补丁。
+它会归档无标签旧消息到 `t_message_legacy_archive`，然后删除、删列与旧索引。
+标签是随机值，无法回填，因此**旧消息不可能保留在聊天记录里**；
+需要保留证据时必须先自行备份归档表。设计说明见
+[docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 12 节。
 
 ## 密钥轮换与备份
 
@@ -597,7 +579,7 @@ cd MIMClient
 ./verify.sh
 
 # 或分端执行（在各自目录）
-cd MIMServer && ../mvnw test      # 234 项（含真实 MySQL 集成）
+cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
 cd MIMClient && ../mvnw test      # 135 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
@@ -629,7 +611,7 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 
 | 测试/脚本 | 覆盖点 |
 |---|---|
-| `MapperIntegrationTest`（45 项） | XML 与 schema 匹配、upsert 语义、`INSERT IGNORE`、`FOR UPDATE` 领取、去重分页、撤回级联、sealed 盲引用与 token 撤回 |
+| `MapperIntegrationTest`（31 项） | XML 与 schema 匹配、upsert 语义、`INSERT IGNORE`、`FOR UPDATE` 领取、标签历史/未读/清除、token 撤回 |
 | `HttpApiIntegrationTest`（20 项） | 鉴权 401、限流 429、`@CurrentUser`/`@CurrentDevice` 解析、伪造发信人、多设备扇出 |
 | `MultiDeviceE2eTest`（30 项） | 多设备注册、按设备分发、各自解密、设备隔离、按 clientMsgId 撤回、sealed 往返/历史/撤回、缺 token 撤回被拒、注销后停止分发 |
 | `SenderTokenE2eTest`（7 项） | 致盲签名跨模块验证、匿名提交无发送者、令牌重放被拒、收信端按标签查历史。需 `MIM_SENDER_TOKEN_ENABLED=true` 与 `MIM_ANONYMOUS_SEND_ENABLED=true`，关闭时明确 SKIP |
@@ -978,6 +960,14 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     **任何失败都回退普通发送**（令牌申请失败/服务端未启用/被拒）。
     CI 启动服务端时默认打开证书/令牌/匿名三个开关，让对应 e2e 真正执行而不是 SKIP。
     客户端 134 项、服务端 234 项、e2e 30 + 18 + 7 + 13 项通过。
+108. **Phase 2 协议断代**：彻底移除 `from_user` / `from_device_id` /
+    `from_ref` / `from_device_ref` 与 `MetadataRef`（HMAC 盲引用机制）：
+    `send` 只接受 sealed + 会话标签，历史/未读/已读/清除/未投递/同步/撤回
+    全部按标签，撤回只认 token；同步副本的 `to_user` 改写为本账号、
+    不再向发送者其它设备推送原始密文（它们解不开）。
+    新装库直接不含旧列；旧库执行 `e2ee.sql` 末尾 Phase 2 补丁
+    （归档 → 删除无标签旧消息 → 删列与旧索引）。
+    服务端 210 项、客户端 135 项、e2e 30 + 18 + 7 + 13 项通过。
 107. 客户端**本地屏蔽名单**：`PlaintextStore` 新增 `blocked|peer` 加密项，
     `MessageService.block/unblock/isBlocked`；解密出口统一屏蔽为
     「[已屏蔽该联系人]」（仍正常解密、推进棘轮，解除后不丢密钥）；
@@ -991,7 +981,7 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 `MIM_ANONYMOUS_SEND_ENABLED` 与客户端 `-Dmim.anonymousSend=true`：
 
 1. 首次联系：A 给从未聊过的 B 发消息，B 能收到、能解密、能直接回复；
-2. 服务端关闭证书功能时，A 的发送自动退回明文发送者格式，不报错；
+2. 服务端关闭证书功能时，A 的发送给出明确错误（不再有明文降级路径）；
 3. 客户端匿名关闭/开启各跑一次首次联系，确认历史、未读、清除都正常；
 4. 屏蔽：B 屏蔽 A 后，A 的新消息显示「已屏蔽该联系人」，解除后恢复正常；
 5. 多设备：A 的两台设备都能看到同一会话的历史（含被标签化的新消息）；
@@ -1000,12 +990,10 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 ## 仍需处理
 
 - 消息长度填充只隐藏精确长度，服务端仍可见粗粒度长度、发送时间、参与者与设备。
-  sealed sender Phase 1.5 已把发送者列置 NULL，但盲引用仍可被持有服务端密钥者
-  关联，且服务端提交时仍从 JWT 知道发送者。提交匿名见
-  [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 10 节及 Phase 2。
-- 撤回凭证仍以发送端为源：另一台设备要靠历史同步拿到凭证，且同步时目标设备
-  必须已声明 `supportsRecallToken`；没跑过同步或本机数据被清除时，只能走旧版
-  发信人兼容路径撤回。
+  协议断代后数据库没有发送者列，但服务端提交时仍从 JWT 知道提交者；
+  匿名提交默认关闭，且受预密钥领取/多端同步的限制（见设计文档第 11 节）。
+- 撤回凭证仍以发送端为源：另一台设备要靠历史同步拿到凭证，且目标设备
+  必须已声明 `supportsRecallToken`；没跑过同步或本机数据被清除后无法撤回。
 - 新设备首次信任仍依赖人工核对指纹/60 位安全码，这是 TOFU 的固有局限。
 - 邮箱找回密码仍依赖用户填写真实邮箱与 SMTP；恢复码已支持登录、关闭 2FA
   和重置密码，但仍需用户提前离线保存。

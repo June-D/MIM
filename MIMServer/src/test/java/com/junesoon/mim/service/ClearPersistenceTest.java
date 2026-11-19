@@ -60,10 +60,13 @@ class ClearPersistenceTest {
                 session.getMapper(MessageMapper.class),
                 session.getMapper(ConversationClearMapper.class),
                 null, null, null, null);
-            ClearResult result = service.clearConversation("probea", "probeb", true);
+            ClearResult result = service.clearConversation("probea", "probeb", true,
+                java.util.Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1"));
             assertEquals(id, result.getClearedBeforeId());
-            assertTrue(service.history("probea", "probeb", null, 20).isEmpty());
-            assertTrue(service.history("probeb", "probea", null, 20).isEmpty());
+            assertTrue(service.history("probea", "probeb", null, 20, null,
+                java.util.Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1")).isEmpty());
+            assertTrue(service.history("probeb", "probea", null, 20, null,
+                java.util.Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1")).isEmpty());
         }
         assertNull(ciphertext());
     }
@@ -83,10 +86,6 @@ class ClearPersistenceTest {
             statement.execute("create table if not exists t_message ("
                 + "id bigint not null auto_increment primary key,"
                 + "client_msg_id varchar(64) not null,"
-                + "from_user varchar(64) null,"
-                + "from_device_id varchar(64) null,"
-                + "from_ref varchar(64) null,"
-                + "from_device_ref varchar(64) null,"
                 + "conversation_tag varchar(64) null,"
                 + "to_user varchar(64) not null,"
                 + "target_device_id varchar(64) not null,"
@@ -135,9 +134,10 @@ class ClearPersistenceTest {
     private static long insertMessage() throws Exception {
         try (Connection connection = DriverManager.getConnection(URL, "root", "");
             PreparedStatement statement = connection.prepareStatement(
-                "insert into t_message (client_msg_id, from_user, from_device_id, to_user,"
+                "insert into t_message (client_msg_id, conversation_tag, to_user,"
                     + " target_device_id, alg, iv, ciphertext, client_time, server_time)"
-                    + " values ('probe-msg', 'probea', 'dev', 'probeb', 'dev', 'ALG', 'iv', 'secret', 1, 1)",
+                    + " values ('probe-msg', 'tagAAAAAAAAAAAAAAAAAAAAAAAA1', 'probeb', 'dev',"
+                    + " 'ALG', 'iv', 'secret', 1, 1)",
                 Statement.RETURN_GENERATED_KEYS)) {
             statement.executeUpdate();
             try (ResultSet keys = statement.getGeneratedKeys()) {

@@ -28,6 +28,9 @@ import org.junit.jupiter.api.Test;
  */
 class MessageClearTest {
 
+    /** 协议断代后清除必须带会话标签。 */
+    private static final String TAG = "tagAAAAAAAAAAAAAAAAAAAAAAAA1";
+
     private MemoryClear clear;
     private MemoryMessages messages;
     private MessageServiceImpl service;
@@ -146,7 +149,8 @@ class MessageClearTest {
     @Test
     @DisplayName("只清除我这边时，对方的清除点不动，密文还在")
     void clearMineLeavesTheOtherSide() {
-        ClearResult result = service.clearConversation("alice", "bob", false);
+        ClearResult result = service.clearConversation("alice", "bob", false,
+                java.util.Collections.singletonList(TAG));
         assertEquals(12L, result.getClearedBeforeId());
         assertEquals(Long.valueOf(12L), clear.cursor("alice", "bob"));
         assertTrue(clear.cursor("bob", "alice") == null);
@@ -156,7 +160,8 @@ class MessageClearTest {
     @Test
     @DisplayName("清除双方时两边都推进，并抹掉密文")
     void clearBothWipesCiphertext() {
-        ClearResult result = service.clearConversation("alice", "bob", true);
+        ClearResult result = service.clearConversation("alice", "bob", true,
+                java.util.Collections.singletonList(TAG));
         assertTrue(result.isForBoth());
         assertEquals(Long.valueOf(12L), clear.cursor("alice", "bob"));
         assertEquals(Long.valueOf(12L), clear.cursor("bob", "alice"));
@@ -168,7 +173,8 @@ class MessageClearTest {
     void cursorNeverMovesBackward() {
         clear.put("alice", "bob", 30L);
         messages.maxId = 12L;
-        service.clearConversation("alice", "bob", false);
+        service.clearConversation("alice", "bob", false,
+                java.util.Collections.singletonList(TAG));
         assertEquals(Long.valueOf(30L), clear.cursor("alice", "bob"));
     }
 
@@ -178,7 +184,8 @@ class MessageClearTest {
         clear.put("alice", "bob", 10L);
         messages.history.add(row(20L));
         messages.history.add(row(5L));
-        List<CipherMessage> visible = service.history("alice", "bob", null, 50);
+        List<CipherMessage> visible = service.history("alice", "bob", null, 50, null,
+                java.util.Collections.singletonList(TAG));
         assertEquals(1, visible.size());
         assertEquals(Long.valueOf(20L), visible.get(0).getId());
     }
@@ -187,7 +194,8 @@ class MessageClearTest {
     @DisplayName("不能清除与自己的会话")
     void cannotClearSelf() {
         assertThrows(UserInvalidException.class,
-            () -> service.clearConversation("alice", "alice", true));
+            () -> service.clearConversation("alice", "alice", true,
+                java.util.Collections.singletonList(TAG)));
     }
 
     private static CipherMessage row(long id) {
@@ -248,37 +256,8 @@ class MessageClearTest {
         }
 
         @Override
-        public CipherMessage selectOwnedCopy(String clientMsgId, String fromUser, String fromRef) {
+        public CipherMessage selectOwnedCopyByTags(List<String> tags, String clientMsgId) {
             return null;
-        }
-
-        @Override
-        public List<CipherMessage> selectHistory(String a, String b, Long beforeId, int limit) {
-            return new ArrayList<>(history);
-        }
-
-        @Override
-        public CipherMessage selectParticipantCopy(String clientMsgId, String username,
-            String userRef) {
-            return null;
-        }
-
-        @Override
-        public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
-            String deviceId, Long beforeId, int limit) {
-            return new ArrayList<>(history);
-        }
-
-        @Override
-        public List<CipherMessage> selectRefHistory(String fromRef, String toUser,
-            Long beforeId, int limit) {
-            return new ArrayList<>();
-        }
-
-        @Override
-        public List<CipherMessage> selectRefHistoryForDevice(String fromRef, String toUser,
-            String viewer, String deviceId, String deviceRef, Long beforeId, int limit) {
-            return new ArrayList<>();
         }
 
         @Override
@@ -287,44 +266,37 @@ class MessageClearTest {
         }
 
         @Override
-        public int markReadByTags(List<String> tags, String toUsername, Long beforeId) {
-            return 0;
-        }
-
-        @Override
-        public long countUnreadByRefOrTags(String fromRef, List<String> tags, String toUsername,
-            Long afterId) {
-            return 0;
-        }
-
-        @Override
-        public Long maxTagConversationId(List<String> tags, String viewer, String peer) {
-            return null;
-        }
-
-        @Override
-        public int wipeTagConversation(List<String> tags, String viewer, String peer,
-            long beforeId) {
-            return 0;
-        }
-
-        @Override
         public List<CipherMessage> selectTagHistoryForDevice(List<String> tags, String viewer,
             String peer, String deviceId, Long beforeId, int limit) {
-            return java.util.Collections.emptyList();
-        }
-
-        @Override
-        public CipherMessage selectOwnedCopyByTags(List<String> tags, String clientMsgId) {
-            return null;
+            return new ArrayList<>(history);
         }
 
         @Override
         public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
             Long beforeId, int limit) {
-            // 标签查询由 MapperIntegrationTest 用真实 MySQL 覆盖；
-            // 这些单测只关心旧路径，返回空列表即可。
-            return java.util.Collections.emptyList();
+            return new ArrayList<>(history);
+        }
+
+        @Override
+        public int markReadByTags(List<String> tags, String toUsername, Long beforeId) {
+            return 0;
+        }
+
+        @Override
+        public long countUnreadByTags(List<String> tags, String toUsername, Long afterId) {
+            return 0;
+        }
+
+        @Override
+        public Long maxTagConversationId(List<String> tags, String viewer, String peer) {
+            return maxId;
+        }
+
+        @Override
+        public int wipeTagConversation(List<String> tags, String viewer, String peer,
+            long beforeId) {
+            wipedBefore = beforeId;
+            return 1;
         }
 
         @Override
@@ -343,65 +315,7 @@ class MessageClearTest {
         }
 
         @Override
-        public int markRead(String fromUsername, String toUsername, Long beforeId) {
-            return 0;
-        }
-
-        @Override
-        public int markReadByRef(String fromRef, String toUsername, Long beforeId) {
-            return 0;
-        }
-
-        @Override
-        public long countUnread(String fromUsername, String toUsername) {
-            return 0;
-        }
-
-        @Override
-        public long countUnreadByRef(String fromRef, String toUsername) {
-            return 0;
-        }
-
-        @Override
         public int recallByToken(String clientMsgId, String recallTokenHash, long recalledAt) {
-            return 0;
-        }
-
-        @Override
-        public int recallBySender(String clientMsgId, String fromUser, String fromRef,
-            long recalledAt) {
-            return 0;
-        }
-
-        @Override
-        public Long maxConversationId(String a, String b) {
-            return maxId;
-        }
-
-        @Override
-        public Long maxRefConversationId(String fromRef, String toUser) {
-            return maxId;
-        }
-
-        @Override
-        public int wipeConversation(String a, String b, long beforeId) {
-            wipedBefore = beforeId;
-            return 1;
-        }
-
-        @Override
-        public int wipeRefConversation(String fromRef, String toUser, long beforeId) {
-            wipedBefore = beforeId;
-            return 1;
-        }
-
-        @Override
-        public long countUnreadAfter(String fromUsername, String toUsername, long afterId) {
-            return 0;
-        }
-
-        @Override
-        public long countUnreadAfterByRef(String fromRef, String toUsername, long afterId) {
             return 0;
         }
     }

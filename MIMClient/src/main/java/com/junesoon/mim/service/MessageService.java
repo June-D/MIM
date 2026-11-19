@@ -304,12 +304,7 @@ public class MessageService {
             SessionRef ref = sessionRef(message.getSessionId());
             return ref == null ? null : ref.peer;
         }
-        if (message.getFromUsername() == null) {
-            return null;
-        }
-        String self = ApplicatonStore.getUsername();
-        return self != null && self.equals(message.getFromUsername())
-            ? message.getToUsername() : message.getFromUsername();
+        return null;
     }
 
     /**
@@ -516,29 +511,32 @@ public class MessageService {
                 // Phase 2b：还没确认会话时，如果对端设备声明支持证书，
                 // 就把服务端签发的证书放进密文里，让服务端不必落库 from_user。
                 // 拿不到证书（功能未启用/服务端旧版本）时自动退回明文发送者格式。
-                com.junesoon.mim.model.SenderCertificateView cert =
-                    sealed ? null : prefetchedCert;
-                if (cert != null && !Boolean.TRUE.equals(device.getSupportsSenderCert())) {
-                    cert = null;
+                if (sealed && conversationTag == null) {
+                    // 已确认的会话却没有标签：说明这对设备从未完成新协议握手。
+                    throw new IdentityException("会话缺少会话标签，请让对方升级后重新发起会话");
                 }
-
-                boolean padding = Boolean.TRUE.equals(device.getSupportsPadding());
-                String payload = padding ? MessagePadding.pad(plaintext) : plaintext;
-                if (cert != null) {
+                if (!sealed) {
+                    com.junesoon.mim.model.SenderCertificateView cert = prefetchedCert;
+                    if (cert == null || !Boolean.TRUE.equals(device.getSupportsSenderCert())) {
+                        // 协议断代后没有「明文发送者」降级路径：拿不到证书就无法归属。
+                        throw new IdentityException(
+                            "无法建立会话：服务端未启用发送者证书，或对方客户端版本过旧");
+                    }
                     // 标签必须随证书信封一起送达，否则收信端永远不知道它。
-                    // 同一会话的所有副本共用这一个标签。
                     if (conversationTag == null) {
                         conversationTag = newConversationTag();
                         plaintextStore.addConversationTag(peer, conversationTag);
                     }
-                    String packed = SenderCertEnvelope.pack(cert, conversationTag, payload);
-                    if (packed == null) {
-                        cert = null;
-                    } else {
-                        payload = packed;
+                }
+
+                boolean padding = Boolean.TRUE.equals(device.getSupportsPadding());
+                String payload = padding ? MessagePadding.pad(plaintext) : plaintext;
+                if (!sealed) {
+                    payload = SenderCertEnvelope.pack(prefetchedCert, conversationTag, payload);
+                    if (payload == null) {
+                        throw new IdentityException("发送者证书信封打包失败");
                     }
                 }
-                boolean sealedWire = sealed || cert != null;
                 RatchetService.Encrypted encrypted = ratchet.encrypt(state, payload);
                 persistSlot(peer, deviceId, slot);
                 log.info("发送到 {}/{}：序号={} 发送链长度={}",
@@ -549,11 +547,9 @@ public class MessageService {
                 replica.setClientMsgId(clientMsgId);
                 replica.setRecallToken(recallToken);
                 replica.setConversationTag(conversationTag);
-                replica.setFromUsername(sealedWire ? null : self);
-                replica.setFromDeviceId(sealedWire ? null : keyManager.deviceId());
                 replica.setToUsername(peer);
                 replica.setTargetDeviceId(deviceId);
-                replica.setSealed(sealedWire);
+                replica.setSealed(true);
                 replica.setSessionId(state.getSessionId());
                 replica.setAlg(RatchetService.ALGORITHM);
                 replica.setIv(encrypted.getIv());
@@ -779,9 +775,8 @@ public class MessageService {
         final boolean deviceSync = message.getSyncFromDevice() != null
             && !message.getSyncFromDevice().isEmpty();
         final boolean sealed = Boolean.TRUE.equals(message.getSealed());
-        boolean isSelf = sealed
-            ? Boolean.TRUE.equals(message.getFromMe())
-            : self.equals(message.getFromUsername());
+        // 协议断代后所有原始消息都是 sealed；没有发送者字段可用来判断归属。
+        boolean isSelf = Boolean.TRUE.equals(message.getFromMe());
 
         // 设备间同步先确认发送设备的身份，再用转发设备的签名覆盖服务端给的归属字段。
         // 这一步可能弹窗，放在 cryptoLock 外，避免用户思考期间阻塞其它会话解密。
@@ -829,10 +824,9 @@ public class MessageService {
             peerDevice = ref.deviceId;
             cacheKey = cacheKey(peer, peerDevice, message.getClientMsgId());
         } else {
-            cacheKey = cacheKey(message.getFromUsername(),
-                normalizeDevice(message.getFromDeviceId()), message.getClientMsgId());
-            peer = message.getFromUsername();
-            peerDevice = normalizeDevice(message.getFromDeviceId());
+            // 既不是同步副本也不是 sealed：协议断代后不应出现这种消息。
+            log.warn("收到不属于任何会话格式的消息 {}", message.getClientMsgId());
+            return new DecryptedMessage(message, "[此消息无法解密]", true);
         }
         String cached = readCache(message, cacheKey, deviceSync, isSelf);
         if (cached != null) {
@@ -1102,7 +1096,7 @@ public class MessageService {
         if (!deviceSync) {
             String password = currentPassword();
             TrustStore.VerificationResult trust = keyManager.getTrustStore()
-                .verify(peer, normalizeDevice(message.getFromDeviceId()),
+                .verify(peer, normalizeDevice(message.getSyncOriginalDevice()),
                     message.getSenderIdentityKey(), password);
             if (!trust.isSendable()) {
                 throw new IdentityException(trust.describe());

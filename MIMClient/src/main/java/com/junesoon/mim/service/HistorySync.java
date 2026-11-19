@@ -292,23 +292,12 @@ public final class HistorySync {
             if (identity == null || raw == null) {
                 return null;
             }
-            String originalFrom;
-            String originalTo;
-            String originalDevice;
-            if (Boolean.TRUE.equals(raw.getSealed())) {
-                // sealed 消息的 from/to 中有一侧是 HMAC 盲引用，不能用它签名；
-                // 用当前会话对端 + 本机账号还原原始归属。发送设备已被隐藏，
-                // 只能使用默认设备标识。
-                String self = ApplicatonStore.getUsername();
-                originalFrom = message.isMine() ? self : conversationPeer;
-                originalTo = message.isMine() ? conversationPeer : self;
-                originalDevice = SessionStore.DEFAULT_DEVICE_ID;
-            } else {
-                originalFrom = raw.getFromUsername();
-                originalTo = raw.getToUsername();
-                originalDevice = raw.getFromDeviceId() == null
-                    ? SessionStore.DEFAULT_DEVICE_ID : raw.getFromDeviceId();
-            }
+            // 服务端不保存发送者，只用会话对端 + 本机账号还原原始归属；
+            // 发送设备已被隐藏，统一使用默认设备标识。
+            String self = ApplicatonStore.getUsername();
+            String originalFrom = message.isMine() ? self : conversationPeer;
+            String originalTo = message.isMine() ? conversationPeer : self;
+            String originalDevice = SessionStore.DEFAULT_DEVICE_ID;
             long clientTime = message.getTimestamp();
             replica.setSyncOriginalFrom(originalFrom);
             replica.setSyncOriginalTo(originalTo);

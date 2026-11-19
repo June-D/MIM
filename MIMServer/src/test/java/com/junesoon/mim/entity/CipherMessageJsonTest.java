@@ -31,18 +31,14 @@ class CipherMessageJsonTest {
         message.setClientMsgId("client-msg-0001");
         message.setToUsername("bob");
         message.setSealed(true);
-        message.setFromRef("0123456789abcdef0123456789abcdef"
-            + "0123456789abcdef0123456789abcdef");
-        message.setFromDeviceRef("fedcba9876543210fedcba9876543210"
-            + "fedcba9876543210fedcba9876543210");
         message.setRecallToken("3q2+7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         message.setRecallTokenHash("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
             + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         message.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
 
         String json = mapper.writeValueAsString(message);
-        assertFalse(json.contains("fromRef"), "盲引用不能下发给客户端");
-        assertFalse(json.contains("fromDeviceRef"), "设备盲引用不能下发给客户端");
+        assertFalse(json.contains("fromRef"), "服务端不再保存/下发任何盲引用");
+        assertFalse(json.contains("fromUsername"), "消息不含发信人字段");
         assertFalse(json.contains("conversationTag"), "会话标签不能下发给旧客户端");
         assertFalse(json.contains("recallToken"), "撤回凭证和哈希都不能下发给客户端");
         assertTrue(json.contains("\"sealed\":true"));

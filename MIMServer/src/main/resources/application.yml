@@ -27,14 +27,9 @@ mim:
   # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
   # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
   instance-id: ${HOSTNAME:local}
-  sealed-sender:
-    # Phase 1：已建立会话的 sealed 消息使用 HMAC 盲引用，不落明文发送者。
-    # 关闭后服务端拒绝 sealed 消息，旧客户端仍走非 sealed 路径。
-    enabled: ${MIM_SEALED_SENDER_ENABLED:true}
   sender-cert:
-    # Phase 2a：签发发送者证书，供首条消息在不落 from_user 时确认归属。
-    # 默认关闭；关闭时 /cert/* 返回「未启用」，也不会生成签名密钥。
-    enabled: ${MIM_SENDER_CERT_ENABLED:false}
+    # 协议断代后证书是消息归属的唯一来源：关闭后客户端无法建立新会话。
+    enabled: ${MIM_SENDER_CERT_ENABLED:true}
   sender-token:
     # Phase 2c：盲签名发送者令牌。默认关闭，关闭时 /token/* 返回「未启用」。
     enabled: ${MIM_SENDER_TOKEN_ENABLED:false}

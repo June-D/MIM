@@ -126,14 +126,14 @@ public final class SenderCertE2eTest {
         String sendResponse = httpPost(BASE + "/message", aliceToken, aliceDevice,
             "[" + replica + "]");
         requireOk(sendResponse, "发送首条 sealed 消息");
-        check("首条 sealed 消息不落明文发送者", sendResponse.contains("\"fromUsername\":null"));
+        check("首条 sealed 消息不落明文发送者", !sendResponse.contains("\"fromUsername\""));
 
         // ---- 收信端：拉取、还原、解密 ----
         String inbox = httpGet(BASE + "/message/undelivered?limit=50", bobToken, bobDevice);
         int block = inbox.indexOf(clientMsgId);
         check("收信端拿到首条消息", block >= 0);
         check("收信端看到的发送者为空、握手参数完整",
-            inbox.contains("\"fromUsername\":null")
+            !inbox.contains("\"fromUsername\"")
                 && inbox.contains("\"senderIdentityKey\":\""));
 
         String senderIdentity = str(inbox, "\"senderIdentityKey\":\"");

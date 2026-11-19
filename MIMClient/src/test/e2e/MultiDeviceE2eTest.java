@@ -32,6 +32,9 @@ public final class MultiDeviceE2eTest {
 
     private static final String BASE = System.getenv().getOrDefault("MIM_BASE", "http://127.0.0.1:8080");
     private static final String PASSWORD = "pass1234";
+    /** 协议断代后所有消息共用同一个会话标签。 */
+    private static final String TAG = "tagE2EAAAAAAAAAAAAAAAAAAAA1";
+    private static final String SESSION_ID = "session-e2e-01";
 
     private static int passed = 0;
     private static int failed = 0;
@@ -128,6 +131,7 @@ public final class MultiDeviceE2eTest {
         List<SessionState> aliceSessions = new ArrayList<>();
         Map<String, SessionState> bobSessions = new LinkedHashMap<>();
         List<String> replicas = new ArrayList<>();
+        String firstRecallToken = newRecallToken();
         for (PreKeyBundleView bundle : bundles) {
             RatchetService.InitiatorResult init = ratchet.initiatorSession(bobName,
                 alice.identity.getPrivateKey(), alice.identity.getPublicKeyBase64(),
@@ -149,7 +153,10 @@ public final class MultiDeviceE2eTest {
                 .append("\"clientTime\":").append(clientTime).append(",")
                 .append("\"senderIdentityKey\":\"").append(init.getSenderIdentityKey()).append("\",")
                 .append("\"senderEphemeralKey\":\"").append(init.getSenderEphemeralKey()).append("\",")
-                .append("\"senderUsedOneTimePreKey\":").append(init.isUsedOneTimePreKey());
+                .append("\"senderUsedOneTimePreKey\":").append(init.isUsedOneTimePreKey())
+                .append(",\"sealed\":true,\"sessionId\":\"").append(SESSION_ID).append("\"")
+                .append(",\"conversationTag\":\"").append(TAG).append("\"")
+                .append(",\"recallToken\":\"").append(firstRecallToken).append("\"");
             if (bundle.oneTimePreKeyId != null) {
                 sb.append(",\"consumedOneTimePreKeyId\":").append(bundle.oneTimePreKeyId);
             }
@@ -200,9 +207,9 @@ public final class MultiDeviceE2eTest {
 
         // ---- 撤回作用于所有副本 ----
         String recallResp = httpPost(BASE + "/message/recall/" + clientMsgId, aliceToken,
-            aliceDevice, null);
+            aliceDevice, "{\"recallToken\":\"" + firstRecallToken + "\",\"tags\":[\"" + TAG + "\"]}");
         check("按 clientMsgId 撤回成功", recallResp.contains("\"status\":200"));
-        String history = httpGet(BASE + "/message/history/" + bobName, aliceToken, aliceDevice);
+        String history = httpGet(BASE + "/message/history/" + bobName + "?tags=" + TAG, aliceToken, aliceDevice);
         check("撤回后历史里显示 recalled 标记", history.contains("\"recalled\":true"));
         check("撤回后密文被清除", !history.contains("\"ciphertext\":\"" + replicas.get(0).split("\"ciphertext\":\"")[1].split("\"")[0] + "\""));
 
@@ -227,8 +234,8 @@ public final class MultiDeviceE2eTest {
             "[" + replyBody + "]");
         check("bob 的回复以 sealed 提交成功", replyResp.contains("\"status\":200")
             && replyResp.contains("\"sealed\":true"));
-        check("sealed 回复不落 bob 明文用户名",
-            !replyResp.contains("\"fromUsername\":\"" + bobName + "\""));
+        check("sealed 回复不含任何发送者字段",
+            !replyResp.contains("\"fromUsername\""));
         check("sealed 回复带 sessionId", replyResp.contains("\"sessionId\":\"" + sessionId + "\""));
         String replyPlain = ratchet.decrypt(aliceState,
             new RatchetService.Header(bobReply.getHeader().getDhPublic(),
@@ -246,8 +253,8 @@ public final class MultiDeviceE2eTest {
             "[" + sealedBody + "]");
         check("alice 的后续消息以 sealed 提交成功", sealedResp.contains("\"status\":200")
             && sealedResp.contains("\"sealed\":true"));
-        check("sealed 后续消息不落 alice 明文用户名",
-            !sealedResp.contains("\"fromUsername\":\"" + aliceName + "\""));
+        check("sealed 后续消息不含任何发送者字段",
+            !sealedResp.contains("\"fromUsername\""));
         String sealedPlain = ratchet.decrypt(bobState,
             new RatchetService.Header(aliceSealed.getHeader().getDhPublic(),
                 aliceSealed.getHeader().getPreviousChainLength(),
@@ -255,17 +262,15 @@ public final class MultiDeviceE2eTest {
             aliceSealed.getIv(), aliceSealed.getCiphertext());
         check("bob 能解密 alice 的 sealed 后续消息", "sealed follow-up".equals(sealedPlain));
 
-        String aliceSealedHistory = httpGet(BASE + "/message/history/" + bobName,
-            aliceToken, aliceDevice);
+        String aliceSealedHistory = httpGet(BASE + "/message/history/" + bobName
+            + "?tags=" + TAG, aliceToken, aliceDevice);
         check("alice 历史包含 sealed 往返消息",
             aliceSealedHistory.contains("\"sealed\":true")
                 && aliceSealedHistory.contains("\"fromMe\":true")
                 && aliceSealedHistory.contains("\"fromMe\":false"));
-        // 首条桥接消息仍是旧格式，会保留 alice 的明文 from_user；
-        // 只要 sealed 回复不暴露 bob 的明文用户名即可。
-        check("sealed 回复在 alice 历史里不暴露 bob 明文用户名",
-            !aliceSealedHistory.contains("\"fromUsername\":\"" + bobName + "\""));
-        String bobSealedHistory = httpGet(BASE + "/message/history/" + aliceName,
+        check("历史响应不含任何发送者字段",
+            !aliceSealedHistory.contains("\"fromUsername\""));
+        String bobSealedHistory = httpGet(BASE + "/message/history/" + aliceName + "?tags=" + TAG,
             bobToken, bobDesktop);
         check("bob 历史按 sessionId 找回 sealed 消息",
             bobSealedHistory.contains("\"sealed\":true")
@@ -274,14 +279,14 @@ public final class MultiDeviceE2eTest {
         check("sealed 后续消息的响应不回显撤回凭证",
             !sealedResp.contains("recallToken") && !sealedResp.contains(sealedToken));
         String noTokenRecall = httpPost(BASE + "/message/recall/" + sealedId,
-            aliceToken, aliceDevice, null);
+            aliceToken, aliceDevice, "{\"tags\":[\"" + TAG + "\"]}");
         check("sealed 消息缺少撤回凭证时被拒绝",
             noTokenRecall.contains("撤回凭证无效"));
         String sealedRecall = httpPost(BASE + "/message/recall/" + sealedId,
             aliceToken, aliceDevice,
-            "{\"recallToken\":\"" + sealedToken + "\"}");
+            "{\"recallToken\":\"" + sealedToken + "\",\"tags\":[\"" + TAG + "\"]}");
         check("sealed 后续消息可撤回", sealedRecall.contains("\"status\":200"));
-        String afterSealedRecall = httpGet(BASE + "/message/history/" + aliceName,
+        String afterSealedRecall = httpGet(BASE + "/message/history/" + aliceName + "?tags=" + TAG,
             bobToken, bobDesktop);
         check("sealed 撤回后历史显示 recalled", afterSealedRecall.contains("\"recalled\":true"));
 
@@ -338,7 +343,8 @@ public final class MultiDeviceE2eTest {
             + "\"messageNumber\":" + encrypted.getHeader().getMessageNumber() + ","
             + "\"clientTime\":" + clientTime + ","
             + "\"recallToken\":\"" + recallToken + "\","
-            + "\"sealed\":true,\"sessionId\":\"" + sessionId + "\"}";
+            + "\"sealed\":true,\"sessionId\":\"" + sessionId + "\""
+            + ",\"conversationTag\":\"" + TAG + "\"}";
     }
 
     /** 生成与客户端一致的 32 字节随机撤回凭证（Base64）。 */

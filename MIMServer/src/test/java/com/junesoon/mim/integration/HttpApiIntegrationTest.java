@@ -278,11 +278,15 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
         message.put("previousChainLength", 0);
         message.put("messageNumber", 0);
         message.put("clientTime", System.currentTimeMillis());
+        // 协议断代后每个副本都必须是 sealed + 会话标签。
+        message.put("sealed", true);
+        message.put("sessionId", "session-http-01");
+        message.put("conversationTag", "tagHttpAAAAAAAAAAAAAAAAAAAA1");
         return message;
     }
 
     @Test
-    @DisplayName("请求体里的 fromUsername 被忽略，发信人取自 JWT")
+    @DisplayName("请求体里的 fromUsername 被忽略，落库不含任何发信人")
     void spoofedSenderIgnoredAtHttpLayer() throws Exception {
         String aliceToken = registerAndLogin("alice");
         String bobToken = registerAndLogin("bob");
@@ -302,7 +306,8 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
                     java.util.Collections.singletonList(message))))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value(200))
-            .andExpect(jsonPath("$.data[0].fromUsername").value("alice"));
+            .andExpect(jsonPath("$.data[0].fromUsername").doesNotExist())
+            .andExpect(jsonPath("$.data[0].conversationTag").doesNotExist());
     }
 
     @Test
@@ -419,8 +424,7 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
                     java.util.Collections.singletonList(message))))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value(200))
-            .andExpect(jsonPath("$.data[0].fromUsername").value(
-                org.hamcrest.Matchers.nullValue()))
+            .andExpect(jsonPath("$.data[0].fromUsername").doesNotExist())
             .andExpect(jsonPath("$.data[0].recallToken").doesNotExist())
             .andExpect(jsonPath("$.data[0].recallTokenHash").doesNotExist());
 
@@ -429,7 +433,7 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
                 .header("Authorization", "Bearer " + aliceToken)
                 .header("X-Device-Id", "alice-b")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{}"))
+                .content("{\"tags\":[\"tagHttpAAAAAAAAAAAAAAAAAAAA1\"]}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value(40001))
             .andExpect(jsonPath("$.message").value(
@@ -440,7 +444,8 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
                 .header("Authorization", "Bearer " + aliceToken)
                 .header("X-Device-Id", "alice-b")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"recallToken\":\"" + recallToken + "\"}"))
+                .content("{\"recallToken\":\"" + recallToken
+                    + "\",\"tags\":[\"tagHttpAAAAAAAAAAAAAAAAAAAA1\"]}"))
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.status").value(200))
             .andExpect(jsonPath("$.data.recalled").value(true))
@@ -451,13 +456,13 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
     // ==================== 发送者证书 ====================
 
     @Test
-    @DisplayName("发送者证书默认关闭：接口返回未启用")
-    void senderCertDisabledByDefault() throws Exception {
+    @DisplayName("发送者证书默认开启：公钥可用，签发需要设备公钥")
+    void senderCertEnabledByDefault() throws Exception {
         mockMvc.perform(get("/cert/key"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.status").value(40001))
-            .andExpect(jsonPath("$.message").value(
-                org.hamcrest.Matchers.containsString("未启用")));
+            .andExpect(jsonPath("$.status").value(200))
+            .andExpect(jsonPath("$.data.publicKey").isNotEmpty())
+            .andExpect(jsonPath("$.data.keyId").isNotEmpty());
 
         String token = registerAndLogin("alice");
         registerDevice(token, "alice-dev");
@@ -465,7 +470,9 @@ class HttpApiIntegrationTest extends IntegrationTestBase {
                 .header("Authorization", "Bearer " + token)
                 .header("X-Device-Id", "alice-dev"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.status").value(40001));
+            .andExpect(jsonPath("$.status").value(40001))
+            .andExpect(jsonPath("$.message").value(
+                org.hamcrest.Matchers.containsString("加密公钥")));
     }
 
     // ==================== 限流与异常映射 ====================

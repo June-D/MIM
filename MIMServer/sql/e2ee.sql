@@ -102,10 +102,6 @@ CREATE TABLE IF NOT EXISTS `t_one_time_prekey` (
 CREATE TABLE IF NOT EXISTS `t_message` (
     `id`                    bigint       NOT NULL AUTO_INCREMENT COMMENT '自增主键',
     `client_msg_id`         varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '客户端生成的唯一消息 ID（同一逻辑消息的多个设备副本共用）',
-    `from_user`             varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '发信人；sealed 消息为 NULL，改由 from_ref 保存 HMAC 盲引用',
-    `from_device_id`        varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT '发信设备；sealed 消息为 NULL，改由 from_device_ref 保存 HMAC 盲引用',
-    `from_ref`              varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT 'sealed 消息的发信人 HMAC 盲引用（64 位十六进制），非 sealed 为 NULL',
-    `from_device_ref`       varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NULL DEFAULT NULL COMMENT 'sealed 消息的发信设备 HMAC 盲引用，非 sealed 为 NULL',
     `to_user`               varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '收信人',
     `target_device_id`      varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'default' COMMENT '这条密文的目标设备',
     `alg`                   varchar(64)  CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '加密算法标识',
@@ -141,11 +137,8 @@ CREATE TABLE IF NOT EXISTS `t_message` (
     -- 同一条逻辑消息对同一目标设备只会有一份；不带发送者，
     -- 避免把发信人重新引入唯一索引
     UNIQUE INDEX `uk_client_target` (`client_msg_id`, `target_device_id`) USING BTREE,
-    INDEX `idx_conversation` (`from_user`, `to_user`, `id`) USING BTREE,
-    INDEX `idx_ref_conversation` (`from_ref`, `to_user`, `id`) USING BTREE,
     INDEX `idx_inbox` (`to_user`, `target_device_id`, `delivered`, `id`) USING BTREE,
     INDEX `idx_unread` (`to_user`, `target_device_id`, `read_flag`) USING BTREE,
-    INDEX `idx_ref_unread` (`from_ref`, `to_user`, `read_flag`) USING BTREE,
     INDEX `idx_tag_conversation` (`conversation_tag`, `id`) USING BTREE,
     INDEX `idx_tag_inbox` (`conversation_tag`, `to_user`, `id`) USING BTREE
 ) ENGINE = InnoDB
@@ -229,95 +222,29 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 --         COMMENT '明文是否做了长度填充';
 
 -- ------------------------------------------------------------
--- 从旧版本升级（取消注释后执行）：sealed sender Phase 1
+-- 从旧版本升级（取消注释后执行）：Phase 2 协议断代
 --
--- 只对已建立会话的消息生效：服务端把 from_user/from_device_id 写成
--- HMAC 盲引用（MIM_METADATA_KEY，未配置时由 JWT 私钥派生），不再保存
--- 明文发送者/设备。旧消息保持原值，历史查询会同时兼容两种形式。
+-- 本版本已彻底移除「明文发送者 + HMAC 盲引用」存储：
+-- 新消息只写 conversation_tag，历史/未读/清除/撤回/同步全部按标签。
+-- 旧消息（没有标签）无法迁移——标签是客户端随机生成、服务端无从推导。
+--
+-- 因此升级顺序固定，且**不可逆**：
+--   1. 归档无标签旧消息；
+--   2. 删除无标签旧消息；
+--   3. 删除发送者列与三个旧索引；
+--   4. 清理按用户名记录的清除点（只保留 tag: 前缀）。
+-- 若还需要旧消息，必须先自行备份 t_message_legacy_archive。
 -- ------------------------------------------------------------
+-- CREATE TABLE IF NOT EXISTS `t_message_legacy_archive` LIKE `t_message`;
+-- INSERT INTO `t_message_legacy_archive` SELECT * FROM `t_message`
+--  WHERE `conversation_tag` IS NULL;
+-- DELETE FROM `t_message` WHERE `conversation_tag` IS NULL;
 -- ALTER TABLE `t_message`
---     ADD COLUMN `sealed` tinyint(1) NOT NULL DEFAULT 0
---         COMMENT '已建立会话后是否隐藏了明文发信人/设备',
---     ADD COLUMN `session_id` varchar(64) NULL
---         COMMENT 'sealed 会话 ID，收件端据此索引棘轮状态';
-
--- ------------------------------------------------------------
--- 从旧版本升级（取消注释后执行）：sealed sender Phase 1.5
---
--- 目标：from_user / from_device_id 对 sealed 消息真正写 NULL，
--- 盲引用迁移到独立列 from_ref / from_device_ref；撤回改用一次性
--- recallToken（服务端只保存哈希）。
---
--- 执行顺序不能颠倒：先加列并回填，再改唯一索引，最后置 NULL。
--- 回填把 Phase 1 写在 from_user 里的盲引用搬到 from_ref，
--- 否则迁移后旧 sealed 历史按 from_user 查询会全部丢失。
--- ------------------------------------------------------------
--- ALTER TABLE `t_message`
---     ADD COLUMN `from_ref` varchar(64) NULL
---         COMMENT 'sealed 消息的发信人 HMAC 盲引用',
---     ADD COLUMN `from_device_ref` varchar(64) NULL
---         COMMENT 'sealed 消息的发信设备 HMAC 盲引用',
---     ADD COLUMN `recall_token_hash` varchar(64) NULL
---         COMMENT '撤回凭证的 SHA-256；有值时撤回必须携带原始 token';
---
--- UPDATE `t_message`
---    SET `from_ref` = `from_user`,
---        `from_device_ref` = `from_device_id`
---  WHERE `sealed` = 1;
---
--- ALTER TABLE `t_message`
---     MODIFY COLUMN `from_user` varchar(64) NULL DEFAULT NULL
---         COMMENT '发信人；sealed 消息为 NULL，改由 from_ref 保存 HMAC 盲引用',
---     MODIFY COLUMN `from_device_id` varchar(64) NULL DEFAULT NULL
---         COMMENT '发信设备；sealed 消息为 NULL，改由 from_device_ref 保存 HMAC 盲引用',
---     DROP INDEX `uk_client_target`,
---     ADD UNIQUE INDEX `uk_client_target` (`client_msg_id`, `target_device_id`),
---     ADD INDEX `idx_ref_conversation` (`from_ref`, `to_user`, `id`),
---     ADD INDEX `idx_ref_unread` (`from_ref`, `to_user`, `read_flag`);
---
--- UPDATE `t_message`
---    SET `from_user` = NULL,
---        `from_device_id` = NULL
---  WHERE `sealed` = 1;
---
--- 注意：新的唯一索引不含发信人。若旧库里存在「不同发送者复用同一
--- clientMsgId 且目标设备相同」的异常数据，ADD UNIQUE 会失败；
--- 先执行下面这条确认没有冲突再迁移：
--- SELECT client_msg_id, target_device_id, count(*) FROM `t_message`
---  GROUP BY client_msg_id, target_device_id HAVING count(*) > 1;
-
--- ------------------------------------------------------------
--- 从旧版本升级（取消注释后执行）：跨设备撤回能力协商
---
--- 撤回凭证只保存在发送设备本地。另一台设备要能撤回同一条消息，
--- 必须让「历史同步」把凭证放进加密副本里一起送过去。凭证不能下发
--- 给不认识的客户端，因此用这个能力位门控：目标设备声明支持后，
--- 发送端才在同步副本的密文里带凭证。
--- 不声明（旧客户端）时保持纯文本副本，行为与升级前完全一致。
--- ------------------------------------------------------------
--- ALTER TABLE `t_user_key`
---     ADD COLUMN `supports_recall_token` tinyint(1) NOT NULL DEFAULT 0
---         COMMENT '客户端能否接收加密的撤回凭证（自己设备间同步）';
-
--- ------------------------------------------------------------
--- 从旧版本升级（取消注释后执行）：Phase 2b 首条消息发送者证书
---
--- 只有声明该能力的目标设备才会收到「证书信封」格式的首条消息；
--- 未声明（旧客户端）继续收明文发送者格式，行为不变。
--- ------------------------------------------------------------
--- ALTER TABLE `t_user_key`
---     ADD COLUMN `supports_sender_cert` tinyint(1) NOT NULL DEFAULT 0
---         COMMENT '客户端能否解析首条消息里的发送者证书';
-
--- ------------------------------------------------------------
--- 从旧版本升级（取消注释后执行）：会话标签（Phase 2c 前置）
---
--- 标签由客户端生成，服务端只当不透明字符串存储与索引。
--- 它取代「HMAC(用户名) → from_ref」这种可被持有服务端密钥者反推的盲引用。
--- 双写期两条查询路径并存；确认稳定后再停写 from_ref。
--- ------------------------------------------------------------
--- ALTER TABLE `t_message`
---     ADD COLUMN `conversation_tag` varchar(64) NULL
---         COMMENT '客户端生成的会话标签（不透明）',
---     ADD INDEX `idx_tag_conversation` (`conversation_tag`, `id`),
---     ADD INDEX `idx_tag_inbox` (`conversation_tag`, `to_user`, `id`);
+--     DROP INDEX `idx_conversation`,
+--     DROP INDEX `idx_ref_conversation`,
+--     DROP INDEX `idx_ref_unread`,
+--     DROP COLUMN `from_user`,
+--     DROP COLUMN `from_device_id`,
+--     DROP COLUMN `from_ref`,
+--     DROP COLUMN `from_device_ref`;
+-- DELETE FROM `t_conversation_clear` WHERE `peer` NOT LIKE 'tag:%';

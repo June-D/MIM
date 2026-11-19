@@ -120,8 +120,7 @@ class MessageSyncTest {
             Collections.singletonList(wrap("carol")));
         assertEquals(1, saved.size());
         CipherMessage copy = saved.get(0);
-        assertEquals("bob", copy.getFromUsername());
-        assertEquals("alice", copy.getToUsername());
+        assertEquals("alice", copy.getToUsername(), "副本收信人是本账号自己的设备");
         assertEquals("msg-sync-01", copy.getClientMsgId());
         assertEquals("dev-b", copy.getTargetDeviceId());
         assertEquals("dev-a", copy.getSyncFromDevice());
@@ -171,20 +170,20 @@ class MessageSyncTest {
         messages.rows.get(0).setRecalled(true);
         CipherMessage replica = new CipherMessage();
         replica.setClientMsgId("msg-sync-01");
+        replica.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
         replica.setTargetDeviceId("dev-b");
         CipherMessage saved = service.syncReplicas("alice", "dev-a",
             Collections.singletonList(replica)).get(0);
         assertEquals(Boolean.TRUE, saved.getRecalled());
         assertNull(saved.getCiphertext());
-        assertEquals("bob", saved.getFromUsername());
+        assertEquals("tagAAAAAAAAAAAAAAAAAAAAAAAA1", saved.getConversationTag());
     }
 
     private static CipherMessage original() {
         CipherMessage message = new CipherMessage();
         message.setId(5L);
         message.setClientMsgId("msg-sync-01");
-        message.setFromUsername("bob");
-        message.setFromDeviceId("bob-1");
+        message.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
         message.setToUsername("alice");
         message.setTargetDeviceId("dev-a");
         message.setAlg(MessageServiceImpl.ALGORITHM_RATCHET);
@@ -201,8 +200,7 @@ class MessageSyncTest {
     private static CipherMessage wrap(String forgedFrom, String clientMsgId) {
         CipherMessage message = new CipherMessage();
         message.setClientMsgId(clientMsgId);
-        message.setFromUsername(forgedFrom);
-        message.setToUsername(forgedFrom);
+        message.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
         message.setTargetDeviceId("dev-b");
         message.setAlg(MessageServiceImpl.ALGORITHM_RATCHET);
         message.setIv(Base64.getEncoder().encodeToString(new byte[12]));
@@ -316,64 +314,31 @@ class MessageSyncTest {
         }
 
         @Override
-        public CipherMessage selectOwnedCopy(String clientMsgId, String fromUser, String fromRef) {
-            for (CipherMessage row : rows) {
-                if (!clientMsgId.equals(row.getClientMsgId())) {
-                    continue;
-                }
-                if (row.getFromUsername() != null
-                    && row.getFromUsername().equals(fromUser)) {
-                    return row;
-                }
-                if (row.getFromRef() != null && row.getFromRef().equals(fromRef)) {
-                    return row;
-                }
-            }
+        public CipherMessage selectOwnedCopyByTags(List<String> tags, String clientMsgId) {
             return null;
-        }
-
-        @Override
-        public CipherMessage selectParticipantCopy(String clientMsgId, String username,
-            String userRef) {
-            for (CipherMessage row : rows) {
-                if (!clientMsgId.equals(row.getClientMsgId()) || row.getSyncFromDevice() != null) {
-                    continue;
-                }
-                if (username.equals(row.getFromUsername())
-                    || username.equals(row.getToUsername())
-                    || (userRef != null && userRef.equals(row.getFromRef()))) {
-                    return row;
-                }
-            }
-            return null;
-        }
-
-        @Override
-        public List<CipherMessage> selectHistory(String a, String b, Long beforeId, int limit) {
-            return Collections.emptyList();
-        }
-
-        @Override
-        public List<CipherMessage> selectHistoryForDevice(String viewer, String peer,
-            String deviceId, Long beforeId, int limit) {
-            return Collections.emptyList();
-        }
-
-        @Override
-        public List<CipherMessage> selectRefHistory(String fromRef, String toUser,
-            Long beforeId, int limit) {
-            return Collections.emptyList();
-        }
-
-        @Override
-        public List<CipherMessage> selectRefHistoryForDevice(String fromRef, String toUser,
-            String viewer, String deviceId, String deviceRef, Long beforeId, int limit) {
-            return Collections.emptyList();
         }
 
         @Override
         public CipherMessage selectParticipantCopyByTag(String clientMsgId, String tag) {
+            for (CipherMessage row : rows) {
+                if (clientMsgId.equals(row.getClientMsgId())
+                    && tag.equals(row.getConversationTag())) {
+                    return row;
+                }
+            }
             return null;
+        }
+
+        @Override
+        public List<CipherMessage> selectTagHistoryForDevice(List<String> tags, String viewer,
+            String peer, String deviceId, Long beforeId, int limit) {
+            return Collections.emptyList();
+        }
+
+        @Override
+        public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
+            Long beforeId, int limit) {
+            return Collections.emptyList();
         }
 
         @Override
@@ -382,8 +347,7 @@ class MessageSyncTest {
         }
 
         @Override
-        public long countUnreadByRefOrTags(String fromRef, List<String> tags, String toUsername,
-            Long afterId) {
+        public long countUnreadByTags(List<String> tags, String toUsername, Long afterId) {
             return 0;
         }
 
@@ -396,25 +360,6 @@ class MessageSyncTest {
         public int wipeTagConversation(List<String> tags, String viewer, String peer,
             long beforeId) {
             return 0;
-        }
-
-        @Override
-        public List<CipherMessage> selectTagHistoryForDevice(List<String> tags, String viewer,
-            String peer, String deviceId, Long beforeId, int limit) {
-            return java.util.Collections.emptyList();
-        }
-
-        @Override
-        public CipherMessage selectOwnedCopyByTags(List<String> tags, String clientMsgId) {
-            return null;
-        }
-
-        @Override
-        public List<CipherMessage> selectTagHistory(List<String> tags, String viewer, String peer,
-            Long beforeId, int limit) {
-            // 标签查询由 MapperIntegrationTest 用真实 MySQL 覆盖；
-            // 这些单测只关心旧路径，返回空列表即可。
-            return java.util.Collections.emptyList();
         }
 
         @Override
@@ -433,63 +378,7 @@ class MessageSyncTest {
         }
 
         @Override
-        public int markRead(String fromUsername, String toUsername, Long beforeId) {
-            return 0;
-        }
-
-        @Override
-        public int markReadByRef(String fromRef, String toUsername, Long beforeId) {
-            return 0;
-        }
-
-        @Override
-        public long countUnread(String fromUsername, String toUsername) {
-            return 0;
-        }
-
-        @Override
-        public long countUnreadByRef(String fromRef, String toUsername) {
-            return 0;
-        }
-
-        @Override
-        public long countUnreadAfter(String fromUsername, String toUsername, long afterId) {
-            return 0;
-        }
-
-        @Override
-        public long countUnreadAfterByRef(String fromRef, String toUsername, long afterId) {
-            return 0;
-        }
-
-        @Override
-        public Long maxConversationId(String a, String b) {
-            return null;
-        }
-
-        @Override
-        public Long maxRefConversationId(String fromRef, String toUser) {
-            return null;
-        }
-
-        @Override
-        public int wipeConversation(String a, String b, long beforeId) {
-            return 0;
-        }
-
-        @Override
-        public int wipeRefConversation(String fromRef, String toUser, long beforeId) {
-            return 0;
-        }
-
-        @Override
         public int recallByToken(String clientMsgId, String recallTokenHash, long recalledAt) {
-            return 0;
-        }
-
-        @Override
-        public int recallBySender(String clientMsgId, String fromUser, String fromRef,
-            long recalledAt) {
             return 0;
         }
     }

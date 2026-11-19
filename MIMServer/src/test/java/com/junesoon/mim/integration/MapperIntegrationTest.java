@@ -351,8 +351,7 @@ class MapperIntegrationTest extends IntegrationTestBase {
         String clientMsgId, int messageNumber) {
         CipherMessage message = new CipherMessage();
         message.setClientMsgId(clientMsgId);
-        message.setFromUsername(from);
-        message.setFromDeviceId(fromDevice);
+        message.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
         message.setToUsername(to);
         message.setTargetDeviceId(targetDevice);
         message.setAlg("X3DH-P256-DOUBLE-RATCHET-AES-256-GCM");
@@ -400,62 +399,8 @@ class MapperIntegrationTest extends IntegrationTestBase {
         assertTrue(rejected, "唯一索引应拒绝重复副本，这是幂等的基础");
     }
 
-    @Test
-    @DisplayName("历史消息按 clientMsgId 去重，多设备副本只出现一次")
-    void historyDeduplicatesReplicas() {
-        // 同一条逻辑消息，发给 bob 的两台设备 = 两行
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-multi-001", 0));
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-multi-001", 0));
-        // 第二条逻辑消息
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-multi-002", 1));
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-multi-002", 1));
 
-        List<CipherMessage> history = messageMapper.selectHistory(ALICE, BOB, null, 50);
-        assertEquals(2, history.size(), "两条逻辑消息应返回两行，实际：" + history.size());
-        assertEquals("msg-multi-002", history.get(0).getClientMsgId(), "应按 id 倒序（新的在前）");
-        assertEquals("msg-multi-001", history.get(1).getClientMsgId());
-    }
 
-    @Test
-    @DisplayName("历史优先返回当前设备解得开的副本，而不是最早的那一份")
-    void historyPrefersReplicaForThisDevice() {
-        CipherMessage original = message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-sync-001", 0);
-        CipherMessage copy = message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-sync-001", 0);
-        copy.setSyncFromDevice(DEVICE_A);
-        messageMapper.insert(original);
-        messageMapper.insert(copy);
-
-        List<CipherMessage> forNewDevice = messageMapper.selectHistoryForDevice(
-            ALICE, BOB, DEVICE_B, null, 10);
-        assertEquals(1, forNewDevice.size());
-        assertEquals(DEVICE_B, forNewDevice.get(0).getTargetDeviceId());
-        assertEquals(DEVICE_A, forNewDevice.get(0).getSyncFromDevice());
-
-        List<CipherMessage> forOldDevice = messageMapper.selectHistoryForDevice(
-            ALICE, BOB, DEVICE_A, null, 10);
-        assertEquals(1, forOldDevice.size());
-        assertEquals(DEVICE_A, forOldDevice.get(0).getTargetDeviceId());
-        assertNull(forOldDevice.get(0).getSyncFromDevice());
-    }
-
-    @Test
-    @DisplayName("历史消息的 beforeId 分页在去重后仍然正确")
-    void historyPaginationWithDedup() {
-        for (int i = 1; i <= 5; i++) {
-            messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A,
-                "msg-page-00" + i, i - 1));
-        }
-        List<CipherMessage> firstPage = messageMapper.selectHistory(ALICE, BOB, null, 2);
-        assertEquals(2, firstPage.size());
-        assertEquals("msg-page-005", firstPage.get(0).getClientMsgId());
-
-        Long cursor = firstPage.get(1).getId();
-        List<CipherMessage> secondPage = messageMapper.selectHistory(ALICE, BOB, cursor, 2);
-        assertEquals(2, secondPage.size());
-        assertEquals("msg-page-003", secondPage.get(0).getClientMsgId());
-        assertFalse(secondPage.get(0).getClientMsgId()
-            .equals(firstPage.get(0).getClientMsgId()), "分页不应重复上一页内容");
-    }
 
     @Test
     @DisplayName("未投递消息按目标设备隔离")
@@ -490,7 +435,7 @@ class MapperIntegrationTest extends IntegrationTestBase {
     void markDeliveredWipesHandshakeParams() {
         // 首条 sealed 消息必须带握手参数，收信端才能离线建会话；
         // 投递确认后这些参数应立即消失，避免用公钥目录 join 出用户名。
-        CipherMessage first = sealedMessage("msg-first-01", BOB, DEVICE_A, REF_ALICE);
+        CipherMessage first = sealedMessage("msg-first-01", BOB, DEVICE_A, TAG_ONE);
         first.setSenderIdentityKey("alice-identity-key");
         first.setSenderEphemeralKey("alice-ephemeral-key");
         first.setSenderUsedOneTimePreKey(Boolean.TRUE);
@@ -508,76 +453,48 @@ class MapperIntegrationTest extends IntegrationTestBase {
         assertNull(stored.getRecipientSignedPreKeyId());
         assertFalse(Boolean.TRUE.equals(stored.getSenderUsedOneTimePreKey()));
         assertNotNull(stored.getCiphertext(), "擦除的是握手参数，不是消息内容");
-        assertEquals(REF_ALICE, stored.getFromRef(), "盲引用必须保留，历史查询还要用");
+        assertEquals(TAG_ONE, stored.getConversationTag(), "会话标签必须保留，历史查询还要用");
     }
 
-    @Test
-    @DisplayName("未读数按 clientMsgId 去重统计")
-    void unreadCountsLogicalMessages() {
-        // 一条逻辑消息发给两台设备
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-unread-01", 0));
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-unread-01", 0));
-        // 第二条逻辑消息
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-unread-02", 1));
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-unread-02", 1));
 
-        assertEquals(2L, messageMapper.countUnread(ALICE, BOB),
-            "应统计 2 条逻辑消息，而非 4 条设备副本");
-    }
-
-    @Test
-    @DisplayName("已读标记跳过已撤回消息")
-    void markReadSkipsRecalled() {
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-read-001", 0));
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-read-002", 1));
-        messageMapper.recallBySender("msg-read-002", ALICE, null, System.currentTimeMillis());
-
-        int affected = messageMapper.markRead(ALICE, BOB, Long.MAX_VALUE);
-        assertEquals(1, affected, "已撤回消息不应被标记为已读");
-    }
 
     @Test
     @DisplayName("撤回按 clientMsgId 一次清掉所有设备副本的密文")
     void recallClearsAllReplicas() {
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-recall-01", 0));
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-recall-01", 0));
+        String hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        CipherMessage a = sealedMessage("msg-recall-01", BOB, DEVICE_A, TAG_ONE);
+        CipherMessage b = sealedMessage("msg-recall-01", BOB, DEVICE_B, TAG_ONE);
+        a.setRecallTokenHash(hash);
+        b.setRecallTokenHash(hash);
+        messageMapper.insert(a);
+        messageMapper.insert(b);
 
-        int affected = messageMapper.recallBySender("msg-recall-01", ALICE, null, System.currentTimeMillis());
+        int affected = messageMapper.recallByToken("msg-recall-01", hash,
+            System.currentTimeMillis());
         assertEquals(2, affected, "两台设备的副本都应被撤回");
 
-        List<CipherMessage> history = messageMapper.selectHistory(ALICE, BOB, null, 50);
+        List<CipherMessage> history = messageMapper.selectTagHistory(
+            Collections.singletonList(TAG_ONE), BOB, ALICE, null, 50);
         assertEquals(1, history.size());
         assertTrue(history.get(0).getRecalled());
         assertNull(history.get(0).getCiphertext(), "密文应被物理清除");
         assertNull(history.get(0).getIv(), "IV 应被清除");
     }
 
-    @Test
-    @DisplayName("非发信人无法撤回（SQL 条件保证）")
-    void recallRequiresSender() {
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-recall-02", 0));
-        int affected = messageMapper.recallBySender("msg-recall-02", BOB, null, System.currentTimeMillis());
-        assertEquals(0, affected, "from_user 条件应阻止他人撤回");
-        assertFalse(messageMapper.selectById(
-            messageMapper.selectOwnedCopy("msg-recall-02", ALICE, null).getId()).getRecalled());
-    }
 
     @Test
     @DisplayName("重复撤回返回 0 行（recalled = 0 条件保证幂等）")
     void recallIsIdempotent() {
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_A, "msg-recall-03", 0));
-        assertEquals(1, messageMapper.recallBySender("msg-recall-03", ALICE, null, System.currentTimeMillis()));
-        assertEquals(0, messageMapper.recallBySender("msg-recall-03", ALICE, null, System.currentTimeMillis()));
+        String hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        CipherMessage row = sealedMessage("msg-recall-03", BOB, DEVICE_A, TAG_ONE);
+        row.setRecallTokenHash(hash);
+        messageMapper.insert(row);
+        assertEquals(1, messageMapper.recallByToken("msg-recall-03", hash,
+            System.currentTimeMillis()));
+        assertEquals(0, messageMapper.recallByToken("msg-recall-03", hash,
+            System.currentTimeMillis()));
     }
 
-    @Test
-    @DisplayName("selectOwnedCopy 不限设备取任意副本")
-    void selectAnyCopy() {
-        messageMapper.insert(message(ALICE, DEVICE_A, BOB, DEVICE_B, "msg-any-0001", 0));
-        CipherMessage any = messageMapper.selectOwnedCopy("msg-any-0001", ALICE, null);
-        assertNotNull(any, "应能取到非 default 设备的副本");
-        assertEquals(DEVICE_B, any.getTargetDeviceId());
-    }
 
     @Test
     @DisplayName("X3DH 握手参数完整往返（长文本字段不被截断）")
@@ -611,12 +528,11 @@ class MapperIntegrationTest extends IntegrationTestBase {
     private static final String TAG_TWO = "tagBBBBBBBBBBBBBBBBBBBBBBBB2";
 
     private CipherMessage sealedMessage(String clientMsgId, String toUser, String target,
-        String fromRef) {
+        String tag) {
         CipherMessage message = message(null, null, toUser, target, clientMsgId, 0);
         message.setSealed(true);
         message.setSessionId("session-0001");
-        message.setFromRef(fromRef);
-        message.setFromDeviceRef(REF_ALICE_DEVICE);
+        message.setConversationTag(tag);
         return message;
     }
 
@@ -640,7 +556,7 @@ class MapperIntegrationTest extends IntegrationTestBase {
             Collections.singletonList(TAG_ONE), BOB, ALICE, null, 50);
         assertEquals(1, found.size(), "只应命中同一标签的消息");
         assertEquals("msg-tag-001", found.get(0).getClientMsgId());
-        assertNull(found.get(0).getFromRef(), "标签查询不依赖盲引用");
+        assertEquals(TAG_ONE, found.get(0).getConversationTag(), "标签查询只依赖会话标签");
     }
 
     @Test
@@ -659,18 +575,6 @@ class MapperIntegrationTest extends IntegrationTestBase {
             ALICE, BOB, null, 50).size());
     }
 
-    @Test
-    @DisplayName("sealed 消息的 from_user / from_device_id 落库为 NULL，盲引用进独立列")
-    void sealedMessageStoresNoPlaintextSender() {
-        messageMapper.insert(sealedMessage("msg-sealed-01", BOB, DEVICE_A, REF_ALICE));
-
-        CipherMessage stored = messageMapper.selectByClientMsgId("msg-sealed-01", DEVICE_A);
-        assertNull(stored.getFromUsername(), "sealed 消息不应保存明文发信人");
-        assertNull(stored.getFromDeviceId(), "sealed 消息不应保存明文发信设备");
-        assertEquals(REF_ALICE, stored.getFromRef(), "盲引用应写入 from_ref");
-        assertEquals(REF_ALICE_DEVICE, stored.getFromDeviceRef());
-        assertEquals(Boolean.TRUE, stored.getSealed());
-    }
 
     @Test
     @DisplayName("唯一索引不含发信人：同一目标设备不能有第二份副本")
@@ -686,30 +590,7 @@ class MapperIntegrationTest extends IntegrationTestBase {
         assertTrue(rejected, "同一 clientMsgId + 目标设备只能存在一份密文");
     }
 
-    @Test
-    @DisplayName("sealed 历史、未读与已读按 from_ref + to_user 工作")
-    void refHistoryUnreadAndMarkRead() {
-        messageMapper.insert(sealedMessage("msg-ref-001", BOB, DEVICE_A, REF_ALICE));
-        messageMapper.insert(sealedMessage("msg-ref-002", BOB, DEVICE_B, REF_ALICE));
 
-        assertEquals(2, messageMapper.selectRefHistory(REF_ALICE, BOB, null, 50).size());
-        assertEquals(2L, messageMapper.countUnreadByRef(REF_ALICE, BOB));
-
-        assertEquals(2, messageMapper.markReadByRef(REF_ALICE, BOB, Long.MAX_VALUE));
-        assertEquals(0L, messageMapper.countUnreadByRef(REF_ALICE, BOB));
-    }
-
-    @Test
-    @DisplayName("sealed 按设备历史优先取发给本设备的副本")
-    void refHistoryPrefersDeviceReplica() {
-        messageMapper.insert(sealedMessage("msg-ref-dev", BOB, DEVICE_A, REF_ALICE));
-        messageMapper.insert(sealedMessage("msg-ref-dev", BOB, DEVICE_B, REF_ALICE));
-
-        List<CipherMessage> forB = messageMapper.selectRefHistoryForDevice(
-            REF_ALICE, BOB, BOB, DEVICE_B, REF_ALICE_DEVICE, null, 10);
-        assertEquals(1, forB.size());
-        assertEquals(DEVICE_B, forB.get(0).getTargetDeviceId());
-    }
 
     @Test
     @DisplayName("一次性 token 撤回：哈希匹配才清空全部副本")
@@ -727,53 +608,15 @@ class MapperIntegrationTest extends IntegrationTestBase {
 
         assertEquals(2, messageMapper.recallByToken("msg-token-01", hash,
             System.currentTimeMillis()), "正确 token 应清空两台设备的副本");
-        for (CipherMessage history : messageMapper.selectRefHistory(REF_ALICE, BOB, null, 50)) {
+        for (CipherMessage history : messageMapper.selectTagHistory(
+            Collections.singletonList(REF_ALICE), BOB, ALICE, null, 50)) {
             assertTrue(history.getRecalled());
             assertNull(history.getCiphertext());
         }
     }
 
-    @Test
-    @DisplayName("Phase 1 存量行（盲引用写在 from_user）仍可按引用撤回")
-    void recallBySenderSupportsPhase1Rows() {
-        // 模拟迁移前的旧布局：from_user 直接是盲引用，from_ref 为 NULL
-        CipherMessage legacy = message(REF_ALICE, REF_ALICE_DEVICE, BOB, DEVICE_A,
-            "msg-legacy-sealed", 0);
-        legacy.setSealed(true);
-        legacy.setSessionId("session-legacy");
-        messageMapper.insert(legacy);
 
-        assertEquals(1, messageMapper.recallBySender("msg-legacy-sealed", ALICE, REF_ALICE,
-            System.currentTimeMillis()));
-    }
 
-    @Test
-    @DisplayName("带凭证哈希的消息不能用发信人身份绕过 token 撤回")
-    void senderPathCannotBypassToken() {
-        String hash = "cccccccccccccccccccccccccccccccc"
-            + "cccccccccccccccccccccccccccccccc";
-        CipherMessage fresh = sealedMessage("msg-token-guard", BOB, DEVICE_A, REF_ALICE);
-        fresh.setRecallTokenHash(hash);
-        messageMapper.insert(fresh);
-
-        assertEquals(0, messageMapper.recallBySender("msg-token-guard", ALICE, REF_ALICE,
-            System.currentTimeMillis()), "有凭证哈希时必须走 token 路径");
-        assertFalse(messageMapper.selectByClientMsgId("msg-token-guard", DEVICE_A).getRecalled());
-    }
-
-    @Test
-    @DisplayName("未投递查询用 from_ref 匹配收件人的清除点")
-    void undeliveredHonoursRefClearCursor() {
-        CipherMessage received = sealedMessage("msg-ref-clear", BOB, DEVICE_A, REF_ALICE);
-        received.setToUsername(BOB);
-        messageMapper.insert(received);
-        long id = received.getId();
-
-        conversationClearMapper.insert(BOB, REF_ALICE, id, System.currentTimeMillis());
-
-        assertTrue(messageMapper.selectUndelivered(BOB, DEVICE_A, 100).isEmpty(),
-            "引用维度的清除点应过滤掉 sealed 收件消息");
-    }
 
     @Test
     @DisplayName("未投递查询用会话标签匹配清除点（无 from_ref 也能过滤）")
@@ -797,13 +640,13 @@ class MapperIntegrationTest extends IntegrationTestBase {
         insertTagged("msg-tag-unread-01", TAG_ONE);
         insertTagged("msg-tag-unread-02", TAG_TWO);
 
-        assertEquals(1L, messageMapper.countUnreadByRefOrTags(null,
+        assertEquals(1L, messageMapper.countUnreadByTags(
             Collections.singletonList(TAG_ONE), BOB, null));
         assertEquals(1, messageMapper.markReadByTags(
             Collections.singletonList(TAG_ONE), BOB, null));
-        assertEquals(0L, messageMapper.countUnreadByRefOrTags(null,
+        assertEquals(0L, messageMapper.countUnreadByTags(
             Collections.singletonList(TAG_ONE), BOB, null));
-        assertEquals(1L, messageMapper.countUnreadByRefOrTags(null,
+        assertEquals(1L, messageMapper.countUnreadByTags(
             Collections.singletonList(TAG_TWO), BOB, null), "其它会话不受影响");
     }
 
@@ -873,17 +716,6 @@ class MapperIntegrationTest extends IntegrationTestBase {
             Collections.singletonList(TAG_TWO), "msg-tag-owned"), "错误标签不能取到副本");
     }
 
-    @Test
-    @DisplayName("双写期未读数对同一逻辑消息只算一次")
-    void unreadDedupesRefAndTag() {
-        CipherMessage both = sealedMessage("msg-dedupe-01", BOB, DEVICE_A, REF_ALICE);
-        both.setConversationTag(TAG_ONE);
-        messageMapper.insert(both);
-
-        assertEquals(1L, messageMapper.countUnreadByRefOrTags(REF_ALICE,
-            Collections.singletonList(TAG_ONE), BOB, null),
-            "盲引用与标签命中同一条消息时不能算两次");
-    }
 
     private void insertTagged(String clientMsgId, String tag) {
         CipherMessage tagged = message(ALICE, DEVICE_A, BOB, DEVICE_A, clientMsgId, 0);
