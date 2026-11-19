@@ -55,6 +55,25 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 
 历史与发送需要端到端加密链路，是协议层迁移的下一步。
 
+### 设备与密钥（KeyRegistry）
+
+`KeyRegistry.provision` 走完整契约：登记设备 → 上传身份公钥 → 上传签名预密钥
+→ 批量上传一次性预密钥。密钥材料由 Rust 核心生成（JNI），私钥不出进程。
+
+运行联调测试前需要先构建带 JNI 的动态库：
+
+```bash
+cd ../MIMCoreRust && cargo build --release --features jni
+cd ../MIMCompose
+MIM_SERVER_URL=http://127.0.0.1:8080 \
+MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
+  ./gradlew :composeApp:desktopTest
+```
+
+注意：`cargo build --release` 不带 `--features jni` 会覆盖动态库并去掉 JNI 符号。
+
+服务端校验的是**明文口令**（BCrypt）；上传 Base64 会一直失败。
+
 ## 接 Android / iOS
 
 1. **Android**：在 `composeApp/build.gradle.kts` 的 `kotlin { }` 里加

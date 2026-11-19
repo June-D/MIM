@@ -9,5 +9,5 @@ public interface PasswordVerifier {
     /**
      * @param passwordBase64 原始口令的 Base64，与登录/注册请求的格式一致
      */
-    boolean matches(String username, String passwordBase64);
+    boolean matches(String username, String password);
 }

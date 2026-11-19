@@ -23,11 +23,11 @@ public class BcryptPasswordVerifier implements PasswordVerifier {
     }
 
     @Override
-    public boolean matches(String username, String passwordBase64) {
-        if (!StringUtils.hasText(username) || !StringUtils.hasText(passwordBase64)) {
+    public boolean matches(String username, String password) {
+        if (!StringUtils.hasText(username) || !StringUtils.hasText(password)) {
             return false;
         }
         User user = userMapper.selectOne(username);
-        return user != null && encoder.matches(passwordBase64, user.getPassword());
+        return user != null && encoder.matches(password, user.getPassword());
     }
 }

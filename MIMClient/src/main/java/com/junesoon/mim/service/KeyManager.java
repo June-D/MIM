@@ -137,9 +137,9 @@ public class KeyManager {
         }
         try {
             ObjectRestResponse<KeyBundle> response = Request.connector(KeyFeign.class)
+                // 服务端用 BCrypt 校验明文口令；Base64 会让校验永远失败。
                 .upload(new KeyUploadRequest(current.getPublicKeyBase64(), "EC-P256",
-                    com.junesoon.mim.utils.EncryptUtil.base64Encode(new String(password)),
-                    Boolean.TRUE, Boolean.TRUE, Boolean.TRUE));
+                    new String(password), Boolean.TRUE, Boolean.TRUE, Boolean.TRUE));
             if (response == null || response.getStatus() != 200 || response.getData() == null) {
                 String message = response == null ? "服务端无响应" : response.getMessage();
                 throw new IdentityException("同步公钥失败：" + message);

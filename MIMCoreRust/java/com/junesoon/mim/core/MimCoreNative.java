@@ -13,7 +13,16 @@ package com.junesoon.mim.core;
 public final class MimCoreNative {
 
     static {
-        System.loadLibrary("mim_core_rust");
+        // 桌面调试可指定绝对路径；Android 走 jniLibs 的默认查找。
+        String explicit = System.getProperty("mim.native.lib");
+        if (explicit == null || explicit.isEmpty()) {
+            explicit = System.getenv("MIM_NATIVE_LIB");
+        }
+        if (explicit != null && !explicit.isEmpty()) {
+            System.load(explicit);
+        } else {
+            System.loadLibrary("mim_core_rust");
+        }
     }
 
     private MimCoreNative() {
