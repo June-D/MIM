@@ -163,6 +163,11 @@ if command -v cargo >/dev/null 2>&1; then
     && ok "Rust → Java → Rust 双向互通" \
     || fail "互通联调失败（日志：/tmp/mim-interop.log）"
 
+  section "JNI 绑定冒烟测试"
+  "$ROOT_DIR/MIMCoreRust/tools/jni_test.sh" /tmp/mim-jni > /tmp/mim-jni.log 2>&1 \
+    && ok "桌面 JVM 经 JNI 跑通完整会话" \
+    || fail "JNI 冒烟失败（日志：/tmp/mim-jni.log）"
+
   section "C ABI（FFI）冒烟测试"
   "$ROOT_DIR/MIMCoreRust/tools/ffi_test.sh" /tmp/mim-ffi > /tmp/mim-ffi.log 2>&1 \
     && ok "C 程序经 C ABI 跑通完整会话" \

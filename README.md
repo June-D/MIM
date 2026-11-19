@@ -224,9 +224,11 @@ MIMServer/
 MIMCoreRust/             Rust 可行性 spike：对拍 + 互通 + C ABI（需要 cargo）
   src/envelope.rs        标签 / 同步副本 / 发送者证书信封（格式与 Java 逐字节一致）
   src/sender_cert.rs     证书规范化串与 SHA256withRSA 验签、keyId 指纹校验
+  java/com/junesoon/mim/core/MimCoreNative.java  JNI 绑定（Android 直接复用）
   include/mim_core.h     C ABI 头文件（Android JNI / iOS cinterop 的公共底座）
   tools/interop.sh       Rust ⇄ Java 真实收发联调
   tools/ffi_test.sh      链接 Rust 静态库的 C 冒烟测试
+  tools/jni_test.sh      桌面 JVM 经 JNI 跑完整会话（Android 调用形态）
 MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Rust 移植的基准）
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
                           SessionStore、PreKeyStore、IdentityStore、SecretBox、TrustStore、
@@ -595,6 +597,7 @@ cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、
 cd MIMCoreRust && cargo test      # 10 项：HKDF/AES-GCM/ECDH/X3DH/握手/信封/证书串/双棘轮
 cd MIMCoreRust && ./tools/interop.sh   # Rust 发起 → Java 解密回信 → Rust 解密（真实互通）
 cd MIMCoreRust && ./tools/ffi_test.sh  # C 程序经 C ABI 跑完整会话与状态恢复
+cd MIMCoreRust && ./tools/jni_test.sh  # 桌面 JVM 经 JNI 跑完整会话（Android 同款）
 cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 mim-core）
 
 # 首次构建顺序：先安装协议核心，再构建客户端
@@ -982,6 +985,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+123. Rust 核心补上 **JNI 绑定**：`MimCoreNative`（Java 类）经 JNI 调用同一份
+    Rust 核心，握手返回不透明句柄，消息与状态用 JSON 字节数组，失败抛异常。
+    `tools/jni_test.sh` 在桌面 JVM 上跑完整会话 + 重复投递拒绝 + 状态恢复，
+    Android 只需把 `.so` 放进 `jniLibs` 并复用这个类。这一步不需要 Android SDK
+    就能验证调用形态。
 122. Rust spike 补齐 **信封层与证书验签**：标签信封、同步副本信封、
     发送者证书信封（7 段 / 带会话标签的 8 段）全部按 Java 格式解析与打包；
     证书用 `SHA256withRSA` 验签，并校验 `keyId = SHA-256(服务端公钥 DER)`、

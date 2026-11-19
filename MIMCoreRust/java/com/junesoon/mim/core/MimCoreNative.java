@@ -1,0 +1,65 @@
+package com.junesoon.mim.core;
+
+/**
+ * Rust 协议核心的 JNI 绑定（Android 与桌面 JVM 共用）。
+ *
+ * <p>方法直接对应 {@code MIMCoreRust/include/mim_core.h}：
+ * 握手返回不透明句柄（long），消息与状态用 JSON 字节数组交换。
+ * 失败一律抛 {@link IllegalStateException}，不会返回半成品状态。
+ *
+ * <p>句柄由调用方负责 {@link #free(long)}；它持有会话私钥，
+ * 泄露相当于泄露会话密钥。
+ */
+public final class MimCoreNative {
+
+    static {
+        System.loadLibrary("mim_core_rust");
+    }
+
+    private MimCoreNative() {
+    }
+
+    /**
+     * 发起方建会话。
+     *
+     * @param peerOneTimePreKeyPub 可为 null 或空数组，表示不使用一次性预密钥
+     * @return 会话句柄
+     */
+    public static native long initiatorSession(
+        byte[] selfIdentityPriv,
+        byte[] selfIdentityPub,
+        byte[] peerIdentityPub,
+        byte[] peerSignedPreKeyPub,
+        byte[] peerOneTimePreKeyPub,
+        byte[] ephemeralPriv,
+        byte[] ephemeralPub);
+
+    /** 接收方建会话。 */
+    public static native long responderSession(
+        byte[] selfIdentityPriv,
+        byte[] selfIdentityPub,
+        byte[] selfSignedPreKeyPriv,
+        byte[] selfSignedPreKeyPub,
+        byte[] selfOneTimePreKeyPriv,
+        byte[] peerIdentityPub,
+        byte[] peerEphemeralPub,
+        boolean usedOneTimePreKey);
+
+    /** 发起方首条消息要携带的参数：{"identity","ephemeral","used_opk"}。 */
+    public static native byte[] initiatorPubkeys(long session);
+
+    /** 加密；iv 必须 12 字节。返回 {"dh","pn","n","iv","ciphertext"}。 */
+    public static native byte[] encrypt(long session, byte[] iv, byte[] plaintext);
+
+    /** 解密同一份线上消息 JSON，返回明文。 */
+    public static native byte[] decrypt(long session, byte[] wireJson);
+
+    /** 状态快照（含私钥；必须加密后落盘）。 */
+    public static native byte[] save(long session);
+
+    /** 从状态快照恢复。 */
+    public static native long load(byte[] stateJson);
+
+    /** 释放会话句柄。 */
+    public static native void free(long session);
+}

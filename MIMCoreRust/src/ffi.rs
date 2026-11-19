@@ -34,6 +34,53 @@ struct InitiatorKeys {
     used_one_time_pre_key: bool,
 }
 
+impl MimSession {
+    /// 由发起方握手结果构造（保留首条消息需要的公开参数）。
+    pub fn from_initiator(result: crate::session::InitiatorResult) -> Self {
+        Self {
+            state: result.state,
+            initiator_keys: Some(InitiatorKeys {
+                identity_key: result.sender_identity_key,
+                ephemeral_key: result.sender_ephemeral_key,
+                used_one_time_pre_key: result.used_one_time_pre_key,
+            }),
+        }
+    }
+
+    /// 由已有状态构造（接收方或从快照恢复）。
+    pub fn from_state(state: RatchetState) -> Self {
+        Self {
+            state,
+            initiator_keys: None,
+        }
+    }
+
+    /// 发起方参数 JSON：{"identity","ephemeral","used_opk"}；接收方状态返回 None。
+    pub fn initiator_pubkeys_json(&self) -> Option<String> {
+        let keys = self.initiator_keys.as_ref()?;
+        Some(format!(
+            "{{\"identity\":\"{}\",\"ephemeral\":\"{}\",\"used_opk\":{}}}",
+            b64(&keys.identity_key),
+            b64(&keys.ephemeral_key),
+            keys.used_one_time_pre_key
+        ))
+    }
+
+    /// 加密并序列化为线上消息 JSON。
+    pub fn encrypt_json(&mut self, iv: &[u8], plaintext: &str) -> Option<String> {
+        let message = self.state.encrypt_wire(iv, plaintext)?;
+        serde_json::to_string(&message).ok()
+    }
+
+    pub fn state(&self) -> &RatchetState {
+        &self.state
+    }
+
+    pub fn state_mut(&mut self) -> &mut RatchetState {
+        &mut self.state
+    }
+}
+
 unsafe fn input_slice<'a>(ptr: *const u8, len: usize) -> Option<&'a [u8]> {
     if len == 0 {
         return Some(&[]);
@@ -118,14 +165,7 @@ pub unsafe extern "C" fn mim_initiator_session(
             if !out_error.is_null() {
                 *out_error = MIM_OK;
             }
-            Box::into_raw(Box::new(MimSession {
-                initiator_keys: Some(InitiatorKeys {
-                    identity_key: result.sender_identity_key,
-                    ephemeral_key: result.sender_ephemeral_key,
-                    used_one_time_pre_key: result.used_one_time_pre_key,
-                }),
-                state: result.state,
-            }))
+            Box::into_raw(Box::new(MimSession::from_initiator(result)))
         }
         _ => {
             if !out_error.is_null() {
@@ -183,10 +223,7 @@ pub unsafe extern "C" fn mim_responder_session(
             if !out_error.is_null() {
                 *out_error = MIM_OK;
             }
-            Box::into_raw(Box::new(MimSession {
-                state,
-                initiator_keys: None,
-            }))
+            Box::into_raw(Box::new(MimSession::from_state(state)))
         }
         _ => {
             if !out_error.is_null() {
@@ -208,17 +245,10 @@ pub unsafe extern "C" fn mim_initiator_pubkeys(
         Some(s) => s,
         None => return MIM_ERR_INVALID_ARG,
     };
-    let keys = match session.initiator_keys.as_ref() {
-        Some(k) => k,
-        None => return MIM_ERR_STATE,
-    };
-    let json = format!(
-        "{{\"identity\":\"{}\",\"ephemeral\":\"{}\",\"used_opk\":{}}}",
-        b64(&keys.identity_key),
-        b64(&keys.ephemeral_key),
-        keys.used_one_time_pre_key
-    );
-    give_bytes(json.into_bytes(), out_json, out_len)
+    match session.initiator_pubkeys_json() {
+        Some(json) => give_bytes(json.into_bytes(), out_json, out_len),
+        None => MIM_ERR_STATE,
+    }
 }
 
 /// 加密。输出为线上消息 JSON（dh/pn/n/iv/ciphertext）。
@@ -318,10 +348,7 @@ pub unsafe extern "C" fn mim_session_load(
             if !out_error.is_null() {
                 *out_error = MIM_OK;
             }
-            Box::into_raw(Box::new(MimSession {
-                state,
-                initiator_keys: None,
-            }))
+            Box::into_raw(Box::new(MimSession::from_state(state)))
         }
         _ => {
             if !out_error.is_null() {

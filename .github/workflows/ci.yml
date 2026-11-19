@@ -128,6 +128,9 @@ jobs:
       - name: C ABI（FFI）冒烟测试
         run: ./MIMCoreRust/tools/ffi_test.sh /tmp/mim-ffi
 
+      - name: JNI 绑定冒烟测试（Android 调用形态）
+        run: ./MIMCoreRust/tools/jni_test.sh /tmp/mim-jni
+
   # ------------------------------------------------------------
   # 客户端：加密层单元测试
   # ------------------------------------------------------------
