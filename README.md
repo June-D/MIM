@@ -224,6 +224,7 @@ MIMServer/
 MIMCoreRust/             Rust 可行性 spike：对拍 + 互通 + C ABI（需要 cargo）
   src/envelope.rs        标签 / 同步副本 / 发送者证书信封（格式与 Java 逐字节一致）
   src/sender_cert.rs     证书规范化串与 SHA256withRSA 验签、keyId 指纹校验
+  src/secure_store.rs    状态加密落盘（AES-256-GCM，密钥来自平台密钥库）
   java/com/junesoon/mim/core/MimCoreNative.java  JNI 绑定（Android 直接复用）
   include/mim_core.h     C ABI 头文件（Android JNI / iOS cinterop 的公共底座）
   tools/interop.sh       Rust ⇄ Java 真实收发联调
@@ -994,6 +995,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+125. Rust 核心补上 **加密状态存储**：会话状态用 AES-256-GCM 加密成三行文本
+    （版本串兼作 AAD），密钥由 Android Keystore / iOS Keychain 提供，
+    nonce 每次新生成。C ABI 与 JNI 都暴露 `state_encrypt/state_decrypt/random_bytes`，
+    错误密钥、篡改密文、错误 nonce、错误版本串全部拒绝；6 项单测 + C/JNI
+    冒烟覆盖。这样移动端才有真正的「私钥不明文落盘」方案。
 124. 新增 **MIMCompose**（Compose Multiplatform UI 骨架）：登录 / 联系人 / 聊天
     三屏，`AppStore` 收口全部状态与动作，`MessagingBackend` 定义传输契约，
     `DemoBackend` 只在内存里跑通交互。桌面目标可编译、可启动，状态流 3 项

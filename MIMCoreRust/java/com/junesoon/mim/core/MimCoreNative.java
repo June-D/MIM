@@ -60,6 +60,20 @@ public final class MimCoreNative {
     /** 从状态快照恢复。 */
     public static native long load(byte[] stateJson);
 
+    /**
+     * 加密状态快照。
+     *
+     * @param key   32 字节密钥（必须由平台 Keystore / Keychain 保管）
+     * @param nonce 12 字节，每条状态必须新生成
+     */
+    public static native byte[] encryptState(byte[] plaintext, byte[] key, byte[] nonce);
+
+    /** 解密状态快照；格式、密钥或密文不对都会抛异常。 */
+    public static native byte[] decryptState(byte[] blob, byte[] key);
+
+    /** 安全随机字节（生成 nonce 与本地密钥用）。 */
+    public static native byte[] randomBytes(int length);
+
     /** 释放会话句柄。 */
     public static native void free(long session);
 }

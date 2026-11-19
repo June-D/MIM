@@ -156,6 +156,31 @@ int main(void) {
     size_t state_len = 0;
     assert(mim_session_save(b, &state_json, &state_len) == MIM_OK);
     printf("B 状态快照 %zu 字节\n", state_len);
+
+    /* 加密落盘：密钥来自平台密钥库，这里用随机密钥演示。 */
+    uint8_t state_key[32];
+    uint8_t state_nonce[12];
+    assert(mim_random_bytes(state_key, sizeof(state_key)) == MIM_OK);
+    assert(mim_random_bytes(state_nonce, sizeof(state_nonce)) == MIM_OK);
+    uint8_t *sealed = NULL;
+    size_t sealed_len = 0;
+    assert(mim_state_encrypt(state_json, state_len, state_key, sizeof(state_key),
+                             state_nonce, sizeof(state_nonce), &sealed, &sealed_len) == MIM_OK);
+    uint8_t *opened = NULL;
+    size_t opened_len = 0;
+    assert(mim_state_decrypt(sealed, sealed_len, state_key, sizeof(state_key),
+                             &opened, &opened_len) == MIM_OK);
+    if (opened_len != state_len || memcmp(opened, state_json, state_len) != 0) {
+        fprintf(stderr, "状态加解密往返不一致\n");
+        return 1;
+    }
+    mim_bytes_free(opened, opened_len);
+    state_key[0] ^= 0xff;
+    assert(mim_state_decrypt(sealed, sealed_len, state_key, sizeof(state_key),
+                             &opened, &opened_len) != MIM_OK);
+    printf("状态加解密与错误密钥拒绝通过\n");
+    mim_bytes_free(sealed, sealed_len);
+
     mim_session_free(b);
 
     b = mim_session_load(state_json, state_len, &err);

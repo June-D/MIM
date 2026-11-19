@@ -72,6 +72,29 @@ public final class MimCoreNativeTest {
 
         byte[] state = MimCoreNative.save(b);
         System.out.println("B 状态快照 " + state.length + " 字节");
+
+        // 加密落盘：密钥由平台密钥库保管，这里用随机密钥演示。
+        byte[] stateKey = MimCoreNative.randomBytes(32);
+        byte[] stateNonce = MimCoreNative.randomBytes(12);
+        byte[] sealed = MimCoreNative.encryptState(state, stateKey, stateNonce);
+        System.out.println("加密后的状态 " + sealed.length + " 字节");
+        byte[] opened = MimCoreNative.decryptState(sealed, stateKey);
+        if (!java.util.Arrays.equals(opened, state)) {
+            throw new IllegalStateException("状态加解密往返不一致");
+        }
+        byte[] wrongKey = stateKey.clone();
+        wrongKey[0] ^= (byte) 0xff;
+        boolean rejected = false;
+        try {
+            MimCoreNative.decryptState(sealed, wrongKey);
+        } catch (IllegalStateException e) {
+            rejected = true;
+        }
+        if (!rejected) {
+            throw new IllegalStateException("错误密钥必须被拒绝");
+        }
+        System.out.println("状态加解密与错误密钥拒绝通过");
+
         MimCoreNative.free(b);
         b = MimCoreNative.load(state);
 

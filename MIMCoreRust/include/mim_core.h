@@ -75,6 +75,23 @@ int32_t mim_session_save(const MimSession *session,
 MimSession *mim_session_load(const uint8_t *json, size_t json_len,
                              int32_t *out_error);
 
+/*
+ * 加密状态存储：密钥必须来自平台 Keystore / Keychain（32 字节），
+ * nonce 必须每次新生成（12 字节）。输出为三行文本：
+ *   MIM-STATE-1 / Base64(nonce) / Base64(密文+tag)
+ */
+int32_t mim_state_encrypt(const uint8_t *plaintext, size_t plaintext_len,
+                          const uint8_t *key, size_t key_len,
+                          const uint8_t *nonce, size_t nonce_len,
+                          uint8_t **out_blob, size_t *out_len);
+
+int32_t mim_state_decrypt(const uint8_t *blob, size_t blob_len,
+                          const uint8_t *key, size_t key_len,
+                          uint8_t **out_plaintext, size_t *out_len);
+
+/* 用安全随机填充调用方缓冲。 */
+int32_t mim_random_bytes(uint8_t *out, size_t len);
+
 void mim_session_free(MimSession *session);
 void mim_bytes_free(uint8_t *ptr, size_t len);
 const char *mim_version(void);

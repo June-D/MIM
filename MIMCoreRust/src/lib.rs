@@ -19,6 +19,7 @@ pub mod ffi;
 #[cfg(feature = "jni")]
 pub mod jni_api;
 pub mod ratchet;
+pub mod secure_store;
 pub mod sender_cert;
 pub mod session;
 

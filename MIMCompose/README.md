@@ -51,5 +51,6 @@ cd MIMCompose
 
 ## 约束
 
-- UI 不接触明文密钥；密钥与状态由核心层加密落盘。
+- UI 不接触明文密钥；状态由 Rust 核心的 `secure_store` 加密落盘，
+  密钥来自 Android Keystore / iOS Keychain。
 - 演示后端只用于验证界面与状态流，不代表协议行为。

@@ -8,9 +8,10 @@
 
 use crate::ffi::MimSession;
 use crate::ratchet::{RatchetState, StateSnapshot, WireMessage};
+use crate::secure_store::{decrypt_state, encrypt_state, fill_random};
 use crate::session::{initiator_session, responder_session};
 use jni::objects::{JByteArray, JClass};
-use jni::sys::{jboolean, jbyteArray, jlong};
+use jni::sys::{jboolean, jbyteArray, jint, jlong};
 use jni::JNIEnv;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -293,4 +294,78 @@ pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_free(
     unsafe {
         drop(Box::from_raw(handle as *mut MimSession));
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_encryptState<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    plaintext: JByteArray<'local>,
+    key: JByteArray<'local>,
+    nonce: JByteArray<'local>,
+) -> jbyteArray {
+    let value = bytes(&mut env, &plaintext);
+    let key = bytes(&mut env, &key);
+    let nonce = bytes(&mut env, &nonce);
+    match (value, key, nonce) {
+        (Some(value), Some(key), Some(nonce)) => match encrypt_state(&value, &key, &nonce) {
+            Some(blob) => array(&mut env, blob.into_bytes()),
+            None => {
+                throw(&mut env, "加密状态失败：密钥必须 32 字节、nonce 必须 12 字节");
+                std::ptr::null_mut()
+            }
+        },
+        _ => {
+            throw(&mut env, "无法读取参数");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_decryptState<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    blob: JByteArray<'local>,
+    key: JByteArray<'local>,
+) -> jbyteArray {
+    let value = bytes(&mut env, &blob);
+    let key = bytes(&mut env, &key);
+    match (value, key) {
+        (Some(value), Some(key)) => {
+            let text = match std::str::from_utf8(&value) {
+                Ok(v) => v,
+                Err(_) => {
+                    throw(&mut env, "状态不是 UTF-8");
+                    return std::ptr::null_mut();
+                }
+            };
+            match decrypt_state(text, &key) {
+                Some(plaintext) => array(&mut env, plaintext),
+                None => {
+                    throw(&mut env, "解密状态失败：格式损坏、密钥不匹配或密文被篡改");
+                    std::ptr::null_mut()
+                }
+            }
+        }
+        _ => {
+            throw(&mut env, "无法读取参数");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_randomBytes<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    length: jint,
+) -> jbyteArray {
+    if length <= 0 {
+        throw(&mut env, "长度必须为正");
+        return std::ptr::null_mut();
+    }
+    let mut buffer = vec![0u8; length as usize];
+    fill_random(&mut buffer);
+    array(&mut env, buffer)
 }

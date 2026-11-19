@@ -370,3 +370,77 @@ pub unsafe extern "C" fn mim_version() -> *const c_char {
     static VERSION: &[u8] = b"mim-core-rust 0.1.0\0";
     VERSION.as_ptr() as *const c_char
 }
+
+// ==================== 加密状态存储 ====================
+
+/// 加密状态。`key` 必须 32 字节，`nonce` 必须 12 字节；输出三行文本。
+#[no_mangle]
+pub unsafe extern "C" fn mim_state_encrypt(
+    plaintext: *const u8,
+    plaintext_len: usize,
+    key: *const u8,
+    key_len: usize,
+    nonce: *const u8,
+    nonce_len: usize,
+    out_blob: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let plaintext = match input_slice(plaintext, plaintext_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let key = match input_slice(key, key_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let nonce = match input_slice(nonce, nonce_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    match crate::secure_store::encrypt_state(plaintext, key, nonce) {
+        Some(blob) => give_bytes(blob.into_bytes(), out_blob, out_len),
+        None => MIM_ERR_STATE,
+    }
+}
+
+/// 解密状态。格式、密钥或密文任一不对都返回 MIM_ERR_STATE。
+#[no_mangle]
+pub unsafe extern "C" fn mim_state_decrypt(
+    blob: *const u8,
+    blob_len: usize,
+    key: *const u8,
+    key_len: usize,
+    out_plaintext: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let blob = match input_slice(blob, blob_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let blob = match std::str::from_utf8(blob) {
+        Ok(v) => v,
+        Err(_) => return MIM_ERR_INVALID_ARG,
+    };
+    let key = match input_slice(key, key_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    match crate::secure_store::decrypt_state(blob, key) {
+        Some(plaintext) => give_bytes(plaintext, out_plaintext, out_len),
+        None => MIM_ERR_STATE,
+    }
+}
+
+/// 用安全随机填充调用方提供的缓冲（例如生成 nonce 与本地密钥）。
+#[no_mangle]
+pub unsafe extern "C" fn mim_random_bytes(out: *mut u8, len: usize) -> i32 {
+    if len == 0 {
+        return MIM_OK;
+    }
+    if out.is_null() {
+        return MIM_ERR_INVALID_ARG;
+    }
+    let buffer = std::slice::from_raw_parts_mut(out, len);
+    crate::secure_store::fill_random(buffer);
+    MIM_OK
+}
