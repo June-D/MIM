@@ -797,13 +797,13 @@ class MapperIntegrationTest extends IntegrationTestBase {
         insertTagged("msg-tag-unread-01", TAG_ONE);
         insertTagged("msg-tag-unread-02", TAG_TWO);
 
-        assertEquals(1L, messageMapper.countUnreadByTags(
+        assertEquals(1L, messageMapper.countUnreadByRefOrTags(null,
             Collections.singletonList(TAG_ONE), BOB, null));
         assertEquals(1, messageMapper.markReadByTags(
             Collections.singletonList(TAG_ONE), BOB, null));
-        assertEquals(0L, messageMapper.countUnreadByTags(
+        assertEquals(0L, messageMapper.countUnreadByRefOrTags(null,
             Collections.singletonList(TAG_ONE), BOB, null));
-        assertEquals(1L, messageMapper.countUnreadByTags(
+        assertEquals(1L, messageMapper.countUnreadByRefOrTags(null,
             Collections.singletonList(TAG_TWO), BOB, null), "其它会话不受影响");
     }
 

@@ -98,9 +98,6 @@ public interface MessageMapper {
         @Param("tags") List<String> tags, @Param("toUsername") String toUsername,
         @Param("afterId") Long afterId);
 
-    long countUnreadByTags(@Param("tags") List<String> tags,
-        @Param("toUsername") String toUsername, @Param("afterId") Long afterId);
-
     Long maxTagConversationId(@Param("tags") List<String> tags,
         @Param("viewer") String viewer, @Param("peer") String peer);
 

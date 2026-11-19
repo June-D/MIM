@@ -62,18 +62,10 @@ public interface MessageService {
      */
     int markRead(String username, String peer, Long beforeId, List<String> tags);
 
-    default int markRead(String username, String peer, Long beforeId) {
-        return markRead(username, peer, beforeId, null);
-    }
-
     /**
      * 未读数。{@code tags} 非空时额外按标签统计（不依赖盲引用）。
      */
     long countUnread(String username, String peer, List<String> tags);
-
-    default long countUnread(String username, String peer) {
-        return countUnread(username, peer, null);
-    }
 
     /**
      * 撤回自己发出的消息（按 clientMsgId 撤回所有设备副本）。

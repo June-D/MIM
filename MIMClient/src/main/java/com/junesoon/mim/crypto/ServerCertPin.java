@@ -63,10 +63,6 @@ public final class ServerCertPin {
         return new Pin(keyId, publicKey);
     }
 
-    public String pinnedKeyId() {
-        return keyId;
-    }
-
     private void load() {
         try {
             if (!Files.exists(file)) {

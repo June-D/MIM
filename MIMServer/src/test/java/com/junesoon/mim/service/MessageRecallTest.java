@@ -124,11 +124,6 @@ class MessageRecallTest {
         }
 
         @Override
-        public long countUnreadByTags(List<String> tags, String toUsername, Long afterId) {
-            return 0;
-        }
-
-        @Override
         public Long maxTagConversationId(List<String> tags, String viewer, String peer) {
             return null;
         }

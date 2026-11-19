@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.file.Path;
-import java.util.List;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -35,10 +34,6 @@ class BlockedPeerStoreTest {
         PlaintextStore reloaded = new PlaintextStore(dir);
         reloaded.load("alice", "pw");
         assertTrue(reloaded.isBlocked("bob"), "屏蔽状态必须持久化");
-
-        List<String> blocked = reloaded.blockedPeers();
-        assertTrue(blocked.contains("bob"));
-        assertFalse(blocked.contains("carol"));
 
         reloaded.unblock("bob");
         assertFalse(reloaded.isBlocked("bob"));

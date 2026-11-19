@@ -94,14 +94,6 @@ public final class SenderCertService {
         }
     }
 
-    /**
-     * 清空缓存。设备标识变化或重新登录后调用，避免继续用旧设备的证书。
-     */
-    public void invalidateCache() {
-        cached = null;
-        cachedExpiresAt = 0L;
-    }
-
     private SenderCertKeyView fetchKey() {
         try {
             ObjectRestResponse<SenderCertKeyView> response =

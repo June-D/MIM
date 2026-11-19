@@ -523,21 +523,6 @@
         </if>
     </select>
 
-    <select id="countUnreadByTags" resultType="java.lang.Long">
-        select count(distinct client_msg_id)
-        from t_message
-        where to_user = #{toUsername,jdbcType=VARCHAR}
-          and conversation_tag in
-          <foreach collection="tags" item="tag" open="(" separator="," close=")">
-              #{tag,jdbcType=VARCHAR}
-          </foreach>
-          and read_flag = 0
-          and recalled = 0
-        <if test="afterId != null">
-          and id &gt; #{afterId,jdbcType=BIGINT}
-        </if>
-    </select>
-
     <select id="countUnreadByRef" resultType="java.lang.Long">
         select count(distinct client_msg_id)
         from t_message

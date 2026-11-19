@@ -183,17 +183,6 @@ public final class PlaintextStore {
         persistQuietly("解除屏蔽状态保存失败");
     }
 
-    /** 已屏蔽的联系人列表，供界面展示与历史同步过滤。 */
-    public java.util.List<String> blockedPeers() {
-        java.util.List<String> peers = new java.util.ArrayList<>();
-        for (String key : texts.keySet()) {
-            if (key.startsWith(BLOCK_PREFIX)) {
-                peers.add(key.substring(BLOCK_PREFIX.length()));
-            }
-        }
-        return peers;
-    }
-
     public void addConversationTag(String peer, String tag) {
         if (peer == null || tag == null || tag.isEmpty()) {
             return;
