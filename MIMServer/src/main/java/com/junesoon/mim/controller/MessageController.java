@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -49,6 +50,19 @@ public class MessageController {
     public ObjectRestResponse<List<CipherMessage>> send(@CurrentUser String username,
         @CurrentDevice String deviceId, @RequestBody List<CipherMessage> messages) {
         List<CipherMessage> saved = messageService.send(username, deviceId, messages);
+        return new ObjectRestResponse<List<CipherMessage>>().data(saved).rel(true);
+    }
+
+    /**
+     * 匿名提交（Phase 2c）。用 {@code X-Sender-Token} 替代 JWT；
+     * 只接受带会话标签的 sealed 消息。默认关闭。
+     */
+    @PostMapping("/anonymous")
+    @RateLimit(limit = 30, windowSeconds = 60, dimension = RateLimit.Dimension.IP)
+    public ObjectRestResponse<List<CipherMessage>> anonymous(
+        @RequestHeader(value = "X-Sender-Token", required = false) String senderToken,
+        @RequestBody List<CipherMessage> messages) {
+        List<CipherMessage> saved = messageService.sendAnonymous(senderToken, messages);
         return new ObjectRestResponse<List<CipherMessage>>().data(saved).rel(true);
     }
 

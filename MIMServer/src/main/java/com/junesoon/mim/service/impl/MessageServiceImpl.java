@@ -15,6 +15,7 @@ import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.service.MessageService;
 import com.junesoon.mim.service.PushService;
+import com.junesoon.mim.service.SenderTokenService;
 import com.junesoon.mim.utils.MetadataRef;
 import com.junesoon.mim.utils.RecallToken;
 import com.junesoon.mim.utils.ValidationUtil;
@@ -93,6 +94,16 @@ public class MessageServiceImpl implements MessageService {
 
     @Value("${message.recall-window-seconds:120}")
     private long recallWindowSeconds;
+
+    /**
+     * 可选注入：匿名提交的令牌校验。单元测试直接构造时可空，
+     * 匿名入口因此不可用。
+     */
+    @Autowired(required = false)
+    private SenderTokenService senderTokenService;
+
+    @Value("${mim.anonymous-send.enabled:false}")
+    private boolean anonymousSendEnabled;
 
     public MessageServiceImpl(MessageMapper messageMapper,
         ConversationClearMapper conversationClearMapper, UserMapper userMapper,
@@ -436,6 +447,131 @@ public class MessageServiceImpl implements MessageService {
                 log.warn("推送消息 id={} 失败：{}", record.getId(), e.getMessage());
             }
         }
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public List<CipherMessage> sendAnonymous(String senderToken, List<CipherMessage> messages) {
+        if (!anonymousSendEnabled || senderTokenService == null) {
+            throw new UserInvalidException("匿名提交未启用");
+        }
+        // 先消费令牌：即使后续校验失败也不退，避免被用来探测校验逻辑。
+        senderTokenService.consume(senderToken);
+
+        if (messages == null || messages.isEmpty()) {
+            throw new UserInvalidException("没有可提交的消息");
+        }
+        CipherMessage sample = messages.get(0);
+        String clientMsgId = sample.getClientMsgId();
+        String toUsername = sample.getToUsername();
+        String tag = normalizeTag(sample.getConversationTag());
+        if (tag == null) {
+            throw new UserInvalidException("匿名提交必须携带会话标签");
+        }
+        if (!Boolean.TRUE.equals(sample.getSealed())) {
+            throw new UserInvalidException("匿名提交只支持 sealed 消息");
+        }
+        if (!ALGORITHM_RATCHET.equals(sample.getAlg())) {
+            throw new UserInvalidException("匿名提交只支持双棘轮消息");
+        }
+        // 匿名入口没有账号：传空字符串跳过「不能给自己发」的判定。
+        validateEnvelope("", toUsername, clientMsgId, sample);
+        if (!StringUtils.hasText(sample.getSessionId())
+            || !sample.getSessionId().matches("^[A-Za-z0-9-]{8,64}$")) {
+            throw new UserInvalidException("sealed 会话 ID 不合法");
+        }
+
+        Set<String> activeDevices = new HashSet<>();
+        List<Device> devices = deviceMapper.selectActiveDevices(toUsername);
+        if (devices != null) {
+            for (Device device : devices) {
+                activeDevices.add(device.getDeviceId());
+            }
+        }
+        Set<String> seenTargets = new HashSet<>();
+        for (CipherMessage message : messages) {
+            String target = targetOf(message);
+            if (!activeDevices.contains(target)) {
+                throw new UserInvalidException("目标设备不存在或已注销：" + target);
+            }
+            if (!seenTargets.add(target)) {
+                throw new UserInvalidException("同一目标设备出现多份密文：" + target);
+            }
+            boolean same = clientMsgId.equals(message.getClientMsgId())
+                && toUsername.equals(message.getToUsername())
+                && tag.equals(normalizeTag(message.getConversationTag()))
+                && Boolean.TRUE.equals(message.getSealed())
+                && ALGORITHM_RATCHET.equals(message.getAlg());
+            if (!same) {
+                throw new UserInvalidException("同一逻辑消息的所有副本必须归属一致");
+            }
+            validateCipherFields(message);
+        }
+
+        String recallTokenHash = recallTokenHash(sample.getRecallToken());
+        long now = System.currentTimeMillis();
+        List<CipherMessage> saved = new ArrayList<>(messages.size());
+        for (CipherMessage message : messages) {
+            String target = targetOf(message);
+            CipherMessage existing = messageMapper.selectByClientMsgId(clientMsgId, target);
+            if (existing != null) {
+                saved.add(existing);
+                continue;
+            }
+            CipherMessage record = new CipherMessage();
+            record.setClientMsgId(clientMsgId);
+            // 匿名提交：不写 from_user / from_device_id / 盲引用，只留会话标签。
+            record.setFromUsername(null);
+            record.setFromDeviceId(null);
+            record.setFromRef(null);
+            record.setFromDeviceRef(null);
+            record.setConversationTag(tag);
+            record.setRecallTokenHash(recallTokenHash);
+            record.setSealed(true);
+            record.setSessionId(message.getSessionId());
+            record.setToUsername(toUsername);
+            record.setTargetDeviceId(target);
+            record.setAlg(message.getAlg());
+            record.setIv(message.getIv());
+            record.setCiphertext(message.getCiphertext());
+            record.setRatchetPublic(message.getRatchetPublic());
+            record.setPreviousChainLength(message.getPreviousChainLength());
+            record.setMessageNumber(message.getMessageNumber());
+            record.setSenderIdentityKey(message.getSenderIdentityKey());
+            record.setSenderEphemeralKey(message.getSenderEphemeralKey());
+            record.setSenderUsedOneTimePreKey(message.getSenderUsedOneTimePreKey());
+            record.setConsumedOneTimePreKeyId(message.getConsumedOneTimePreKeyId());
+            record.setRecipientSignedPreKeyId(message.getRecipientSignedPreKeyId());
+            record.setPadding(Boolean.TRUE.equals(message.getPadding()));
+            record.setClientTime(message.getClientTime());
+            record.setServerTime(now);
+            record.setDelivered(false);
+            record.setReadFlag(false);
+            record.setRecalled(false);
+            try {
+                messageMapper.insert(record);
+            } catch (DuplicateKeyException e) {
+                CipherMessage duplicate = messageMapper.selectByClientMsgId(clientMsgId, target);
+                if (duplicate != null) {
+                    saved.add(duplicate);
+                    continue;
+                }
+                throw e;
+            }
+            saved.add(record);
+        }
+
+        // 匿名提交没有「发送者其它设备」可以通知，只推给收信设备。
+        for (CipherMessage record : saved) {
+            try {
+                BaseNotify<CipherMessage> notify =
+                    BaseNotify.of(CommonConstants.NOTIFY_TYPE_NEW_MESSAGE, record);
+                pushService.pushToDevice(toUsername, record.getTargetDeviceId(), notify);
+            } catch (Exception e) {
+                log.warn("匿名消息推送失败 id={}：{}", record.getId(), e.getMessage());
+            }
+        }
+        return saved;
     }
 
     @Override
@@ -1005,6 +1141,14 @@ public class MessageServiceImpl implements MessageService {
         } catch (Exception e) {
             log.warn("删除已使用的 OPK 失败：{}", e.getMessage());
         }
+    }
+
+    /**
+     * 目标设备缺省为 default，与 /message 的约定一致。
+     */
+    private static String targetOf(CipherMessage message) {
+        return StringUtils.hasText(message.getTargetDeviceId())
+            ? message.getTargetDeviceId().trim() : UserKey.DEFAULT_DEVICE_ID;
     }
 
     private String requireOwnDevice(String username, String deviceId) {

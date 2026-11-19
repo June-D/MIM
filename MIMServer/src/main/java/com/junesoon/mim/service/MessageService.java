@@ -15,6 +15,12 @@ public interface MessageService {
     List<CipherMessage> send(String authenticatedUser, String fromDeviceId, List<CipherMessage> messages);
 
     /**
+     * 匿名提交（Phase 2c）：用发送者令牌替代 JWT。
+     * 只接受带会话标签的 sealed 消息；服务端不保存任何发送者形式。
+     */
+    List<CipherMessage> sendAnonymous(String senderToken, List<CipherMessage> messages);
+
+    /**
      * 会话历史。{@code deviceId} 不为空时，优先返回这台设备解得开的那一份副本。
      * {@code tags} 是客户端持有的会话标签，非空时额外按标签查询
      * （双写期与盲引用查询并存，结果按 clientMsgId 去重）。

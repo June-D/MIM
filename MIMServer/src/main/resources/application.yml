@@ -35,6 +35,13 @@ mim:
     # Phase 2a：签发发送者证书，供首条消息在不落 from_user 时确认归属。
     # 默认关闭；关闭时 /cert/* 返回「未启用」，也不会生成签名密钥。
     enabled: ${MIM_SENDER_CERT_ENABLED:false}
+  sender-token:
+    # Phase 2c：盲签名发送者令牌。默认关闭，关闭时 /token/* 返回「未启用」。
+    enabled: ${MIM_SENDER_TOKEN_ENABLED:false}
+  anonymous-send:
+    # Phase 2c：/message/anonymous 免 JWT 提交（靠令牌认证）。
+    # 依赖 sender-token 同时打开；默认关闭。
+    enabled: ${MIM_ANONYMOUS_SEND_ENABLED:false}
   redis:
     # 设为 true 时，非本机 Redis 必须同时配置密码与 TLS，否则拒绝启动。
     require-secure: ${MIM_REDIS_REQUIRE_SECURE:false}
