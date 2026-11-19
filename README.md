@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **234** 项、客户端 **134** 项、e2e **30 + 18 + 7 + 13** 项
+- 回归基线：服务端 **234** 项、客户端 **135** 项、e2e **30 + 18 + 7 + 13** 项
 
 ### 已完成
 
@@ -22,6 +22,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 - 消息长度填充（能力协商）、跨设备历史同步、sealed sender Phase 1.5（含跨设备撤回）。
 - Phase 2a/2b：发送者证书签发、分发、TOFU 固定，并接入首条消息（默认关闭）。
 - Phase 2c：盲签名令牌签发/消费 + 匿名提交（服务端与客户端都已接入，默认关闭）。
+- 客户端本地屏蔽名单（匿名消息下唯一可用的滥用拦截手段）。
 - Maven Wrapper 3.9.9；CI 覆盖单元、真实 MySQL 集成和 e2e。
 
 ### Sealed sender 的实际边界（Phase 1.5）
@@ -236,7 +237,7 @@ MIMClient/
   websocket/              WSClient（只收推送）
   utils/                  TlsSupport（HTTPS/WSS 信任配置）
   gui/                    Login / Main / Chat / Loading
-  src/test/java/          134 项单元测试
+  src/test/java/          135 项单元测试
   src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```
 
@@ -597,7 +598,7 @@ cd MIMClient
 
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 234 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 134 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMClient && ../mvnw test      # 135 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -977,6 +978,24 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     **任何失败都回退普通发送**（令牌申请失败/服务端未启用/被拒）。
     CI 启动服务端时默认打开证书/令牌/匿名三个开关，让对应 e2e 真正执行而不是 SKIP。
     客户端 134 项、服务端 234 项、e2e 30 + 18 + 7 + 13 项通过。
+107. 客户端**本地屏蔽名单**：`PlaintextStore` 新增 `blocked|peer` 加密项，
+    `MessageService.block/unblock/isBlocked`；解密出口统一屏蔽为
+    「[已屏蔽该联系人]」（仍正常解密、推进棘轮，解除后不丢密钥）；
+    被屏蔽会话不参与跨设备历史同步转写；联系人右键菜单增加「屏蔽此人 / 解除屏蔽」。
+    匿名消息里服务端不知道发送者，屏蔽只能落在客户端。客户端 135 项通过。
+
+## Phase 2 启用前验收清单
+
+自动化只能覆盖服务端契约与线格式；下面这些必须在真实界面上人工跑一遍，
+全部通过后再考虑打开 `MIM_SENDER_CERT_ENABLED` / `MIM_SENDER_TOKEN_ENABLED` /
+`MIM_ANONYMOUS_SEND_ENABLED` 与客户端 `-Dmim.anonymousSend=true`：
+
+1. 首次联系：A 给从未聊过的 B 发消息，B 能收到、能解密、能直接回复；
+2. 服务端关闭证书功能时，A 的发送自动退回明文发送者格式，不报错；
+3. 客户端匿名关闭/开启各跑一次首次联系，确认历史、未读、清除都正常；
+4. 屏蔽：B 屏蔽 A 后，A 的新消息显示「已屏蔽该联系人」，解除后恢复正常；
+5. 多设备：A 的两台设备都能看到同一会话的历史（含被标签化的新消息）；
+6. 会话丢失：删掉本地会话后收到 sealed 消息，提示明确且不崩溃。
 
 ## 仍需处理
 
@@ -1004,7 +1023,8 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
   用户需要注意：旧版本设备不认识标签，看不到新会话中被标签化的历史。
   2c 的匿名提交已落地（服务端 + 客户端，默认关闭），且**不等于完全匿名**：
   预密钥领取与多端同步仍可让服务端关联账号，盲签名实现也未经外部审计；
-  客户端接入路径尚未在真实界面上验证过。
+  客户端接入路径尚未在真实界面上验证过（见「Phase 2 启用前验收清单」）。
+  客户端屏蔽只能拦截本机展示，服务端仍会投递与计未读。
   见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 11 节。
 - KMS 目前只有外部命令桥接（Vault/AWS/GCP CLI），尚未接 SDK；生产 SMTP
   仍需真实邮件服务器。

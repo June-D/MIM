@@ -249,6 +249,10 @@ public final class HistorySync {
 
     private static CipherMessage toReplica(String targetDeviceId, String conversationPeer,
         DecryptedMessage message, PreKeyBundle bundle) {
+        // 被屏蔽的会话不转发给其它设备：屏蔽状态是用户明确的意愿。
+        if (MessageService.getInstance().isBlocked(conversationPeer)) {
+            return null;
+        }
         if (message.isRecalled()) {
             CipherMessage tombstone = new CipherMessage();
             tombstone.setClientMsgId(message.getClientMsgId());

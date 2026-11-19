@@ -836,7 +836,7 @@ public class MessageService {
         }
         String cached = readCache(message, cacheKey, deviceSync, isSelf);
         if (cached != null) {
-            return new DecryptedMessage(message, unwrapSync(message, cached, deviceSync), false);
+            return finish(peer, message, unwrapSync(message, cached, deviceSync));
         }
         if (isSelf && !deviceSync) {
             // 自己发出的密文是用对方的接收链加密的，本机棘轮解不开。
@@ -919,8 +919,7 @@ public class MessageService {
                     log.warn("会话状态保存失败，可能导致后续消息解密异常：{}", e.getMessage());
                 }
                 plaintextStore.put(cacheKey, plaintext);
-                return new DecryptedMessage(message,
-                    unwrapSync(message, plaintext, deviceSync), false);
+                return finish(peer, message, unwrapSync(message, plaintext, deviceSync));
             }
         } catch (Exception e) {
             log.warn("解密消息 {} 失败：{}", message.getClientMsgId(), e.getMessage());
@@ -982,6 +981,17 @@ public class MessageService {
         trust.trustDevice(deviceId, identityKey, currentPassword());
     }
 
+    /**
+     * 统一的返回出口：屏蔽的联系人只显示占位，避免继续把内容呈现给用户。
+     * 消息本身仍会正常解密并推进棘轮，这样解除屏蔽后不会丢密钥。
+     */
+    private DecryptedMessage finish(String peer, CipherMessage message, String text) {
+        if (peer != null && plaintextStore.isBlocked(peer)) {
+            return new DecryptedMessage(message, "[已屏蔽该联系人]", false);
+        }
+        return new DecryptedMessage(message, text, false);
+    }
+
     private static String syncCacheKey(CipherMessage message) {
         return "sync|" + normalizeDevice(message.getSyncFromDevice()) + "|"
             + (message.getClientMsgId() == null ? "" : message.getClientMsgId());
@@ -1026,6 +1036,24 @@ public class MessageService {
      */
     public java.util.List<String> conversationTags(String peer) {
         return plaintextStore.getConversationTags(peer);
+    }
+
+    /**
+     * 是否已屏蔽该联系人。匿名消息的发送者只有客户端知道，
+     * 因此屏蔽只能落在本地。
+     */
+    public boolean isBlocked(String peer) {
+        return plaintextStore.isBlocked(peer);
+    }
+
+    public void block(String peer) {
+        plaintextStore.block(peer);
+        log.info("已屏蔽联系人 {}", peer);
+    }
+
+    public void unblock(String peer) {
+        plaintextStore.unblock(peer);
+        log.info("已解除屏蔽 {}", peer);
     }
 
     public String recallTokenFor(String peer, String clientMsgId) {
@@ -1218,7 +1246,7 @@ public class MessageService {
             }
             plaintextStore.put(cacheKey(peer, peerDevice, message.getClientMsgId()), text);
             log.info("首条 sealed 消息已按证书归属到 {}/{}", peer, peerDevice);
-            return new DecryptedMessage(message, text, false);
+            return finish(peer, message, text);
         } catch (Exception e) {
             log.warn("首条 sealed 消息解密失败：{}", e.getMessage());
             return new DecryptedMessage(message, "[此消息无法解密]", true);

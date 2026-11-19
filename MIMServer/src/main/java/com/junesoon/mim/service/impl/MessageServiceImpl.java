@@ -591,6 +591,9 @@ public class MessageServiceImpl implements MessageService {
             messages.addAll(legacy);
         }
 
+        // 旧 sealed 消息（Phase 1/1.5）只写了 from_ref，没有会话标签：
+        // 这些分支必须保留，删掉会让历史里 1.5 之前的消息直接消失。
+        // 新消息已停写 from_ref，是否清理取决于旧数据留存策略，不能只按代码判断。
         // sealed 消息的 from_user 是 NULL：发件侧按「我的引用 + 对端用户名」查，
         // 收件侧按「对端引用 + 我的用户名」查。两条都返回同一会话的不同方向。
         if (metadataRefsEnabled()) {

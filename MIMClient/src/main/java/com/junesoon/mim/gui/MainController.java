@@ -883,7 +883,18 @@ public class MainController {
         rename.setOnAction(event -> promptRename(user));
         javafx.scene.control.MenuItem remove = new javafx.scene.control.MenuItem("删除好友");
         remove.setOnAction(event -> confirmRemove(user));
-        menu.getItems().addAll(rename, remove);
+        boolean blocked = MessageService.getInstance().isBlocked(user.getUsername());
+        javafx.scene.control.MenuItem block = new javafx.scene.control.MenuItem(
+            blocked ? "解除屏蔽" : "屏蔽此人");
+        block.setOnAction(event -> {
+            if (MessageService.getInstance().isBlocked(user.getUsername())) {
+                MessageService.getInstance().unblock(user.getUsername());
+            } else {
+                MessageService.getInstance().block(user.getUsername());
+            }
+            loadContacts();
+        });
+        menu.getItems().addAll(rename, block, remove);
         row.setOnContextMenuRequested(event -> menu.show(row, event.getScreenX(), event.getScreenY()));
 
         return row;

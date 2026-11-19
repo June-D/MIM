@@ -29,6 +29,7 @@ public final class PlaintextStore {
     private static final String SENT_PREFIX = "sent|";
     private static final String TOKEN_PREFIX = "token|";
     private static final String TAG_PREFIX = "tags|";
+    private static final String BLOCK_PREFIX = "blocked|";
 
     private final Path directory;
     private final Map<String, String> texts = new LinkedHashMap<>();
@@ -158,6 +159,41 @@ public final class PlaintextStore {
      * 记录一个会话标签。上限 20 个，超出的标签不会影响消息收发，
      * 只是历史查询可能少一条来源。
      */
+    /**
+     * 是否已屏蔽该联系人。屏蔽是本地行为：匿名消息里服务端不知道发送者，
+     * 只能在客户端按发送者证书做拦截。
+     */
+    public boolean isBlocked(String peer) {
+        return peer != null && "1".equals(texts.get(BLOCK_PREFIX + peer));
+    }
+
+    public void block(String peer) {
+        if (peer == null || peer.isEmpty()) {
+            return;
+        }
+        texts.put(BLOCK_PREFIX + peer, "1");
+        persistQuietly("屏蔽联系人状态保存失败");
+    }
+
+    public void unblock(String peer) {
+        if (peer == null || peer.isEmpty()) {
+            return;
+        }
+        texts.remove(BLOCK_PREFIX + peer);
+        persistQuietly("解除屏蔽状态保存失败");
+    }
+
+    /** 已屏蔽的联系人列表，供界面展示与历史同步过滤。 */
+    public java.util.List<String> blockedPeers() {
+        java.util.List<String> peers = new java.util.ArrayList<>();
+        for (String key : texts.keySet()) {
+            if (key.startsWith(BLOCK_PREFIX)) {
+                peers.add(key.substring(BLOCK_PREFIX.length()));
+            }
+        }
+        return peers;
+    }
+
     public void addConversationTag(String peer, String tag) {
         if (peer == null || tag == null || tag.isEmpty()) {
             return;
@@ -169,13 +205,20 @@ public final class PlaintextStore {
         }
         tags.add(tag);
         texts.put(TAG_PREFIX + peer, String.join(",", tags));
+        persistQuietly("会话标签保存失败");
+    }
+
+    /**
+     * 立即落盘；未解锁（无用户名/口令）时只留在内存。
+     */
+    private void persistQuietly(String failureMessage) {
         if (username == null || password == null) {
             return;
         }
         try {
             save();
         } catch (Exception e) {
-            log.warn("会话标签保存失败：{}", e.getMessage());
+            log.warn(failureMessage + "：{}", e.getMessage());
         }
     }
 
