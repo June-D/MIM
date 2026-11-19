@@ -960,6 +960,10 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     **任何失败都回退普通发送**（令牌申请失败/服务端未启用/被拒）。
     CI 启动服务端时默认打开证书/令牌/匿名三个开关，让对应 e2e 真正执行而不是 SKIP。
     客户端 134 项、服务端 234 项、e2e 30 + 18 + 7 + 13 项通过。
+113. 新增 `AcceptanceE2eTest`：把「Phase 2 启用前验收」里可断言的协议契约
+    脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
+    跑两个服务端实例（8080 全开 / 8081 全关）；
+    纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
 112. 修复**证书信封在普通解密路径被当成正文显示**：发送端在会话未确认时会
     继续把证书带在消息里，而接收端可能已有会话，走的是普通解密路径。
     现在所有非同步消息解密后统一拆 `SenderCertEnvelope`，再剥离 padding；
@@ -996,7 +1000,25 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 
 ## Phase 2 启用前验收清单
 
-自动化只能覆盖服务端契约与线格式；下面这些必须在真实界面上人工跑一遍，
+**脚本化部分**（`MIMClient/src/test/e2e/AcceptanceE2eTest`）覆盖可断言的协议契约：
+
+```bash
+# 8080：三个开关全开；8081：三者全关（用于验证关闭态没有降级路径）
+SERVER_PORT=8081 MIM_SENDER_CERT_ENABLED=false \
+MIM_SENDER_TOKEN_ENABLED=false MIM_ANONYMOUS_SEND_ENABLED=false \
+  java -jar MIMServer-1.0-SNAPSHOT-exec.jar &
+
+cd MIMClient
+javac -encoding UTF-8 -cp "target/classes:$(cat /tmp/cp.txt)" \
+  -d /tmp/e2e src/test/e2e/AcceptanceE2eTest.java
+java -cp "/tmp/e2e:target/classes:$(cat /tmp/cp.txt)" \
+  com.junesoon.mim.crypto.AcceptanceE2eTest
+```
+
+当前结果：**12 项协议断言通过**（首次联系、证书关闭、匿名关闭、多设备历史），
+另有 4 项纯界面项会打印 `MANUAL`，必须人工确认。
+
+纯界面项仍必须在真实界面上人工跑一遍，
 全部通过后再考虑打开 `MIM_SENDER_CERT_ENABLED` / `MIM_SENDER_TOKEN_ENABLED` /
 `MIM_ANONYMOUS_SEND_ENABLED` 与客户端 `-Dmim.anonymousSend=true`：
 
