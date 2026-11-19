@@ -147,6 +147,16 @@ public class MainController {
     public void init() {
         renderMe();
         bindEvents();
+        // 登录后立即补一次离线消息：首次联系的消息要在这里学到会话标签，
+        // 否则用户点开会话时历史还是空的。
+        new Thread(() -> {
+            try {
+                MessageService.getInstance().pollUndelivered();
+                loadContacts();
+            } catch (Exception e) {
+                log.debug("启动补拉离线消息失败：{}", e.getMessage());
+            }
+        }, "offline-catchup").start();
         loadContacts();
         loadRequests();
         startPolling();
@@ -760,6 +770,13 @@ public class MainController {
      */
     private void startPolling() {
         poller.scheduleWithFixedDelay(() -> {
+            // 先补离线消息：首次联系的消息会在这里学到会话标签，
+            // 后面的未读数与历史查询才认得这段会话。
+            try {
+                MessageService.getInstance().pollUndelivered();
+            } catch (Exception e) {
+                log.debug("拉取离线消息失败：{}", e.getMessage());
+            }
             try {
                 List<ChatContact> groups = Request.connector(ChatFeign.class).getContacts();
                 List<ChatUser> flat = new ArrayList<>();

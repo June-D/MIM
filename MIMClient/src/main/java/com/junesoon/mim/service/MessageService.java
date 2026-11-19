@@ -1311,6 +1311,32 @@ public class MessageService {
         }
     }
 
+    /**
+     * 拉取并解密本设备的离线消息，然后确认投递。
+     *
+     * <p>首次联系的消息必须靠这里解密才能学到会话标签；只靠历史查询会出现
+     * 「没有标签 → 查不到消息 → 永远学不到标签」的死循环。
+     *
+     * @return 本次处理的消息条数
+     */
+    public int pollUndelivered() {
+        List<DecryptedMessage> list = undelivered(200);
+        if (list.isEmpty()) {
+            return 0;
+        }
+        long maxId = 0L;
+        for (DecryptedMessage message : list) {
+            Long id = message.getRaw() == null ? null : message.getRaw().getId();
+            if (id != null && id > maxId) {
+                maxId = id;
+            }
+        }
+        if (maxId > 0) {
+            markDelivered(maxId);
+        }
+        return list.size();
+    }
+
     public List<DecryptedMessage> undelivered(int limit) {
         try {
             ObjectRestResponse<List<CipherMessage>> response =
