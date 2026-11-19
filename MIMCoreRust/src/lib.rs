@@ -10,6 +10,7 @@
 use aes_gcm::aead::{Aead, KeyInit, Payload};
 use aes_gcm::{Aes256Gcm, Nonce};
 use hkdf::Hkdf;
+use p256::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
@@ -22,6 +23,20 @@ const CHAIN_NEXT: u8 = 0x03;
 
 const TAG_MAGIC: &str = "\u{1}mimtag1\u{1}";
 const SYNC_MAGIC: &str = "\u{1}mimsync1\u{1}";
+
+/// P-256 ECDH：返回共享点的 X 坐标（32 字节），与 JDK ECDH 的输出一致。
+pub fn dh(private_pkcs8: &[u8], public_spki: &[u8]) -> Option<Vec<u8>> {
+    let secret = p256::SecretKey::from_pkcs8_der(private_pkcs8).ok()?;
+    let public = p256::PublicKey::from_public_key_der(public_spki).ok()?;
+    let shared = p256::ecdh::diffie_hellman(secret.to_nonzero_scalar(), public.as_affine());
+    Some(shared.raw_secret_bytes().to_vec())
+}
+
+/// X3DH 初始共享密钥：DH1||DH2||DH3||DH4 → HKDF("MIM/v2/initial")。
+pub fn x3dh_initial_key(dh_parts: &[&[u8]]) -> Vec<u8> {
+    let shared: Vec<u8> = dh_parts.iter().flat_map(|p| p.iter().copied()).collect();
+    hkdf_derive(None, &shared, "MIM/v2/initial", 32)
+}
 
 /// RFC 5869 HKDF-SHA256；salt 为空时按 32 字节全零处理。
 pub fn hkdf_derive(salt: Option<&[u8]>, ikm: &[u8], info: &str, len: usize) -> Vec<u8> {

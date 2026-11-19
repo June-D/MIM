@@ -16,6 +16,8 @@ struct Vectors {
     tag_envelope: EnvelopeCase,
     sync_envelope: SyncEnvelopeCase,
     cert_canonical: CertCase,
+    x3dh: X3dhCase,
+    dh_ratchet: DhRatchetCase,
     sha256_hex: HashCase,
 }
 
@@ -83,6 +85,30 @@ struct CertCase {
     expires: i64,
     key_id: String,
     canonical: String,
+}
+
+#[derive(Deserialize)]
+struct X3dhCase {
+    aik_priv: String,
+    aek_priv: String,
+    bik_pub: String,
+    bspk_pub: String,
+    bopk_pub: String,
+    dh1: String,
+    dh2: String,
+    dh3: String,
+    dh4: String,
+    initial_key: String,
+}
+
+#[derive(Deserialize)]
+struct DhRatchetCase {
+    aek2_priv: String,
+    bik_pub: String,
+    dh_out: String,
+    root: String,
+    new_root: String,
+    chain: String,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +191,37 @@ fn aad_and_envelopes_match_java() {
         hex::encode(sync_envelope_pack(&v.sync_envelope.token, &sync_body).as_bytes()),
         v.sync_envelope.packed
     );
+}
+
+#[test]
+fn p256_ecdh_and_x3dh_match_java() {
+    let v = vectors();
+    let x = v.x3dh;
+    let a_ik = hex::decode(&x.aik_priv).unwrap();
+    let a_ek = hex::decode(&x.aek_priv).unwrap();
+    let b_ik = hex::decode(&x.bik_pub).unwrap();
+    let b_spk = hex::decode(&x.bspk_pub).unwrap();
+    let b_opk = hex::decode(&x.bopk_pub).unwrap();
+
+    let dh1 = dh(&a_ik, &b_spk).expect("dh1");
+    let dh2 = dh(&a_ek, &b_ik).expect("dh2");
+    let dh3 = dh(&a_ek, &b_spk).expect("dh3");
+    let dh4 = dh(&a_ek, &b_opk).expect("dh4");
+    assert_eq!(hex::encode(&dh1), x.dh1, "DH1");
+    assert_eq!(hex::encode(&dh2), x.dh2, "DH2");
+    assert_eq!(hex::encode(&dh3), x.dh3, "DH3");
+    assert_eq!(hex::encode(&dh4), x.dh4, "DH4");
+
+    let initial = x3dh_initial_key(&[&dh1, &dh2, &dh3, &dh4]);
+    assert_eq!(hex::encode(initial), x.initial_key, "X3DH 初始密钥");
+
+    let r = v.dh_ratchet;
+    let dh_out = dh(&hex::decode(&r.aek2_priv).unwrap(), &hex::decode(&r.bik_pub).unwrap())
+        .expect("dh_ratchet");
+    assert_eq!(hex::encode(&dh_out), r.dh_out);
+    let (new_root, chain) = root_kdf(&hex::decode(&r.root).unwrap(), &dh_out);
+    assert_eq!(hex::encode(new_root), r.new_root);
+    assert_eq!(hex::encode(chain), r.chain);
 }
 
 #[test]

@@ -27,6 +27,19 @@ import javax.crypto.spec.SecretKeySpec;
  */
 public final class ExportVectors {
 
+    private static final String AIK_PRIV = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420ed1aaac79c7a0a07e89016ca9fd088faecb674bfdb364c61772b304dc47656b0a14403420004bd83be1776a292497bcc717e9d2a57c7972047276c92d61aacc5396c08585444383fc266331d647d8c234700ef125f03b03c546d8f7cae09e899ec2cc0bf36a9";
+    private static final String AIK_PUB = "3059301306072a8648ce3d020106082a8648ce3d03010703420004bd83be1776a292497bcc717e9d2a57c7972047276c92d61aacc5396c08585444383fc266331d647d8c234700ef125f03b03c546d8f7cae09e899ec2cc0bf36a9";
+    private static final String AEK_PRIV = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420cefa80706633c3cfaf970186a16cbeae76fe19d5d8f75179e6e60616d99b4e31a14403420004025268a7415a2af79ea1bbaca974d02d2ce9f4729304a222b9b9017e29bc6ef6c53d82ec9a9dd5fe31e40b9bf27896e5f9df94a9b2a4d62df3b42968ba0d1f36";
+    private static final String AEK_PUB = "3059301306072a8648ce3d020106082a8648ce3d03010703420004025268a7415a2af79ea1bbaca974d02d2ce9f4729304a222b9b9017e29bc6ef6c53d82ec9a9dd5fe31e40b9bf27896e5f9df94a9b2a4d62df3b42968ba0d1f36";
+    private static final String BIK_PRIV = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b02010104206a3364f2700f5aab8d9e81f56c3776a167fcd66f2c62299274afb64e9ad531dea14403420004f4fe50329464acf44684d4f2fda4152e99cbc9482621b54b4beb2360285a16cfee3a4589299efd66b6c9f40fe43d16b2e0c9d781f76b44aa6d6d0a453df25413";
+    private static final String BIK_PUB = "3059301306072a8648ce3d020106082a8648ce3d03010703420004f4fe50329464acf44684d4f2fda4152e99cbc9482621b54b4beb2360285a16cfee3a4589299efd66b6c9f40fe43d16b2e0c9d781f76b44aa6d6d0a453df25413";
+    private static final String BSPK_PRIV = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420938517594ecaf3587286695e0e675f1177c0278b6281f3517c83ace4ab8bf0e6a14403420004eb2835ee70b0c7188a75cfe531a87c10d6c186b4a4a361aac3ad2072cd1807d1403f3d97c3fa8f0259363864b3c70c382cc840e5a6040f762b5ac5ec75e28013";
+    private static final String BSPK_PUB = "3059301306072a8648ce3d020106082a8648ce3d03010703420004eb2835ee70b0c7188a75cfe531a87c10d6c186b4a4a361aac3ad2072cd1807d1403f3d97c3fa8f0259363864b3c70c382cc840e5a6040f762b5ac5ec75e28013";
+    private static final String BOPK_PRIV = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420c998cc833a3669a48ad6de76655b06aa568dc152a73517675afe94da3bf444d5a144034200047f6741ab9b140f1e035e38553708afa1f57872118495c5fb7f0e4a339dadc443dc51596720c6a59f4a8e8c82c80ea19569a32cddbf66ed6a3c700c38aecd5836";
+    private static final String BOPK_PUB = "3059301306072a8648ce3d020106082a8648ce3d030107034200047f6741ab9b140f1e035e38553708afa1f57872118495c5fb7f0e4a339dadc443dc51596720c6a59f4a8e8c82c80ea19569a32cddbf66ed6a3c700c38aecd5836";
+    private static final String AEK2_PRIV = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420db9918aa00a325c358939f01c7657587656f46c8bf97f05d84a396ca933f3df0a144034200044f0d04460e020585e77a12355bc68035cca8dc78e53d2cd96544e6d775372ac9cd98f6896818f8b385c82970129e14b517a669a73a01000b0842ba12d9aa95e7";
+    private static final String AEK2_PUB = "3059301306072a8648ce3d020106082a8648ce3d030107034200044f0d04460e020585e77a12355bc68035cca8dc78e53d2cd96544e6d775372ac9cd98f6896818f8b385c82970129e14b517a669a73a01000b0842ba12d9aa95e7";
+
     public static void main(String[] args) throws Exception {
         String out = args.length > 0 ? args[0] : "vectors.json";
         StringBuilder json = new StringBuilder();
@@ -126,6 +139,44 @@ public final class ExportVectors {
             .append("\"canonical\":\"")
             .append(hex(cert.canonical().getBytes(StandardCharsets.UTF_8))).append("\"},\n");
 
+        // ---------- P-256 ECDH + X3DH ----------
+        java.security.PrivateKey aIk = com.junesoon.mim.crypto.DhKeyUtil.decodePrivateKey(unhex(AIK_PRIV));
+        java.security.PrivateKey aEk = com.junesoon.mim.crypto.DhKeyUtil.decodePrivateKey(unhex(AEK_PRIV));
+        java.security.PrivateKey aEk2 = com.junesoon.mim.crypto.DhKeyUtil.decodePrivateKey(unhex(AEK2_PRIV));
+        java.security.PublicKey bIk = com.junesoon.mim.crypto.DhKeyUtil
+            .decodePublicKey(Base64.getEncoder().encodeToString(unhex(BIK_PUB)));
+        java.security.PublicKey bSpk = com.junesoon.mim.crypto.DhKeyUtil
+            .decodePublicKey(Base64.getEncoder().encodeToString(unhex(BSPK_PUB)));
+        java.security.PublicKey bOpk = com.junesoon.mim.crypto.DhKeyUtil
+            .decodePublicKey(Base64.getEncoder().encodeToString(unhex(BOPK_PUB)));
+        byte[] dh1 = com.junesoon.mim.crypto.DhKeyUtil.agree(aIk, bSpk);
+        byte[] dh2 = com.junesoon.mim.crypto.DhKeyUtil.agree(aEk, bIk);
+        byte[] dh3 = com.junesoon.mim.crypto.DhKeyUtil.agree(aEk, bSpk);
+        byte[] dh4 = com.junesoon.mim.crypto.DhKeyUtil.agree(aEk, bOpk);
+        byte[] shared = concat(dh1, dh2, dh3, dh4);
+        byte[] initialKey = Hkdf.derive(null, shared, "MIM/v2/initial", 32);
+        json.append("  \"x3dh\": {\"aik_priv\":\"").append(AIK_PRIV)
+            .append("\",\"aek_priv\":\"").append(AEK_PRIV)
+            .append("\",\"bik_pub\":\"").append(BIK_PUB)
+            .append("\",\"bspk_pub\":\"").append(BSPK_PUB)
+            .append("\",\"bopk_pub\":\"").append(BOPK_PUB)
+            .append("\",\"dh1\":\"").append(hex(dh1))
+            .append("\",\"dh2\":\"").append(hex(dh2))
+            .append("\",\"dh3\":\"").append(hex(dh3))
+            .append("\",\"dh4\":\"").append(hex(dh4))
+            .append("\",\"initial_key\":\"").append(hex(initialKey)).append("\"},\n");
+
+        byte[] dhOut = com.junesoon.mim.crypto.DhKeyUtil.agree(aEk2, bIk);
+        byte[] dhPrk = Hkdf.extract(root, dhOut);
+        byte[] dhRoot = Hkdf.expand(dhPrk, "MIM/v2/root", 32);
+        byte[] dhChain = Hkdf.expand(dhPrk, "MIM/v2/chain", 32);
+        json.append("  \"dh_ratchet\": {\"aek2_priv\":\"").append(AEK2_PRIV)
+            .append("\",\"bik_pub\":\"").append(BIK_PUB)
+            .append("\",\"dh_out\":\"").append(hex(dhOut))
+            .append("\",\"root\":\"").append(hex(root))
+            .append("\",\"new_root\":\"").append(hex(dhRoot))
+            .append("\",\"chain\":\"").append(hex(dhChain)).append("\"},\n");
+
         // ---------- SHA-256 十六进制（撤回凭证哈希的格式） ----------
         json.append("  \"sha256_hex\": {\"input\":\"")
             .append(hex(recallToken.getBytes(StandardCharsets.UTF_8)))
@@ -134,6 +185,23 @@ public final class ExportVectors {
         json.append("}\n");
         Files.write(Paths.get(out), json.toString().getBytes(StandardCharsets.UTF_8));
         System.out.println("wrote " + out);
+    }
+
+    private static byte[] concat(byte[]... parts) {
+        int total = 0;
+        for (byte[] part : parts) {
+            total += part == null ? 0 : part.length;
+        }
+        byte[] out = new byte[total];
+        int offset = 0;
+        for (byte[] part : parts) {
+            if (part == null) {
+                continue;
+            }
+            System.arraycopy(part, 0, out, offset, part.length);
+            offset += part.length;
+        }
+        return out;
     }
 
     private static byte[] hmac(byte[] key, byte marker) throws Exception {
