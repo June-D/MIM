@@ -24,6 +24,12 @@ import okhttp3.ConnectionPool;
 
 public class Request {
     private static final Map<String, FeignAPI> CONNECTORS = new ConcurrentHashMap<>();
+
+    /**
+     * 匿名提交专用连接器：<b>不注入 Authorization / X-Device-Id</b>。
+     * 带 JWT 或设备头会让服务端知道提交者，匿名入口就失去意义。
+     */
+    private static final Map<String, FeignAPI> ANONYMOUS_CONNECTORS = new ConcurrentHashMap<>();
     private static RibbonClient ribbonClient;
     private static final String API_URL = "http://feign-client";
     private static final int CONNECT_TIME_OUT_MILLIS = 1000;
@@ -57,6 +63,24 @@ public class Request {
 
     public static <T extends FeignAPI> T connector(Class<T> connectorClass) {
         return connector(connectorClass, READ_TIME_OUT_MILLIS);
+    }
+
+    /**
+     * 匿名连接器：不带任何身份头。只用于 /message/anonymous。
+     */
+    public static <T extends FeignAPI> T anonymousConnector(Class<T> connectorClass) {
+        String key = "anon|" + connectorClass.getSimpleName();
+        return (T) ANONYMOUS_CONNECTORS.computeIfAbsent(key, k -> Feign.builder()
+            .client(ribbonClient())
+            .decoder(getJacksonDecoder())
+            .encoder(getJacksonEncoder())
+            .errorDecoder(getRequestErrorDecoder())
+            .logger(getSlf4jLogger())
+            .logLevel(Logger.Level.NONE)
+            .retryer(Retryer.NEVER_RETRY)
+            .options(new feign.Request.Options(CONNECT_TIME_OUT_MILLIS,
+                READ_TIME_OUT_MILLIS))
+            .target(connectorClass, API_URL));
     }
 
     private static JacksonDecoder getJacksonDecoder() {

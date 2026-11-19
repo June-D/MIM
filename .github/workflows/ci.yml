@@ -67,6 +67,10 @@ jobs:
           MIM_TEST_DB_PASSWORD: ''
           MIM_REDIS_HOST: 127.0.0.1
           MIM_REDIS_PORT: '6379'
+          # 打开 Phase 2 的证书与令牌能力，让对应 e2e 真正执行而不是 SKIP。
+          MIM_SENDER_CERT_ENABLED: 'true'
+          MIM_SENDER_TOKEN_ENABLED: 'true'
+          MIM_ANONYMOUS_SEND_ENABLED: 'true'
           # CI 中数据库必须可用：不可用时让测试明确失败，而不是跳过造成假绿
           MIM_TEST_DB_REQUIRED: 'true'
         run: ../mvnw -B clean test
@@ -170,6 +174,10 @@ jobs:
           MIM_DB_PASSWORD: ''
           MIM_REDIS_HOST: 127.0.0.1
           MIM_REDIS_PORT: '6379'
+          # 打开 Phase 2 的证书与令牌能力，让对应 e2e 真正执行而不是 SKIP。
+          MIM_SENDER_CERT_ENABLED: 'true'
+          MIM_SENDER_TOKEN_ENABLED: 'true'
+          MIM_ANONYMOUS_SEND_ENABLED: 'true'
         run: |
           export PATH="$JAVA_HOME/bin:$PATH"
           ../mvnw -B -q compile

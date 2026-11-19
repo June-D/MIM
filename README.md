@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **234** 项、客户端 **132** 项、e2e **30 + 18 + 7 + 13** 项
+- 回归基线：服务端 **234** 项、客户端 **134** 项、e2e **30 + 18 + 7 + 13** 项
 
 ### 已完成
 
@@ -21,7 +21,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 - 2FA、恢复码、邮箱/TOTP 密钥轮换、JWT 主密钥加密、Redis 安全边界、WS 过期断连。
 - 消息长度填充（能力协商）、跨设备历史同步、sealed sender Phase 1.5（含跨设备撤回）。
 - Phase 2a/2b：发送者证书签发、分发、TOFU 固定，并接入首条消息（默认关闭）。
-- Phase 2c：盲签名令牌签发/消费 + 匿名提交入口（默认关闭，客户端尚未接入）。
+- Phase 2c：盲签名令牌签发/消费 + 匿名提交（服务端与客户端都已接入，默认关闭）。
 - Maven Wrapper 3.9.9；CI 覆盖单元、真实 MySQL 集成和 e2e。
 
 ### Sealed sender 的实际边界（Phase 1.5）
@@ -63,10 +63,9 @@ Phase 1.5 让 `from_user` / `from_device_id` 对 sealed 消息真正置 NULL：
 2. **Phase 2（进行中）**：2a、2b 已完成并默认关闭；`SenderCertE2eTest`
    已覆盖服务端契约与真实双棘轮往返，但 **`MessageService` 的接线仍只在
    单元测试层面验证过**，开启前必须人工跑一遍首次联系/TOFU/会话丢失。
-   2c 已完成令牌签发/消费与匿名提交入口（默认关闭）；但**预密钥领取与多端
-   同步仍会关联账号**，所以只能宣称「提交与落库不含发送者」，不能宣称完全匿名。
-   下一步：把匿名入口接进 `MessageService`、做客户端侧拉黑，再清理 `idx_ref_*`。
-   见设计文档第 11 节。
+   2c 已完成令牌签发/消费、匿名提交入口与客户端接入（默认关闭，`-Dmim.anonymousSend=true`）；
+   但**预密钥领取与多端同步仍会关联账号**，所以只能宣称「提交与落库不含发送者」，
+   不能宣称完全匿名。下一步：客户端侧拉黑、清理 `idx_ref_*`。见第 11 节。
 3. **运维收尾**：KMS SDK 直连（目前只有 CLI 命令桥接）、真实 SMTP、TOFU 人工核对流程。
 4. **长期迁移**：客户端 JavaFX 8/Boot 2.7 BOM 暂不升级；服务端保持 Java 17。
 
@@ -237,7 +236,7 @@ MIMClient/
   websocket/              WSClient（只收推送）
   utils/                  TlsSupport（HTTPS/WSS 信任配置）
   gui/                    Login / Main / Chat / Loading
-  src/test/java/          132 项单元测试
+  src/test/java/          134 项单元测试
   src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```
 
@@ -598,7 +597,7 @@ cd MIMClient
 
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 234 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 132 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMClient && ../mvnw test      # 134 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -621,8 +620,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 
 覆盖内容：
 
-> `SenderCertE2eTest` 需要服务端以 `MIM_SENDER_CERT_ENABLED=true` 启动；
-> 未启用时它会打印 SKIP 并以 0 退出，不会伪装成通过。
+> `SenderCertE2eTest` / `SenderTokenE2eTest` 需要服务端打开对应开关
+> （`MIM_SENDER_CERT_ENABLED` / `MIM_SENDER_TOKEN_ENABLED` +
+> `MIM_ANONYMOUS_SEND_ENABLED`）；CI 的 e2e job 已默认打开。
+> 未启用时脚本打印 SKIP 并以 0 退出，不会伪装成通过。
+> 客户端匿名发送需要额外加 `-Dmim.anonymousSend=true`。
 
 | 测试/脚本 | 覆盖点 |
 |---|---|
@@ -969,6 +971,12 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     （重放被拒）、Redis 故障时失败关闭。服务端 234 项、客户端 132 项、
     e2e 30 + 18 + 7 + 13 项通过。
     边界：预密钥领取与多端同步仍会让服务端关联账号，详见第 11 节。
+106. 客户端接入匿名提交（默认关闭）：新增不带身份头的
+    `Request.anonymousConnector` 与 `AnonymousMessageFeign`；`send` 在
+    `-Dmim.anonymousSend=true` 且会话有标签时先申请令牌、走 `/message/anonymous`，
+    **任何失败都回退普通发送**（令牌申请失败/服务端未启用/被拒）。
+    CI 启动服务端时默认打开证书/令牌/匿名三个开关，让对应 e2e 真正执行而不是 SKIP。
+    客户端 134 项、服务端 234 项、e2e 30 + 18 + 7 + 13 项通过。
 
 ## 仍需处理
 
@@ -994,8 +1002,9 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
   带会话标签的新消息已停写 `from_ref`，「从用户名推导的关联」对这些消息
   不再存在；不带标签的消息（旧客户端/旧会话）仍写引用。混合版本的多设备
   用户需要注意：旧版本设备不认识标签，看不到新会话中被标签化的历史。
-  2c 的匿名提交已落地但默认关闭，且**不等于完全匿名**：预密钥领取与多端同步
-  仍可让服务端关联账号，盲签名实现也未经外部审计。
+  2c 的匿名提交已落地（服务端 + 客户端，默认关闭），且**不等于完全匿名**：
+  预密钥领取与多端同步仍可让服务端关联账号，盲签名实现也未经外部审计；
+  客户端接入路径尚未在真实界面上验证过。
   见 [docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 11 节。
 - KMS 目前只有外部命令桥接（Vault/AWS/GCP CLI），尚未接 SDK；生产 SMTP
   仍需真实邮件服务器。

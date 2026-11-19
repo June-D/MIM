@@ -20,6 +20,7 @@ import com.junesoon.mim.crypto.SyncEnvelope;
 import com.junesoon.mim.crypto.SyncPayload;
 import com.junesoon.mim.crypto.TrustChangedException;
 import com.junesoon.mim.crypto.TrustStore;
+import com.junesoon.mim.feign.AnonymousMessageFeign;
 import com.junesoon.mim.feign.MessageFeign;
 import com.junesoon.mim.model.CipherMessage;
 import com.junesoon.mim.model.PreKeyBundle;
@@ -585,11 +586,16 @@ public class MessageService {
             throw new IdentityException("对方设备尚未准备好接收加密消息（预密钥未发布）");
         }
 
-        ObjectRestResponse<List<CipherMessage>> response;
-        try {
-            response = Request.connector(MessageFeign.class).send(replicas);
-        } catch (Exception e) {
-            throw new IdentityException("消息发送失败：" + e.getMessage());
+        ObjectRestResponse<List<CipherMessage>> response = null;
+        if (anonymousEnabled() && conversationTag != null) {
+            response = tryAnonymousSend(replicas);
+        }
+        if (response == null) {
+            try {
+                response = Request.connector(MessageFeign.class).send(replicas);
+            } catch (Exception e) {
+                throw new IdentityException("消息发送失败：" + e.getMessage());
+            }
         }
         if (response == null || response.getStatus() != 200 || response.getData() == null) {
             String error = response == null ? "服务端无响应" : response.getMessage();
@@ -613,6 +619,39 @@ public class MessageService {
     /**
      * 生成 32 字节随机撤回凭证（Base64）。服务端只保存 SHA-256。
      */
+    /**
+     * 是否走匿名提交。默认关闭：需要服务端同时开启令牌与匿名入口，
+     * 并显式设置 {@code -Dmim.anonymousSend=true}。
+     */
+    static boolean anonymousEnabled() {
+        return Boolean.parseBoolean(System.getProperty("mim.anonymousSend", "false"));
+    }
+
+    /**
+     * 尝试匿名提交。任何失败都返回 null，由调用方回退到普通发送——
+     * 匿名是增强项，不能让消息发不出去。
+     */
+    private ObjectRestResponse<List<CipherMessage>> tryAnonymousSend(List<CipherMessage> replicas) {
+        String token = SenderTokenService.getInstance().issueToken();
+        if (token == null) {
+            log.info("匿名提交不可用（令牌申请失败），回退普通发送");
+            return null;
+        }
+        try {
+            ObjectRestResponse<List<CipherMessage>> response =
+                Request.anonymousConnector(AnonymousMessageFeign.class).send(token, replicas);
+            if (response == null || response.getStatus() != 200) {
+                log.info("匿名提交被拒绝（{}），回退普通发送",
+                    response == null ? "无响应" : response.getMessage());
+                return null;
+            }
+            return response;
+        } catch (Exception e) {
+            log.warn("匿名提交异常，回退普通发送：{}", e.getMessage());
+            return null;
+        }
+    }
+
     /**
      * 生成 24 字节随机会话标签（Base64URL，32 字符）。服务端只当不透明值，
      * 不能用它反推任何用户名。
