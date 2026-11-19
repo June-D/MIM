@@ -14,6 +14,7 @@ use p256::pkcs8::{DecodePrivateKey, DecodePublicKey};
 use hmac::{Hmac, Mac};
 use sha2::{Digest, Sha256};
 
+pub mod ffi;
 pub mod ratchet;
 pub mod session;
 

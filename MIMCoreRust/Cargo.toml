@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 description = "MiM 协议核心的 Rust spike：用 Java 基准向量逐字节对拍，验证 Android/iOS 复用路线"
 
+[lib]
+crate-type = ["rlib", "staticlib", "cdylib"]
+
 [dependencies]
 sha2 = "0.10"
 hmac = "0.12"

@@ -162,6 +162,11 @@ if command -v cargo >/dev/null 2>&1; then
   CLIENT_JAVA_HOME="$CLIENT_JH" "$ROOT_DIR/MIMCoreRust/tools/interop.sh" /tmp/mim-interop > /tmp/mim-interop.log 2>&1 \
     && ok "Rust → Java → Rust 双向互通" \
     || fail "互通联调失败（日志：/tmp/mim-interop.log）"
+
+  section "C ABI（FFI）冒烟测试"
+  "$ROOT_DIR/MIMCoreRust/tools/ffi_test.sh" /tmp/mim-ffi > /tmp/mim-ffi.log 2>&1 \
+    && ok "C 程序经 C ABI 跑通完整会话" \
+    || fail "FFI 冒烟失败（日志：/tmp/mim-ffi.log）"
 else
   echo
   echo "跳过 Rust 对拍：未找到 cargo（CI 中会执行）"

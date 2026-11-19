@@ -221,7 +221,10 @@ MIMServer/
   config/                 WebMvc、RedisSubscriber、WebSocket、TLS
   src/test/java/          210 项测试（单元 + Mapper/HTTP 真实 MySQL 集成）
 
-MIMCoreRust/             Rust 可行性 spike：与 Java 的基准向量逐字节对拍（需要 cargo）
+MIMCoreRust/             Rust 可行性 spike：对拍 + 互通 + C ABI（需要 cargo）
+  include/mim_core.h     C ABI 头文件（Android JNI / iOS cinterop 的公共底座）
+  tools/interop.sh       Rust ⇄ Java 真实收发联调
+  tools/ffi_test.sh      链接 Rust 静态库的 C 冒烟测试
 MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Rust 移植的基准）
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
                           SessionStore、PreKeyStore、IdentityStore、SecretBox、TrustStore、
@@ -589,6 +592,7 @@ cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
 cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、信封、盲签名
 cd MIMCoreRust && cargo test      # 10 项：HKDF/AES-GCM/ECDH/X3DH/握手/信封/证书串/双棘轮
 cd MIMCoreRust && ./tools/interop.sh   # Rust 发起 → Java 解密回信 → Rust 解密（真实互通）
+cd MIMCoreRust && ./tools/ffi_test.sh  # C 程序经 C ABI 跑完整会话与状态恢复
 cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 mim-core）
 
 # 首次构建顺序：先安装协议核心，再构建客户端
@@ -976,6 +980,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+121. Rust 核心暴露 **C ABI**（`include/mim_core.h`）：不透明 `MimSession` 句柄、
+    握手/加密/解密/状态保存恢复、库分配缓冲与错误码；消息与状态用 JSON，
+    新增字段不破坏 ABI。`tests/c/ffi_test.c` 链接 Rust 静态库跑完整会话、
+    拒绝重复投递、并验证「保存 → 释放 → 恢复 → 继续解密」。
+    Android 的 JNI 与 iOS 的 cinterop 都只依赖这一层。
 120. Rust spike 完成 **真实跨语言互通**：Rust 作为发起方用 X3DH 建会话并加密
     首条消息，Java 侧 `RatchetService` 解密后回信，Rust 再解密该回信。
     两边实现独立，只共享线上格式；`tools/interop.sh` 串起三步，CI 与
