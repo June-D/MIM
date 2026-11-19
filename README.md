@@ -235,6 +235,11 @@ MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Ru
                           SyncEnvelope、SenderCertEnvelope、TagEnvelope、BlindRsaToken
   src/test/java/          129 项协议单测
 
+MIMCompose/             移动端 UI 骨架（Compose Multiplatform，当前验证桌面目标）
+  composeApp/           登录 / 联系人 / 聊天三屏，AppStore 单一状态源
+  composeApp/.../data   MessagingBackend 契约 + DemoBackend（内存演示）
+  README.md             运行方式与接 Android/iOS 的步骤
+
 MIMClient/
   crypto/                 DemoBot（联调用的演示客户端，依赖 WebSocket，故留在客户端）
   service/                DeviceIdentity（设备标识）、KeyManager、PreKeyManager、
@@ -602,6 +607,10 @@ cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 m
 
 # 首次构建顺序：先安装协议核心，再构建客户端
 cd MIMCore && ../mvnw install -DskipTests && cd ../MIMClient && ../mvnw test
+
+# 移动端 UI 骨架（首次构建会下载 Gradle 与 Compose 依赖）
+cd MIMCompose && ./gradlew :composeApp:run
+cd MIMCompose && ./gradlew :composeApp:desktopTest
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -985,6 +994,11 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+124. 新增 **MIMCompose**（Compose Multiplatform UI 骨架）：登录 / 联系人 / 聊天
+    三屏，`AppStore` 收口全部状态与动作，`MessagingBackend` 定义传输契约，
+    `DemoBackend` 只在内存里跑通交互。桌面目标可编译、可启动，状态流 3 项
+    单测通过。本机没有 Android SDK，因此未声明 `androidTarget()`；README 写明
+    接入步骤（加 target、把 UI 移到 commonMain、JNI 用 `MimCoreNative`）。
 123. Rust 核心补上 **JNI 绑定**：`MimCoreNative`（Java 类）经 JNI 调用同一份
     Rust 核心，握手返回不透明句柄，消息与状态用 JSON 字节数组，失败抛异常。
     `tools/jni_test.sh` 在桌面 JVM 上跑完整会话 + 重复投递拒绝 + 状态恢复，
