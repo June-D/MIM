@@ -33,11 +33,27 @@ MIMCompose/
 
 ```bash
 cd MIMCompose
-./gradlew :composeApp:run          # 启动桌面窗口
+./gradlew :composeApp:run          # 演示后端（内存）
 ./gradlew :composeApp:desktopTest  # 状态流单元测试
+
+# 接真实服务端：登录与联系人走 HTTP
+MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:run
+MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 ```
 
-首次构建会下载 Gradle 与 Compose 依赖。
+首次构建会下载 Gradle 与 Compose 依赖。国内网络可加 `MIM_GRADLE_MIRRORS=1`
+启用 Maven 镜像。
+
+### 当前接入范围
+
+| 能力 | 演示后端 | 真实服务端（HttpBackend） |
+|---|---|---|
+| 登录 | 模拟 | `POST /login/token`，令牌绑定设备 |
+| 联系人 | 固定两条 | `GET /chat/contacts`（分组展开） |
+| 聊天历史 | 内存 | **未接入**（返回空） |
+| 发送 | 内存回声 | **未接入**（显式报错，不造假数据） |
+
+历史与发送需要端到端加密链路，是协议层迁移的下一步。
 
 ## 接 Android / iOS
 

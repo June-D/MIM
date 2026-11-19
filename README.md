@@ -612,6 +612,9 @@ cd MIMCore && ../mvnw install -DskipTests && cd ../MIMClient && ../mvnw test
 # 移动端 UI 骨架（首次构建会下载 Gradle 与 Compose 依赖）
 cd MIMCompose && ./gradlew :composeApp:run
 cd MIMCompose && ./gradlew :composeApp:desktopTest
+
+# 接真实服务端（登录 + 联系人）
+cd MIMCompose && MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:run
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -995,6 +998,12 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+126. MIMCompose 接入 **真实服务端传输**：新增 `HttpBackend`（Ktor + kotlinx
+    serialization），登录走 `POST /login/token`（令牌绑定 `X-Device-Id`），
+    联系人走 `GET /chat/contacts` 并展开分组。设置 `MIM_SERVER_URL` 时启用，
+    否则仍用内存演示后端。聊天历史与发送**显式未接入**（不返回假数据），
+    它们依赖端到端加密链路，是协议层迁移的下一步。联调测试用新注册账号
+    走「注册 → 登录 → 联系人」，不依赖预置账号。
 125. Rust 核心补上 **加密状态存储**：会话状态用 AES-256-GCM 加密成三行文本
     （版本串兼作 AAD），密钥由 Android Keystore / iOS Keychain 提供，
     nonce 每次新生成。C ABI 与 JNI 都暴露 `state_encrypt/state_decrypt/random_bytes`，

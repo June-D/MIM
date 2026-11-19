@@ -41,6 +41,7 @@ fun ChatScreen(
     messages: List<ChatMessage>,
     onBack: () -> Unit,
     onSend: (String) -> Unit,
+    error: String? = null,
 ) {
     var draft by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
@@ -61,26 +62,36 @@ fun ChatScreen(
             )
         },
         bottomBar = {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedTextField(
-                    value = draft,
-                    onValueChange = { draft = it },
-                    placeholder = { Text("输入消息") },
-                    modifier = Modifier.weight(1f),
-                )
-                Button(
-                    onClick = {
-                        if (draft.isNotBlank()) {
-                            onSend(draft)
-                            draft = ""
-                        }
-                    }
+            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
+                if (error != null) {
+                    Text(
+                        error,
+                        color = MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    Text("发送")
+                    OutlinedTextField(
+                        value = draft,
+                        onValueChange = { draft = it },
+                        placeholder = { Text("输入消息") },
+                        modifier = Modifier.weight(1f),
+                    )
+                    Button(
+                        onClick = {
+                            if (draft.isNotBlank()) {
+                                onSend(draft)
+                                draft = ""
+                            }
+                        }
+                    ) {
+                        Text("发送")
+                    }
                 }
             }
         }
