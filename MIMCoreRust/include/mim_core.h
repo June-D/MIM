@@ -76,6 +76,20 @@ MimSession *mim_session_load(const uint8_t *json, size_t json_len,
                              int32_t *out_error);
 
 /*
+ * 设备密钥管理：生成密钥包 JSON（身份密钥 + 签名预密钥 + 一次性预密钥），
+ * 以及用已固定的身份公钥验证签名预密钥。
+ * signature 为 Base64 文本的字节，不必 NUL 结尾。
+ */
+int32_t mim_key_bundle_generate(uint32_t version, uint32_t one_time_count,
+                                uint8_t **out_json, size_t *out_len);
+
+int32_t mim_signed_pre_key_verify(const uint8_t *identity_public, size_t identity_public_len,
+                                  uint32_t pre_key_id,
+                                  const uint8_t *signed_pre_key_public,
+                                  size_t signed_pre_key_public_len,
+                                  const uint8_t *signature, size_t signature_len);
+
+/*
  * 加密状态存储：密钥必须来自平台 Keystore / Keychain（32 字节），
  * nonce 必须每次新生成（12 字节）。输出为三行文本：
  *   MIM-STATE-1 / Base64(nonce) / Base64(密文+tag)

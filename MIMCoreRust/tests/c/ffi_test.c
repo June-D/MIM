@@ -61,6 +61,9 @@ static const char *B_ONE_TIME_PRE_KEY_PUB =
     "035e38553708afa1f57872118495c5fb7f0e4a339dadc443dc51596720c6a59f4a8e8c"
     "82c80ea19569a32cddbf66ed6a3c700c38aecd5836";
 
+static const char *SPK_SIGNATURE =
+    "MEUCIQD4MX39ZTDckhzL6Ql1gSGQQjaUQzzcQ2ta/ILSLHoMOAIgSbLzDswGAXWGEodmtHBxzmGRP8JEamuGXG4Vl7piwqA=";
+
 typedef struct {
     uint8_t *data;
     size_t len;
@@ -197,6 +200,26 @@ int main(void) {
     expect_text((const char *) plain, plain_len, third);
     mim_bytes_free(plain, plain_len);
     printf("恢复状态后继续解密成功\n");
+
+    /* 设备密钥管理 */
+    uint8_t *bundle_json = NULL;
+    size_t bundle_len = 0;
+    assert(mim_key_bundle_generate(1, 4, &bundle_json, &bundle_len) == MIM_OK);
+    assert(bundle_len > 100);
+    printf("密钥包 %zu 字节\n", bundle_len);
+    mim_bytes_free(bundle_json, bundle_len);
+
+    uint8_t spk_sig[256];
+    size_t spk_sig_len = strlen(SPK_SIGNATURE);
+    memcpy(spk_sig, SPK_SIGNATURE, spk_sig_len);
+    int32_t spk_ok = mim_signed_pre_key_verify(
+        a_ik_pub.data, a_ik_pub.len, 1,
+        b_spk_pub.data, b_spk_pub.len, spk_sig, spk_sig_len);
+    assert(spk_ok == MIM_OK);
+    assert(mim_signed_pre_key_verify(
+        a_ik_pub.data, a_ik_pub.len, 2,
+        b_spk_pub.data, b_spk_pub.len, spk_sig, spk_sig_len) != MIM_OK);
+    printf("签名预密钥验签与篡改拒绝通过\n");
 
     mim_bytes_free(wire, wire_len);
     mim_bytes_free(wire2, wire2_len);

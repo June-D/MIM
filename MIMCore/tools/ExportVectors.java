@@ -177,6 +177,20 @@ public final class ExportVectors {
             .append("\",\"new_root\":\"").append(hex(dhRoot))
             .append("\",\"chain\":\"").append(hex(dhChain)).append("\"},\n");
 
+        // ---------- 签名预密钥（固定签名，保证向量可复现） ----------
+        byte[] spkPublic = unhex(BSPK_PUB);
+        byte[] spkPayload = com.junesoon.mim.crypto.DhKeyUtil.signedPreKeyPayload(1, spkPublic);
+        String spkSignature = "MEUCIQD4MX39ZTDckhzL6Ql1gSGQQjaUQzzcQ2ta/ILSLHoMOAIgSbLzDswGAXWGEodmtHBxzmGRP8JEamuGXG4Vl7piwqA=";
+        java.security.PublicKey identityPublic = com.junesoon.mim.crypto.DhKeyUtil
+            .decodePublicKey(Base64.getEncoder().encodeToString(unhex(AIK_PUB)));
+        if (!com.junesoon.mim.crypto.DhKeyUtil.verify(identityPublic, spkPayload, spkSignature)) {
+            throw new IllegalStateException("入库的预密钥签名无法通过 Java 自身验签");
+        }
+        json.append("  \"signed_pre_key\": {\"identity_pub\":\"").append(AIK_PUB)
+            .append("\",\"pre_key_id\":1,\"spk_pub\":\"").append(BSPK_PUB)
+            .append("\",\"payload\":\"").append(hex(spkPayload))
+            .append("\",\"signature\":\"").append(spkSignature).append("\"},\n");
+
         // ---------- 发送者证书（真实 RSA 签名） ----------
         SenderCertificateView rsaCert = new SenderCertificateView();
         rsaCert.setUsername("alice");

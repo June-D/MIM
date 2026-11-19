@@ -23,6 +23,7 @@ struct Vectors {
     cert_canonical: CertCase,
     x3dh: X3dhCase,
     dh_ratchet: DhRatchetCase,
+    signed_pre_key: SignedPreKeyCase,
     cert_rsa: CertRsaCase,
     cert_envelope: CertEnvelopeCase,
     sha256_hex: HashCase,
@@ -116,6 +117,15 @@ struct DhRatchetCase {
     root: String,
     new_root: String,
     chain: String,
+}
+
+#[derive(Deserialize)]
+struct SignedPreKeyCase {
+    identity_pub: String,
+    pre_key_id: u32,
+    spk_pub: String,
+    payload: String,
+    signature: String,
 }
 
 #[derive(Deserialize)]
@@ -337,4 +347,50 @@ fn sender_certificate_verifies_with_rsa() {
     let mut bad_signature = c.cert.clone();
     bad_signature.signature = "AAAA".to_string();
     assert!(!bad_signature.verify(&public_key, c.now), "非法签名必须拒绝");
+}
+
+#[test]
+fn signed_pre_key_matches_java() {
+    use mim_core_rust::keys::{signed_pre_key_payload, verify_signed_pre_key};
+
+    let v = vectors();
+    let case = v.signed_pre_key;
+    let identity = hex::decode(&case.identity_pub).unwrap();
+    let spk = hex::decode(&case.spk_pub).unwrap();
+
+    // 签名串必须逐字节等于 Java 的 "{id}|{SPKI DER}"
+    assert_eq!(
+        hex::encode(signed_pre_key_payload(case.pre_key_id, &spk)),
+        case.payload
+    );
+    assert!(verify_signed_pre_key(
+        &identity,
+        case.pre_key_id,
+        &spk,
+        &case.signature
+    ));
+
+    // 改 ID 必须失败
+    assert!(!verify_signed_pre_key(
+        &identity,
+        case.pre_key_id + 1,
+        &spk,
+        &case.signature
+    ));
+    // 改预密钥公钥必须失败
+    let mut tampered = spk.clone();
+    tampered[10] ^= 0xff;
+    assert!(!verify_signed_pre_key(
+        &identity,
+        case.pre_key_id,
+        &tampered,
+        &case.signature
+    ));
+    // 非法签名必须失败
+    assert!(!verify_signed_pre_key(
+        &identity,
+        case.pre_key_id,
+        &spk,
+        "AAAA"
+    ));
 }

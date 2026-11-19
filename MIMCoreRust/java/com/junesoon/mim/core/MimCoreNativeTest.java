@@ -25,6 +25,9 @@ public final class MimCoreNativeTest {
     private static final String B_ONE_TIME_PRE_KEY_PRIV = "308187020100301306072a8648ce3d020106082a8648ce3d030107046d306b0201010420c998cc833a3669a48ad6de76655b06aa568dc152a73517675afe94da3bf444d5a144034200047f6741ab9b140f1e035e38553708afa1f57872118495c5fb7f0e4a339dadc443dc51596720c6a59f4a8e8c82c80ea19569a32cddbf66ed6a3c700c38aecd5836";
     private static final String B_ONE_TIME_PRE_KEY_PUB = "3059301306072a8648ce3d020106082a8648ce3d030107034200047f6741ab9b140f1e035e38553708afa1f57872118495c5fb7f0e4a339dadc443dc51596720c6a59f4a8e8c82c80ea19569a32cddbf66ed6a3c700c38aecd5836";
 
+    private static final String SPK_SIGNATURE =
+        "MEUCIQD4MX39ZTDckhzL6Ql1gSGQQjaUQzzcQ2ta/ILSLHoMOAIgSbLzDswGAXWGEodmtHBxzmGRP8JEamuGXG4Vl7piwqA=";
+
     private MimCoreNativeTest() {
     }
 
@@ -103,6 +106,23 @@ public final class MimCoreNativeTest {
         text = new String(MimCoreNative.decrypt(b, third), StandardCharsets.UTF_8);
         expect(text, "after restore", "恢复状态后继续解密");
         System.out.println("恢复状态后继续解密成功");
+
+        byte[] bundle = MimCoreNative.generateKeyBundle(1, 4);
+        if (bundle.length < 100) {
+            throw new IllegalStateException("密钥包过短");
+        }
+        System.out.println("密钥包 " + bundle.length + " 字节");
+
+        byte[] sig = SPK_SIGNATURE.getBytes(StandardCharsets.UTF_8);
+        if (!MimCoreNative.verifySignedPreKey(
+            unhex(A_IDENTITY_PUB), 1, unhex(B_SIGNED_PRE_KEY_PUB), sig)) {
+            throw new IllegalStateException("签名预密钥应验签通过");
+        }
+        if (MimCoreNative.verifySignedPreKey(
+            unhex(A_IDENTITY_PUB), 2, unhex(B_SIGNED_PRE_KEY_PUB), sig)) {
+            throw new IllegalStateException("篡改 ID 必须失败");
+        }
+        System.out.println("签名预密钥验签与篡改拒绝通过");
 
         MimCoreNative.free(a);
         MimCoreNative.free(b);

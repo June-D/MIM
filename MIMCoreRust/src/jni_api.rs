@@ -369,3 +369,62 @@ pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_randomBytes<'loc
     fill_random(&mut buffer);
     array(&mut env, buffer)
 }
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_generateKeyBundle<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    version: jint,
+    one_time_count: jint,
+) -> jbyteArray {
+    if version < 0 || one_time_count < 0 {
+        throw(&mut env, "版本与数量必须非负");
+        return std::ptr::null_mut();
+    }
+    match crate::keys::KeyBundle::generate(version as u32, one_time_count as u32) {
+        Some(bundle) => match bundle.to_json() {
+            Some(json) => array(&mut env, json.into_bytes()),
+            None => {
+                throw(&mut env, "密钥包序列化失败");
+                std::ptr::null_mut()
+            }
+        },
+        None => {
+            throw(&mut env, "生成密钥包失败");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_verifySignedPreKey<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    identity_public: JByteArray<'local>,
+    pre_key_id: jint,
+    signed_pre_key_public: JByteArray<'local>,
+    signature: JByteArray<'local>,
+) -> jboolean {
+    let identity = bytes(&mut env, &identity_public);
+    let spk = bytes(&mut env, &signed_pre_key_public);
+    let signature = bytes(&mut env, &signature)
+        .and_then(|v| String::from_utf8(v).ok());
+    match (identity, spk, signature) {
+        (Some(identity), Some(spk), Some(signature)) => {
+            if crate::keys::verify_signed_pre_key(
+                &identity,
+                pre_key_id as u32,
+                &spk,
+                &signature,
+            ) {
+                1
+            } else {
+                0
+            }
+        }
+        _ => {
+            throw(&mut env, "无法读取参数");
+            0
+        }
+    }
+}

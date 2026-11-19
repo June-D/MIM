@@ -444,3 +444,58 @@ pub unsafe extern "C" fn mim_random_bytes(out: *mut u8, len: usize) -> i32 {
     crate::secure_store::fill_random(buffer);
     MIM_OK
 }
+
+// ==================== 设备密钥管理 ====================
+
+/// 生成一台设备的密钥包（JSON）：身份密钥 + 签名预密钥 + 一次性预密钥。
+#[no_mangle]
+pub unsafe extern "C" fn mim_key_bundle_generate(
+    version: u32,
+    one_time_count: u32,
+    out_json: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    match crate::keys::KeyBundle::generate(version, one_time_count) {
+        Some(bundle) => match bundle.to_json() {
+            Some(json) => give_bytes(json.into_bytes(), out_json, out_len),
+            None => MIM_ERR_STATE,
+        },
+        None => MIM_ERR_STATE,
+    }
+}
+
+/// 验证签名预密钥：返回 MIM_OK 表示签名有效，MIM_ERR_STATE 表示无效。
+///
+/// `signature` 是 Base64 文本（不必 NUL 结尾）。
+#[no_mangle]
+pub unsafe extern "C" fn mim_signed_pre_key_verify(
+    identity_public: *const u8,
+    identity_public_len: usize,
+    pre_key_id: u32,
+    signed_pre_key_public: *const u8,
+    signed_pre_key_public_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+) -> i32 {
+    let identity = match input_slice(identity_public, identity_public_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let spk = match input_slice(signed_pre_key_public, signed_pre_key_public_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let signature = match input_slice(signature, signature_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let signature = match std::str::from_utf8(signature) {
+        Ok(v) => v,
+        Err(_) => return MIM_ERR_INVALID_ARG,
+    };
+    if crate::keys::verify_signed_pre_key(identity, pre_key_id, spk, signature) {
+        MIM_OK
+    } else {
+        MIM_ERR_STATE
+    }
+}

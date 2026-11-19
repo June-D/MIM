@@ -61,6 +61,25 @@ public final class MimCoreNative {
     public static native long load(byte[] stateJson);
 
     /**
+     * 生成设备密钥包（JSON）：身份密钥 + 签名预密钥 + 一次性预密钥。
+     *
+     * @param version        身份密钥版本；私钥丢失后重新生成时递增
+     * @param oneTimeCount   一次性预密钥数量
+     */
+    public static native byte[] generateKeyBundle(int version, int oneTimeCount);
+
+    /**
+     * 验证签名预密钥。
+     *
+     * @param signature Base64 签名的 UTF-8 字节
+     */
+    public static native boolean verifySignedPreKey(
+        byte[] identityPublic,
+        int preKeyId,
+        byte[] signedPreKeyPublic,
+        byte[] signature);
+
+    /**
      * 加密状态快照。
      *
      * @param key   32 字节密钥（必须由平台 Keystore / Keychain 保管）
