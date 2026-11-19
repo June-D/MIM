@@ -223,6 +223,12 @@ public class PreKeyManager {
                 Request.connector(PreKeyFeign.class).fetchDevice(peer, deviceId);
             if (response == null || response.getStatus() != 200) {
                 String error = response == null ? "服务端无响应" : response.getMessage();
+                // 单台设备没发布预密钥不应阻断整条消息：其它设备可能已经就绪。
+                // 这里转成 PreKeyUnavailableException，让 send 跳过这台设备。
+                if (error != null && error.contains("尚未发布预密钥")) {
+                    throw new PreKeyUnavailableException(
+                        "对方设备 " + deviceId + " 尚未发布预密钥，已跳过该设备");
+                }
                 throw new IdentityException(error == null ? "获取预密钥包失败" : error);
             }
             bundles = response.getData();

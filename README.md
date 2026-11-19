@@ -960,6 +960,10 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     **任何失败都回退普通发送**（令牌申请失败/服务端未启用/被拒）。
     CI 启动服务端时默认打开证书/令牌/匿名三个开关，让对应 e2e 真正执行而不是 SKIP。
     客户端 134 项、服务端 234 项、e2e 30 + 18 + 7 + 13 项通过。
+110. 修复「单台设备缺预密钥阻断整条消息」：`PreKeyManager.fetchVerifiedBundle`
+    收到服务端「尚未发布预密钥」时改为抛 `PreKeyUnavailableException`，
+    由 `send` 跳过该设备继续发给其它就绪设备；同时清理了联调时误建的
+    无预密钥测试设备（已注销并删除其公钥行）。
 109. 修复客户端**依赖冲突导致登录无反应**：`feign-okhttp 13.18` 解析到
     OkHttp 5.5.1，而 Spring Boot 2.7 BOM 把 `kotlin-stdlib` 锁在 1.6.21，
     运行时缺 `kotlin.enums.EnumEntriesKt`（`NoClassDefFoundError`），
