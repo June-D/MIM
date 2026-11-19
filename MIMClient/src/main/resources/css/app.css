@@ -201,6 +201,15 @@
     -fx-font-weight: bold;
 }
 
+/* 已屏蔽：灰底小标签，让用户知道自己屏蔽过谁 */
+.blocked-badge {
+    -fx-background-color: #d8dee9;
+    -fx-background-radius: 8;
+    -fx-padding: 1 5 1 5;
+    -fx-text-fill: #5c6b82;
+    -fx-font-size: 10.5px;
+}
+
 /* 在线状态：小圆点，绿=在线 */
 .presence-dot {
     -fx-min-width: 8px;

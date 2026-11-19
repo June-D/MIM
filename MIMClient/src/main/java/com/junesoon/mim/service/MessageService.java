@@ -17,6 +17,7 @@ import com.junesoon.mim.crypto.SenderCertVerifier;
 import com.junesoon.mim.crypto.SessionState;
 import com.junesoon.mim.crypto.SessionStore;
 import com.junesoon.mim.crypto.SyncEnvelope;
+import com.junesoon.mim.crypto.TagEnvelope;
 import com.junesoon.mim.crypto.SyncPayload;
 import com.junesoon.mim.crypto.TrustChangedException;
 import com.junesoon.mim.crypto.TrustStore;
@@ -532,10 +533,15 @@ public class MessageService {
                 boolean padding = Boolean.TRUE.equals(device.getSupportsPadding());
                 String payload = padding ? MessagePadding.pad(plaintext) : plaintext;
                 if (!sealed) {
+                    // 首次联系：证书信封里同时带标签，收信端一次学全。
                     payload = SenderCertEnvelope.pack(prefetchedCert, conversationTag, payload);
                     if (payload == null) {
                         throw new IdentityException("发送者证书信封打包失败");
                     }
+                } else {
+                    // 已确认会话：再带一层轻量标签信封，保证对端迟早学到这个标签。
+                    // 双方可能各自生成过标签，不带就会出现「带未知标签的消息查不到」。
+                    payload = TagEnvelope.pack(conversationTag, payload);
                 }
                 RatchetService.Encrypted encrypted = ratchet.encrypt(state, payload);
                 persistSlot(peer, deviceId, slot);
@@ -1025,6 +1031,11 @@ public class MessageService {
                 plaintextStore.addConversationTag(peer, parsed.getConversationTag());
             }
             text = parsed.getText();
+        }
+        TagEnvelope.Parsed tagEnvelope = TagEnvelope.unpack(text);
+        if (tagEnvelope != null) {
+            plaintextStore.addConversationTag(peer, tagEnvelope.getTag());
+            text = tagEnvelope.getText();
         }
         return padding ? MessagePadding.strip(text) : text;
     }

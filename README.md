@@ -12,7 +12,7 @@ Spring Boot 服务端 + JavaFX 桌面客户端。**只做一对一私密交流�
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **210** 项、客户端 **137** 项、e2e **30 + 18 + 7 + 13** 项
+- 回归基线：服务端 **210** 项、客户端 **140** 项、e2e **30 + 18 + 7 + 13** 项
 
 ### 已完成
 
@@ -230,7 +230,7 @@ MIMClient/
   websocket/              WSClient（只收推送）
   utils/                  TlsSupport（HTTPS/WSS 信任配置）
   gui/                    Login / Main / Chat / Loading
-  src/test/java/          137 项单元测试
+  src/test/java/          140 项单元测试
   src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```
 
@@ -580,7 +580,7 @@ cd MIMClient
 
 # 或分端执行（在各自目录）
 cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
-cd MIMClient && ../mvnw test      # 137 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
+cd MIMClient && ../mvnw test      # 140 项：HKDF/SecretBox、X3DH+双棘轮、TOFU、加密落盘
 ```
 
 **集成测试需要真实 MySQL**（不用 H2：Mapper 依赖 `ON DUPLICATE KEY UPDATE`、
@@ -964,6 +964,13 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+114. 修复**会话标签不一致导致消息在历史里消失**：双方可能各自生成标签，
+    而标签只在会话未确认时随证书信封传一次；会话确认后另一方永远学不到，
+    用它发的消息就查不到（表现为「收不到」/「什么都不显示」）。
+    现在每条已确认会话的消息都带一层 `TagEnvelope`（约 40 字节），
+    接收端统一学习标签，双方最终收敛。
+    同时联系人列表会显示「已屏蔽」标签，屏蔽后无需凭记忆判断。
+    客户端 140 项通过。
 112. 修复**证书信封在普通解密路径被当成正文显示**：发送端在会话未确认时会
     继续把证书带在消息里，而接收端可能已有会话，走的是普通解密路径。
     现在所有非同步消息解密后统一拆 `SenderCertEnvelope`，再剥离 padding；

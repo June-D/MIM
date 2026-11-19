@@ -884,6 +884,11 @@ public class MainController {
         textBox.getChildren().addAll(name, statusLine);
         row.getChildren().addAll(avatar, textBox);
 
+        if (MessageService.getInstance().isBlocked(user.getUsername())) {
+            javafx.scene.control.Label blocked = new javafx.scene.control.Label("已屏蔽");
+            blocked.getStyleClass().add("blocked-badge");
+            row.getChildren().add(blocked);
+        }
         if (Boolean.TRUE.equals(user.getHasUnread())) {
             // 显示具体条数而不是一个圆点：条数能让用户判断"是否值得现在点开"
             int unread = user.getUnreadCount();
@@ -910,6 +915,7 @@ public class MainController {
                 MessageService.getInstance().block(user.getUsername());
             }
             loadContacts();
+            renderContacts(contacts);
         });
         menu.getItems().addAll(rename, block, remove);
         row.setOnContextMenuRequested(event -> menu.show(row, event.getScreenX(), event.getScreenY()));
