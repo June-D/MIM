@@ -3,6 +3,7 @@ package com.junesoon.mim.app.state
 import com.junesoon.mim.app.data.DemoBackend
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.IncomingMessage
+import com.junesoon.mim.app.data.PushEvent
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.SafetyEntry
@@ -83,6 +84,7 @@ class AppStore(
                         )
                     }
                     startPolling()
+                    refreshUnread(result.token, force = true)
                 }
                 .onFailure { error ->
                     _state.update { it.copy(busy = false, error = error.message ?: "登录失败") }
@@ -146,6 +148,68 @@ class AppStore(
 
     fun backToContacts() {
         _state.update { it.copy(screen = Screen.Contacts) }
+        token?.let { currentToken ->
+            scope.launch { refreshUnread(currentToken, force = true) }
+        }
+    }
+
+    /**
+     * 清除当前会话。
+     *
+     * 服务端按清除点过滤历史，本地缓存必须一起丢掉，
+     * 否则下次打开会看到服务端已经抹掉的旧消息。
+     */
+    fun clearConversation(forBoth: Boolean) {
+        val currentToken = token ?: return
+        val chat = _state.value.screen as? Screen.Chat ?: return
+        scope.launch {
+            runCatching { backend.clearConversation(currentToken, chat.contactId, forBoth) }
+                .onSuccess {
+                    dropLocal(chat.contactId)
+                    _state.update { state ->
+                        state.copy(
+                            contacts = state.contacts.map { contact ->
+                                if (contact.id == chat.contactId) {
+                                    contact.copy(subtitle = "", unread = 0)
+                                } else {
+                                    contact
+                                }
+                            },
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "清除会话失败") }
+                }
+        }
+    }
+
+    /**
+     * 未读数以服务端为准；查不到时保留当前值，不显示假数字。
+     *
+     * 每个联系人一次请求，因此节流到 5 秒一次，避免轮询把请求放大。
+     */
+    private suspend fun refreshUnread(currentToken: String, force: Boolean = false) {
+        val contacts = _state.value.contacts
+        if (contacts.isEmpty()) {
+            return
+        }
+        val now = System.currentTimeMillis()
+        if (!force && now - lastUnreadAt < 5_000) {
+            return
+        }
+        lastUnreadAt = now
+        val counts = contacts.associate { contact ->
+            contact.id to runCatching { backend.unread(currentToken, contact.id) }.getOrNull()
+        }
+        _state.update { state ->
+            state.copy(
+                contacts = state.contacts.map { contact ->
+                    val fresh = counts[contact.id] ?: return@map contact
+                    contact.copy(unread = fresh)
+                },
+            )
+        }
     }
 
     fun send(text: String) {
@@ -231,7 +295,17 @@ class AppStore(
         polling = true
         // 推送只用来「叫醒」同步；HTTP 仍是一致性来源。
         scope.launch {
-            runCatching { backend.listenPush { scope.launch { syncOnce() } } }
+            runCatching {
+                backend.listenPush { event ->
+                    when (event) {
+                        PushEvent.NewData -> scope.launch { syncOnce() }
+                        is PushEvent.Cleared -> {
+                            backend.forgetLocalConversation(event.peer)
+                            dropLocal(event.peer)
+                        }
+                    }
+                }
+            }
         }
         // 轮询兜底：推送断开或丢失时最多延迟 3 秒。
         scope.launch {
@@ -254,11 +328,18 @@ class AppStore(
                     val open = (_state.value.screen as? Screen.Chat)?.contactId
                     if (open != null) {
                         refreshStates(currentToken, open)
+                    } else if (_state.value.screen is Screen.Contacts) {
+                        refreshUnread(currentToken)
                     }
                 }
         } finally {
             syncLock.unlock()
         }
+    }
+
+    /** 只丢本地消息缓存；安全码不受清除影响，身份密钥没有变化。 */
+    private fun dropLocal(contactId: String) {
+        _state.update { state -> state.copy(messages = state.messages - contactId) }
     }
 
     private fun mergeIncoming(incoming: IncomingMessage) {
@@ -285,5 +366,6 @@ class AppStore(
     }
 
     private var polling = false
+    private var lastUnreadAt = 0L
     private val syncLock = Mutex()
 }

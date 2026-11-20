@@ -44,7 +44,16 @@ interface MessagingBackend {
      * 只把「有新数据」这件事通知出去，具体拉取仍走 HTTP：
      * 落库与鉴权都在 HTTP 上，推送丢失也不会影响一致性。
      */
-    suspend fun listenPush(onSignal: () -> Unit) = Unit
+    suspend fun listenPush(onSignal: (PushEvent) -> Unit) = Unit
+
+    /** 与某人的未读消息数（服务端按逻辑消息计数）。 */
+    suspend fun unread(token: String, contactId: String): Int = 0
+
+    /** 清除与某人的会话；forBoth 时对方也看不到这段消息。 */
+    suspend fun clearConversation(token: String, contactId: String, forBoth: Boolean) = Unit
+
+    /** 只丢弃本地缓存，不动服务端（对方清除会话时用）。 */
+    fun forgetLocalConversation(contactId: String) = Unit
 
     /** 本账号的设备列表。 */
     suspend fun devices(token: String): List<DeviceInfo> = emptyList()
@@ -57,6 +66,16 @@ interface MessagingBackend {
 
     /** 本设备身份公钥（Base64）；演示后端返回 null。 */
     fun ownIdentityKeyBase64(): String? = null
+}
+
+/** 下行推送事件。 */
+sealed interface PushEvent {
+
+    /** 有新消息、已读回执或撤回，需要拉一次 HTTP。 */
+    data object NewData : PushEvent
+
+    /** 对方清除了与我们的会话。 */
+    data class Cleared(val peer: String) : PushEvent
 }
 
 /** 一条逻辑消息的外部状态。 */

@@ -72,8 +72,15 @@ class SecureBackendTest {
         assertTrue(incoming != null, "B 未收到 A 的消息；收到：$received")
         assertEquals("secure hello", incoming.message.text)
 
+        // 未读数：B 还没读时至少 1，标记已读后归零。
+        assertTrue(
+            bobBackend.unread(bobLogin.token, alice) >= 1,
+            "B 应有未读：${bobBackend.unread(bobLogin.token, alice)}",
+        )
+
         // 已读回执：B 标记已读后，A 通过历史状态看到 read。
         bobBackend.markRead(bobLogin.token, alice)
+        assertEquals(0, bobBackend.unread(bobLogin.token, alice), "标记已读后未读应为 0")
         val readState = aliceBackend.historyStates(aliceLogin.token, bob)
             .firstOrNull { it.id == sent.id }
         assertTrue(readState?.read == true, "A 应看到已读：$readState")
@@ -96,6 +103,24 @@ class SecureBackendTest {
         val history = aliceAgain.history(aliceLogin.token, bob)
         assertTrue(history.any { it.fromMe && it.recalled && it.id == sent.id }, "撤回记录应保留")
         assertTrue(history.any { !it.fromMe && it.text == "secure reply" }, "接收记录应保留")
+
+        // 清除：只清自己的，对方仍看得到；本地缓存同步丢弃。
+        aliceAgain.clearConversation(aliceLogin.token, bob, forBoth = false)
+        assertTrue(aliceAgain.history(aliceLogin.token, bob).isEmpty(), "清除后本地不应再有该会话")
+        assertTrue(
+            bobBackend.history(bobLogin.token, alice).isNotEmpty(),
+            "单方清除不应影响对方的记录",
+        )
+
+        // 清除后仍能继续收发：会话标签与棘轮状态没有被清除动作破坏。
+        aliceAgain.send(aliceLogin.token, bob, "after clear")
+        val afterClear = bobBackend.poll(bobLogin.token).firstOrNull { it.contactId == alice }
+        assertTrue(afterClear != null, "清除后应还能收到新消息")
+        assertEquals("after clear", afterClear.message.text)
+
+        // 双方清除：B 执行后，B 本地与 A 的历史都应被抹掉。
+        bobBackend.clearConversation(bobLogin.token, alice, forBoth = true)
+        assertTrue(bobBackend.history(bobLogin.token, alice).isEmpty(), "双方清除后 B 不应有记录")
     }
 
     private suspend fun safetyCode(

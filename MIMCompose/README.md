@@ -1,46 +1,62 @@
 # MIMCompose
 
-移动端 UI 骨架（Compose Multiplatform）。
+PC 桌面客户端（Compose Multiplatform）。
 
 ## 定位
 
-这是客户端界面的**结构样板**，不是完整客户端：
+当前先做透桌面端，再把同一套状态与职责划分复用到手机端。
 
-- 已有：登录 → 联系人 → 聊天三屏，状态集中管理，可运行的桌面目标
-- 未接：真实 REST / WebSocket 传输、真实协议与密码学（属于 `mim-core` 与 `MIMCoreRust`）
+- 已有：登录 → 联系人 → 聊天 → 设备；真实端到端收发、撤回、已读、离线队列、
+  WebSocket 推送、未读数、清除会话、设备管理、安全码核对
+- 不在这里：协议与密码学。基准实现在 `MIMCore`，实际执行在 `MIMCoreRust`
+  （C ABI / JNI）。本模块只做传输、入库与 UI 语义
 
-这样分层的目的：UI 与状态先稳定，传输和密码学各自独立演进，互不阻塞。
+这样分层的目的：界面只表达业务语义，密码学独立演进，两端互不阻塞。
 
 ## 目录
 
 ```
 MIMCompose/
+  run-desktop.sh          启动脚本：构建 JNI 动态库、检查服务端、启动界面
   composeApp/src/desktopMain/kotlin/com/junesoon/mim/app/
     Main.kt               窗口入口（920×660）
     MimApp.kt             路由分发，只读状态
     domain/Model.kt       Contact / ChatMessage
-    data/MessagingBackend.kt  传输层契约（登录/联系人/历史/发送/轮询）
+    domain/DeviceInfo.kt  设备、对端身份公钥、安全码条目
+    domain/SafetyNumber.kt 60 位安全码（与 Java 同算法）
+    data/MessagingBackend.kt  传输层契约（登录/收发/推送/设备/清除）
     data/DemoBackend.kt   内存演示实现（含回声，仅用于跑通 UI）
-    data/SecureBackend.kt 真实收发：设备密钥 + 首条消息 + sealed 收发 + 本地缓存
-    data/LocalVault.kt    本地保险库（密钥包/会话/消息，全部加密落盘）
-    state/AppStore.kt     唯一状态源：StateFlow + 动作
+    data/HttpBackend.kt   登录与令牌
+    data/KeyRegistry.kt   设备登记、密钥上传、旧设备清理
+    data/SecureBackend.kt 真实收发：首条消息 / sealed / 撤回 / 已读 / 离线队列 / 推送
+    data/LocalVault.kt    本地保险库（密钥包/会话/消息/队列，全部加密落盘）
+    data/messaging/Protocol.kt  服务端 DTO 与 Rust 边界 DTO
+    data/Codec.kt         十六进制 / Base64 转换
+    data/JsonCodec.kt     统一 JSON 配置
+    state/AppStore.kt     唯一状态源：StateFlow + 动作 + 同步循环
     ui/Theme.kt           纸墨配色，换主题只改这一处
-    ui/LoginScreen.kt
-    ui/ContactsScreen.kt
-    ui/ChatScreen.kt
-  composeApp/src/desktopTest/kotlin/  状态流单元测试
+    ui/LoginScreen.kt     登录
+    ui/ContactsScreen.kt  联系人（含未读角标、设备入口）
+    ui/ChatScreen.kt      聊天（撤回、安全码、清除）
+    ui/DeviceScreen.kt    设备列表与注销
+  composeApp/src/desktopTest/kotlin/  状态流测试 + 真实后端联调
 ```
 
 ## 运行
 
 ```bash
+# 推荐：一条命令检查环境并启动（自动构建带 JNI 的 Rust 动态库）
+MIMCompose/run-desktop.sh
+MIMCompose/run-desktop.sh --check           # 只检查，不启动界面
+
+# 等价的手动方式
 cd MIMCompose
 ./gradlew :composeApp:run          # 演示后端（内存）
-./gradlew :composeApp:desktopTest  # 状态流单元测试
+./gradlew :composeApp:desktopTest  # 状态流与联调测试
 
-# 接真实服务端：登录与联系人走 HTTP
-MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:run
-MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
+MIM_SERVER_URL=http://127.0.0.1:8080 \
+MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
+  ./gradlew :composeApp:run
 ```
 
 首次构建会下载 Gradle 与 Compose 依赖。国内网络可加 `MIM_GRADLE_MIRRORS=1`
@@ -62,6 +78,8 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 | 实时推送 | 无 | WebSocket `/websocket/*`，收到 100010/100012/100014 即触发同步 |
 | 设备管理 | 无 | `GET /device` 列表 + `DELETE /device/{id}` 注销 |
 | 安全码 | 无 | 60 位安全码（与 Java 同算法），按对端设备逐个展示 |
+| 未读数 | 内存计数 | `GET /message/unread/{peer}`，联系人页角标以服务端为准 |
+| 清除会话 | 无 | `POST /message/clear`，可只清自己的或双方清除；本地缓存一并丢弃 |
 
 协议计算全部在 Rust 核心；Kotlin 只做传输、入库与 UI 语义。
 
@@ -69,7 +87,8 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 
 `SecureBackend.listenPush` 连 `ws(s)://host/websocket/compose`，握手带
 `Authorization` 与 `X-Device-Id`；只把「有新数据」通知给上层，具体拉取仍走 HTTP。
-收到新消息 / 已读回执 / 撤回事件即时触发一次同步。
+收到新消息 / 已读回执 / 撤回事件即时触发一次同步；
+收到对方「清除会话」通知（100019）时直接丢弃本地缓存，避免显示已被抹掉的消息。
 
 同时保留 3 秒轮询兜底：推送断开或丢失时最多延迟 3 秒；重连间隔 3 秒，
 25 秒无帧就发文本心跳。
@@ -84,6 +103,19 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 联系人页「设备」进入设备管理：可查看本账号设备并注销其它设备
 （注销后该设备令牌立即失效）。聊天页「安全码」按对端每台设备展示
 60 位安全码，双方排序后哈希，因此两端算出同一个码，可线下核对。
+
+### 未读数与清除会话
+
+联系人列表的未读角标取自 `GET /message/unread/{peer}`，避免只靠本地计数漂移；
+每个联系人一次请求，因此节流到 5 秒一次，进入联系人页时强制刷新。
+
+聊天页「清除」提供两种语义：
+
+- **只清我的**：服务端记录清除点，仅影响自己；对方记录不受影响。
+- **双方清除**：服务端抹掉这段密文，对方也看不到。
+
+两种都会同时丢弃本地缓存（`messages.bin` 中该联系人的记录），
+否则下次打开会看到服务端已过滤、本地还留着的旧消息。清除后仍可继续收发。
 
 ### 本地保险库
 

@@ -3,6 +3,8 @@ package com.junesoon.mim.app.data
 import com.junesoon.mim.app.data.messaging.ApiEnvelope
 import com.junesoon.mim.app.data.messaging.CertDto
 import com.junesoon.mim.app.data.messaging.CertJson
+import com.junesoon.mim.app.data.messaging.ClearRequest
+import com.junesoon.mim.app.data.messaging.ClearResultDto
 import com.junesoon.mim.app.data.messaging.ChatContactGroup
 import com.junesoon.mim.app.data.messaging.CipherMessageDto
 import com.junesoon.mim.app.data.messaging.CipherMessageOut
@@ -52,6 +54,8 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import java.nio.file.Path
 import java.text.SimpleDateFormat
 import java.util.Base64
@@ -99,7 +103,7 @@ class SecureBackend(
      * 连接断开后每 3 秒重连；25 秒没收到任何帧就发一次文本心跳
      * （服务端按报文里是否含 `"ping"` 识别）。
      */
-    override suspend fun listenPush(onSignal: () -> Unit) {
+    override suspend fun listenPush(onSignal: (PushEvent) -> Unit) {
         val wsBase = server.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://")
         while (currentCoroutineContext().isActive) {
             val connected = runCatching {
@@ -116,8 +120,8 @@ class SecureBackend(
                             send(Frame.Text("{\"ping\":true}"))
                             continue
                         }
-                        if (frame is Frame.Text && isSignal(frame.data.decodeToString())) {
-                            onSignal()
+                        if (frame is Frame.Text) {
+                            toEvent(frame.data.decodeToString())?.let(onSignal)
                         }
                     }
                 }
@@ -128,11 +132,46 @@ class SecureBackend(
         }
     }
 
-    private fun isSignal(payload: String): Boolean {
-        val type = runCatching {
-            JsonCodec.decode<PushEnvelope>(payload).type
-        }.getOrNull() ?: return false
-        return type == TYPE_NEW_MESSAGE || type == TYPE_READ_RECEIPT || type == TYPE_RECALLED
+    private fun toEvent(payload: String): PushEvent? {
+        val envelope = runCatching { JsonCodec.decode<PushEnvelope>(payload) }.getOrNull()
+            ?: return null
+        return when (envelope.type) {
+            TYPE_NEW_MESSAGE, TYPE_READ_RECEIPT, TYPE_RECALLED -> PushEvent.NewData
+            TYPE_CONVERSATION_CLEARED -> {
+                val peer = runCatching {
+                    envelope.data?.jsonObject?.get("peer")?.jsonPrimitive?.content
+                }.getOrNull()
+                peer?.takeIf { it.isNotBlank() }?.let { PushEvent.Cleared(it) }
+            }
+            else -> null
+        }
+    }
+
+    override suspend fun unread(token: String, contactId: String): Int {
+        val tags = tagsFor(contactId)
+        val query = if (tags.isEmpty()) "" else "?tags=" + tags.joinToString(",")
+        val response: ApiEnvelope<Long> = client.get("$server/message/unread/$contactId$query") {
+            header("Authorization", "Bearer $token")
+        }.body()
+        // 查不到时返回 0：角标宁可不显示，也不要显示假数字。
+        return if (response.status == 200) (response.data ?: 0L).toInt() else 0
+    }
+
+    override suspend fun clearConversation(token: String, contactId: String, forBoth: Boolean) {
+        val response: ApiEnvelope<ClearResultDto> = client.post("$server/message/clear") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(ClearRequest(peer = contactId, forBoth = forBoth, tags = tagsFor(contactId)))
+        }.body()
+        require(response.status == 200) { response.message ?: "清除会话失败" }
+        forgetLocalConversation(contactId)
+    }
+
+    override fun forgetLocalConversation(contactId: String) {
+        messages.removeAll { it.contactId == contactId }
+        serverIds.remove(contactId)
+        vault.saveMessages(messages)
+        vault.saveServerIds(serverIds)
     }
 
     override suspend fun login(username: String, password: String, deviceName: String): LoginResult {
@@ -689,6 +728,7 @@ class SecureBackend(
         private const val TYPE_NEW_MESSAGE = 100010
         private const val TYPE_READ_RECEIPT = 100012
         private const val TYPE_RECALLED = 100014
+        private const val TYPE_CONVERSATION_CLEARED = 100019
     }
 }
 

@@ -73,6 +73,7 @@ fun MimApp() {
                             onBack = store::backToContacts,
                             onSend = store::send,
                             onRecall = { messageId -> store.recall(screen.contactId, messageId) },
+                            onClear = store::clearConversation,
                             safetyNumbers = state.safetyNumbers,
                             error = state.error,
                         )

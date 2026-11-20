@@ -44,11 +44,13 @@ fun ChatScreen(
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onRecall: (String) -> Unit = {},
+    onClear: (Boolean) -> Unit = {},
     safetyNumbers: List<SafetyEntry> = emptyList(),
     error: String? = null,
 ) {
     var draft by remember { mutableStateOf("") }
     var showSafety by remember { mutableStateOf(false) }
+    var showClear by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -68,6 +70,7 @@ fun ChatScreen(
                     if (safetyNumbers.isNotEmpty()) {
                         TextButton(onClick = { showSafety = true }) { Text("安全码") }
                     }
+                    TextButton(onClick = { showClear = true }) { Text("清除") }
                 },
             )
         },
@@ -106,6 +109,27 @@ fun ChatScreen(
             }
         }
     ) { padding ->
+        if (showClear) {
+            AlertDialog(
+                onDismissRequest = { showClear = false },
+                title = { Text("清除会话") },
+                text = {
+                    Text("只清除我这边的记录不会影响对方；双方清除会让对方也看不到这段消息。")
+                },
+                confirmButton = {
+                    TextButton(onClick = {
+                        showClear = false
+                        onClear(true)
+                    }) { Text("双方清除") }
+                },
+                dismissButton = {
+                    TextButton(onClick = {
+                        showClear = false
+                        onClear(false)
+                    }) { Text("只清我的") }
+                },
+            )
+        }
         if (showSafety) {
             AlertDialog(
                 onDismissRequest = { showSafety = false },

@@ -145,6 +145,20 @@ data class RecallRequest(
     val tags: List<String> = emptyList(),
 )
 
+@Serializable
+data class ClearRequest(
+    val peer: String,
+    val forBoth: Boolean = false,
+    val tags: List<String> = emptyList(),
+)
+
+@Serializable
+data class ClearResultDto(
+    val peer: String? = null,
+    val clearedBeforeId: Long = 0,
+    val forBoth: Boolean = false,
+)
+
 // ---------------- Rust 边界 ----------------
 
 @Serializable
