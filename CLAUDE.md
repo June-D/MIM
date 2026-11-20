@@ -1,0 +1,43 @@
+# MIM · 端到端加密私密通讯（项目宪法）
+
+Spring Boot 服务端 + Compose Multiplatform 桌面客户端（`MIMCompose`，主客户端）
++ JavaFX 参考客户端（`MIMClient`）。
+**完整共识见根目录 `README.md` 的《产品基调（共识）》，动手前必须先读。**
+本文件只做 L1 摘要与导航，冲突时以 README 那一节为准。
+
+## 定位
+
+注重安全与隐私的**个人一对一**端到端加密通讯产品。不做群聊、不做内容推荐、
+不做云端明文备份。服务端不持有私钥，只见密文与必要元数据。
+
+## 模块
+
+```
+MIMServer/     Spring Boot 3.5 / Java 17：鉴权、设备登记、预密钥分发、密文转发、
+               发送者证书、已读/撤回/清除状态、限流
+MIMCoreRust/   Rust 安全内核：X3DH、双棘轮、HKDF、AES-GCM、信封、会话存储、
+               证书验签、状态加密；出口 JNI 与 C ABI
+MIMCore/       Java 协议核心：行为基准与测试向量（不在生产路径）
+MIMCompose/    Compose 桌面客户端（JVM 17）：传输、缓存、UI 语义
+MIMClient/     JavaFX 客户端：互通参考与回归验证，不再加新功能
+```
+
+## 硬约束
+
+1. 密码学只在 `MIMCoreRust`；Kotlin/Swift/Java 业务层不写加密、不碰明文私钥。
+2. 改协议必须同步：向量 → Rust → 两端客户端 → 文档；`cargo test` 与
+   `tools/interop.sh` 对拍通过。
+3. 未接入的能力显式报错或返回空；**禁止造假数据、禁止假装成功**。
+4. 不宣传「完全匿名」；匿名提交默认关闭。
+5. 桌面保险库仅文件权限是已知限制；移动端必须 Keystore/Keychain。
+6. 公网部署必须 TLS/WSS。
+7. 改动过 `./verify.sh --e2e`，并同步三层文档（L1 本文件 / L2 模块 README / L3 头注释）。
+8. 不删除、不弱化既有安全测试。
+
+## 当前边界
+
+已完成：注册/登录/记住账号、好友申请与备注、屏蔽、双向移除、一对一收发、
+撤回、已读、未读、清除、离线队列、WebSocket 推送、设备管理、安全码、附件外的一切文本能力。
+未完成：移动端、自有设备历史同步、附件/图片、Compose 端 TOTP、头像上传、部署文档。
+
+[PROTOCOL]: Update this header on change, then check README.md
