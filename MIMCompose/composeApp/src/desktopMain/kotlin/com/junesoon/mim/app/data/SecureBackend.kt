@@ -11,6 +11,7 @@ import com.junesoon.mim.app.data.messaging.ComposeResponseJson
 import com.junesoon.mim.app.data.messaging.ComposeSealedRequestJson
 import com.junesoon.mim.app.data.messaging.ComposeSealedResponseJson
 import com.junesoon.mim.app.data.messaging.DeviceKeyDto
+import com.junesoon.mim.app.data.messaging.DeviceListDto
 import com.junesoon.mim.app.data.messaging.InsertRequestJson
 import com.junesoon.mim.app.data.messaging.OpenFirstRequestJson
 import com.junesoon.mim.app.data.messaging.OpenFirstResponseJson
@@ -26,6 +27,8 @@ import com.junesoon.mim.app.data.messaging.StoreResponseJson
 import com.junesoon.mim.app.data.messaging.WireJson
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
+import com.junesoon.mim.app.domain.DeviceInfo
+import com.junesoon.mim.app.domain.PeerIdentityKey
 import com.junesoon.mim.core.MimCoreNative
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -33,6 +36,7 @@ import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -66,6 +70,8 @@ import java.util.UUID
 class SecureBackend(
     private val server: String,
     private val vaultRoot: Path = LocalVault.defaultRoot(),
+    /** 登录后先注销本账号的其它设备（测试与「重置」场景用）。 */
+    private val pruneOtherDevices: Boolean = false,
     private val client: HttpClient = HttpClient(CIO) {
         // 服务端要求 sealed 等字段显式出现，默认值必须参与序列化。
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true }) }
@@ -136,6 +142,9 @@ class SecureBackend(
         cachedToken = token
 
         vault = LocalVault(vaultRoot, username, cachedDeviceId)
+        if (pruneOtherDevices) {
+            KeyRegistry(server).pruneOtherDevices(token, cachedDeviceId)
+        }
         bundle = vault.loadBundle() ?: KeyRegistry(server)
             .provision(token, password, cachedDeviceId, deviceName.ifBlank { "Compose Desktop" })
             .also { vault.saveBundle(it) }
@@ -637,6 +646,39 @@ class SecureBackend(
         iv = raw.iv ?: error("缺少 IV"),
         ciphertext = raw.ciphertext ?: error("缺少密文"),
     )
+
+    override suspend fun devices(token: String): List<DeviceInfo> {
+        val response: ApiEnvelope<DeviceListDto> = client.get("$server/device") {
+            header("Authorization", "Bearer $token")
+        }.body()
+        require(response.status == 200) { response.message ?: "查询设备失败" }
+        return response.data?.devices.orEmpty().mapNotNull { device ->
+            val id = device.deviceId ?: return@mapNotNull null
+            DeviceInfo(
+                deviceId = id,
+                deviceName = device.deviceName.orEmpty(),
+                lastSeen = device.lastSeen,
+                current = id == cachedDeviceId,
+            )
+        }
+    }
+
+    override suspend fun revokeDevice(token: String, deviceId: String) {
+        val response = client.delete("$server/device/$deviceId") {
+            header("Authorization", "Bearer $token")
+        }
+        val envelope: StatusEnvelope = response.body()
+        require(envelope.status == 200) { envelope.message ?: "注销设备失败" }
+    }
+
+    override suspend fun peerIdentityKeys(token: String, contactId: String): List<PeerIdentityKey> =
+        getEnvelope<List<DeviceKeyDto>>("$server/key/$contactId", token).mapNotNull { device ->
+            val id = device.deviceId ?: return@mapNotNull null
+            val key = device.publicKey ?: return@mapNotNull null
+            PeerIdentityKey(id, key)
+        }
+
+    override fun ownIdentityKeyBase64(): String = Codec.hexToBase64(bundle.identity.publicKey)
 
     private fun nowTime(): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())

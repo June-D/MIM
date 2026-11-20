@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -33,6 +34,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
+import com.junesoon.mim.app.domain.SafetyEntry
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -42,9 +44,11 @@ fun ChatScreen(
     onBack: () -> Unit,
     onSend: (String) -> Unit,
     onRecall: (String) -> Unit = {},
+    safetyNumbers: List<SafetyEntry> = emptyList(),
     error: String? = null,
 ) {
     var draft by remember { mutableStateOf("") }
+    var showSafety by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(messages.size) {
@@ -60,6 +64,11 @@ fun ChatScreen(
                     TextButton(onClick = onBack) { Text("返回") }
                 },
                 title = { Text(contact.name) },
+                actions = {
+                    if (safetyNumbers.isNotEmpty()) {
+                        TextButton(onClick = { showSafety = true }) { Text("安全码") }
+                    }
+                },
             )
         },
         bottomBar = {
@@ -97,6 +106,30 @@ fun ChatScreen(
             }
         }
     ) { padding ->
+        if (showSafety) {
+            AlertDialog(
+                onDismissRequest = { showSafety = false },
+                title = { Text("安全码") },
+                text = {
+                    Column {
+                        Text(
+                            "与对方当面或通过可信渠道逐位核对；不一致说明密钥可能被替换。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        safetyNumbers.forEach { entry ->
+                            Text(
+                                entry.deviceId,
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(top = 10.dp),
+                            )
+                            Text(entry.code, style = MaterialTheme.typography.bodyMedium)
+                        }
+                    }
+                },
+                confirmButton = { TextButton(onClick = { showSafety = false }) { Text("关闭") } },
+            )
+        }
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize().padding(padding),

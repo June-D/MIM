@@ -45,6 +45,20 @@ data class PreKeyBundleDto(
 )
 
 @Serializable
+data class DeviceListDto(
+    val count: Int = 0,
+    val devices: List<DeviceDto> = emptyList(),
+)
+
+@Serializable
+data class DeviceDto(
+    val deviceId: String? = null,
+    val deviceName: String? = null,
+    val lastSeen: Long? = null,
+    val revoked: Boolean? = null,
+)
+
+@Serializable
 data class CertDto(
     val username: String,
     val deviceId: String,

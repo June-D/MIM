@@ -5,6 +5,8 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
+import io.ktor.client.request.delete
+import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
@@ -57,6 +59,39 @@ object TestAccounts {
         }
     }
 
+    /** 登录拿令牌；登录本身不登记设备，可用于清理。 */
+    suspend fun loginToken(server: String, username: String, deviceId: String): String {
+        val response: TestEnvelope<String> = client.post("$server/login/token") {
+            header("X-Device-Id", deviceId)
+            contentType(ContentType.Application.Json)
+            setBody(mapOf("username" to username, "password" to PASSWORD))
+        }.body()
+        check(response.status == 200) { response.message ?: "登录失败" }
+        return response.data ?: error("登录未返回令牌")
+    }
+
+    /**
+     * 清掉账号下的其它设备。
+     *
+     * 服务端每账号最多 10 台；测试每次都建新设备，不清理很快就会撞上限。
+     */
+    suspend fun clearDevices(server: String, username: String) {
+        val temp = uniqueDevice("clean")
+        val token = loginToken(server, username, temp)
+        val list: TestEnvelope<AccountDeviceList> = client.get("$server/device") {
+            header("Authorization", "Bearer $token")
+        }.body()
+        if (list.status != 200) return
+        for (device in list.data?.devices.orEmpty()) {
+            val id = device.deviceId ?: continue
+            runCatching {
+                client.delete("$server/device/$id") {
+                    header("Authorization", "Bearer $token")
+                }
+            }
+        }
+    }
+
     fun uniqueDevice(prefix: String): String =
         "$prefix-" + System.currentTimeMillis().toString().takeLast(9)
 
@@ -82,3 +117,12 @@ internal data class TestEnvelope<T>(
     val message: String? = null,
     val data: T? = null,
 )
+
+@Serializable
+internal data class AccountDeviceList(
+    val count: Int = 0,
+    val devices: List<AccountDevice> = emptyList(),
+)
+
+@Serializable
+internal data class AccountDevice(val deviceId: String? = null)

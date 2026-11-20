@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
@@ -12,6 +13,7 @@ import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
+import com.junesoon.mim.app.data.messaging.DeviceListDto
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
@@ -75,6 +77,29 @@ class KeyRegistry(
             )
         }
         return bundle
+    }
+
+    /**
+     * 注销本账号下的其它设备（只保留 keep）。
+     *
+     * 服务端每账号最多 10 台；测试与设备管理都需要这个动作。
+     */
+    suspend fun pruneOtherDevices(token: String, keep: String) {
+        val response: ApiEnvelope<DeviceListDto> = client.get("$baseUrl/device") {
+            header("Authorization", "Bearer $token")
+        }.body()
+        if (response.status != 200) {
+            return
+        }
+        for (device in response.data?.devices.orEmpty()) {
+            val id = device.deviceId ?: continue
+            if (id == keep) continue
+            runCatching {
+                client.delete("$baseUrl/device/$id") {
+                    header("Authorization", "Bearer $token")
+                }
+            }
+        }
     }
 
     /** 查询本设备剩余的一次性预密钥数量。 */

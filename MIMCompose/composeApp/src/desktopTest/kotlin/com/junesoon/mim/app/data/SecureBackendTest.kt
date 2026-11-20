@@ -34,14 +34,13 @@ class SecureBackendTest {
         val bob = "composebob"
         TestAccounts.ensure(server, alice)
         TestAccounts.ensure(server, bob)
-
         val root = Files.createTempDirectory("mim-vault")
 
-        val aliceBackend = SecureBackend(server, root)
+        val aliceBackend = SecureBackend(server, root, pruneOtherDevices = true)
         val aliceLogin = aliceBackend.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
         pruneOtherDevices(server, aliceLogin.token, aliceBackend.currentDeviceId)
 
-        val bobBackend = SecureBackend(server, root)
+        val bobBackend = SecureBackend(server, root, pruneOtherDevices = true)
         val bobLogin = bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
         pruneOtherDevices(server, bobLogin.token, bobBackend.currentDeviceId)
 
@@ -51,6 +50,19 @@ class SecureBackendTest {
             bobBackend.listenPush { signal.complete(Unit) }
         }
         delay(800)
+
+        // 设备列表包含本机
+        val devices = aliceBackend.devices(aliceLogin.token)
+        assertTrue(
+            devices.any { it.current && it.deviceId == aliceBackend.currentDeviceId },
+            "设备列表应包含本机：$devices",
+        )
+
+        // 安全码对称：双方对同一设备对算出的 60 位码必须相同
+        val aliceCode = safetyCode(aliceBackend, aliceLogin.token, bob, bobBackend.currentDeviceId)
+        val bobCode = safetyCode(bobBackend, bobLogin.token, alice, aliceBackend.currentDeviceId)
+        assertTrue(aliceCode != null, "A 应能算出与 B 的安全码")
+        assertEquals(aliceCode, bobCode, "安全码必须对称")
 
         val sent = aliceBackend.send(aliceLogin.token, bob, "secure hello")
         withTimeout(10_000) { signal.await() }
@@ -84,6 +96,18 @@ class SecureBackendTest {
         val history = aliceAgain.history(aliceLogin.token, bob)
         assertTrue(history.any { it.fromMe && it.recalled && it.id == sent.id }, "撤回记录应保留")
         assertTrue(history.any { !it.fromMe && it.text == "secure reply" }, "接收记录应保留")
+    }
+
+    private suspend fun safetyCode(
+        backend: SecureBackend,
+        token: String,
+        peer: String,
+        peerDeviceId: String,
+    ): String? {
+        val own = backend.ownIdentityKeyBase64() ?: return null
+        val key = backend.peerIdentityKeys(token, peer).firstOrNull { it.deviceId == peerDeviceId }
+            ?: return null
+        return com.junesoon.mim.app.domain.SafetyNumber.of(own, key.publicKeyBase64)
     }
 
     /** 清掉历史遗留设备，避免多设备分发把测试放大。 */

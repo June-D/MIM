@@ -13,6 +13,7 @@ import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.state.AppStore
 import com.junesoon.mim.app.state.Screen
 import com.junesoon.mim.app.ui.ChatScreen
+import com.junesoon.mim.app.ui.DeviceScreen
 import com.junesoon.mim.app.ui.ContactsScreen
 import com.junesoon.mim.app.ui.LoginScreen
 import com.junesoon.mim.app.ui.MimTheme
@@ -47,6 +48,13 @@ fun MimApp() {
                     deviceName = state.deviceName,
                     contacts = state.contacts,
                     onOpenChat = store::openChat,
+                    onShowDevices = store::openDevices,
+                )
+
+                Screen.Devices -> DeviceScreen(
+                    devices = state.devices,
+                    onBack = store::backToContacts,
+                    onRevoke = store::revokeDevice,
                 )
 
                 is Screen.Chat -> {
@@ -65,6 +73,7 @@ fun MimApp() {
                             onBack = store::backToContacts,
                             onSend = store::send,
                             onRecall = { messageId -> store.recall(screen.contactId, messageId) },
+                            safetyNumbers = state.safetyNumbers,
                             error = state.error,
                         )
                     }

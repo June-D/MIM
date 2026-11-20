@@ -209,6 +209,7 @@ class FirstMessageTest {
     ): RustKeyBundle {
         awaitRegister(server, user, password)
         val login = HttpBackend(server).login(user, password, device)
+        KeyRegistry(server).pruneOtherDevices(login.token, device)
         return KeyRegistry(server).provision(login.token, password, device, "Compose Test")
     }
 

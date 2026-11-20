@@ -2,6 +2,8 @@ package com.junesoon.mim.app.data
 
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
+import com.junesoon.mim.app.domain.DeviceInfo
+import com.junesoon.mim.app.domain.PeerIdentityKey
 
 /**
  * 传输层契约。
@@ -43,6 +45,18 @@ interface MessagingBackend {
      * 落库与鉴权都在 HTTP 上，推送丢失也不会影响一致性。
      */
     suspend fun listenPush(onSignal: () -> Unit) = Unit
+
+    /** 本账号的设备列表。 */
+    suspend fun devices(token: String): List<DeviceInfo> = emptyList()
+
+    /** 注销（踢掉）指定设备。 */
+    suspend fun revokeDevice(token: String, deviceId: String) = Unit
+
+    /** 对端设备的身份公钥，用于计算安全码。 */
+    suspend fun peerIdentityKeys(token: String, contactId: String): List<PeerIdentityKey> = emptyList()
+
+    /** 本设备身份公钥（Base64）；演示后端返回 null。 */
+    fun ownIdentityKeyBase64(): String? = null
 }
 
 /** 一条逻辑消息的外部状态。 */

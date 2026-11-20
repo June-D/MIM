@@ -4,6 +4,9 @@ import com.junesoon.mim.app.data.DemoBackend
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.IncomingMessage
 import com.junesoon.mim.app.domain.ChatMessage
+import com.junesoon.mim.app.domain.DeviceInfo
+import com.junesoon.mim.app.domain.SafetyEntry
+import com.junesoon.mim.app.domain.SafetyNumber
 import com.junesoon.mim.app.domain.Contact
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -21,6 +24,7 @@ import kotlinx.coroutines.launch
 sealed interface Screen {
     data object Login : Screen
     data object Contacts : Screen
+    data object Devices : Screen
     data class Chat(val contactId: String) : Screen
 }
 
@@ -29,6 +33,8 @@ data class AppState(
     val selfName: String = "",
     val deviceName: String = "",
     val contacts: List<Contact> = emptyList(),
+    val devices: List<DeviceInfo> = emptyList(),
+    val safetyNumbers: List<SafetyEntry> = emptyList(),
     val messages: Map<String, List<ChatMessage>> = emptyMap(),
     val error: String? = null,
     val busy: Boolean = false,
@@ -101,7 +107,41 @@ class AppStore(
                 }
             runCatching { backend.markRead(currentToken, contactId) }
             refreshStates(currentToken, contactId)
+            loadSafetyNumbers(currentToken, contactId)
         }
+    }
+
+    fun openDevices() {
+        val currentToken = token ?: return
+        _state.update { it.copy(screen = Screen.Devices) }
+        scope.launch {
+            runCatching { backend.devices(currentToken) }
+                .onSuccess { devices -> _state.update { it.copy(devices = devices) } }
+                .onFailure { error -> _state.update { it.copy(error = error.message ?: "查询设备失败") } }
+        }
+    }
+
+    fun revokeDevice(deviceId: String) {
+        val currentToken = token ?: return
+        scope.launch {
+            runCatching { backend.revokeDevice(currentToken, deviceId) }
+                .onSuccess {
+                    val devices = backend.devices(currentToken)
+                    _state.update { it.copy(devices = devices) }
+                }
+                .onFailure { error -> _state.update { it.copy(error = error.message ?: "注销设备失败") } }
+        }
+    }
+
+    private suspend fun loadSafetyNumbers(currentToken: String, contactId: String) {
+        val own = backend.ownIdentityKeyBase64() ?: return
+        runCatching { backend.peerIdentityKeys(currentToken, contactId) }
+            .onSuccess { keys ->
+                val entries = keys.map { key ->
+                    SafetyEntry(key.deviceId, SafetyNumber.of(own, key.publicKeyBase64))
+                }
+                _state.update { it.copy(safetyNumbers = entries) }
+            }
     }
 
     fun backToContacts() {
