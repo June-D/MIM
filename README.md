@@ -505,6 +505,11 @@ export MIM_SENDER_CERT_ENABLED=true
 ../mvnw spring-boot:run
 ```
 
+> 也可以直接跑 `MIMServer/run-server.sh`：打包、复制到 target 之外、等待就绪。
+> 复制这一步是必要的：`verify.sh` 会在 MIMServer 下执行 `clean`，
+> 正在被 JVM 读取的 `target/*.jar` 被删掉会让运行中的服务端抛
+> `NoSuchFileException`，表现为登录突然 500。`--stop` 可停止已有实例。
+
 > 服务端需要 JDK 17；Maven 已由 `mvnw` 固定为 3.9.9。客户端仍需带 JavaFX 的 JDK 8。
 > 两个 JDK 可以并存，分别通过 `JAVA_HOME` / `MIM_CLIENT_JAVA_HOME` 指定。
 
