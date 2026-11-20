@@ -8,6 +8,7 @@ import com.junesoon.mim.app.domain.Contact
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -188,19 +189,35 @@ class AppStore(
             return
         }
         polling = true
+        // 推送只用来「叫醒」同步；HTTP 仍是一致性来源。
+        scope.launch {
+            runCatching { backend.listenPush { scope.launch { syncOnce() } } }
+        }
+        // 轮询兜底：推送断开或丢失时最多延迟 3 秒。
         scope.launch {
             while (scope.isActive) {
                 delay(3_000)
-                val currentToken = token ?: continue
-                runCatching { backend.poll(currentToken) }
-                    .onSuccess { incoming ->
-                        incoming.forEach(::mergeIncoming)
-                        val open = (_state.value.screen as? Screen.Chat)?.contactId
-                        if (open != null) {
-                            refreshStates(currentToken, open)
-                        }
-                    }
+                syncOnce()
             }
+        }
+    }
+
+    private suspend fun syncOnce() {
+        val currentToken = token ?: return
+        if (!syncLock.tryLock()) {
+            return
+        }
+        try {
+            runCatching { backend.poll(currentToken) }
+                .onSuccess { incoming ->
+                    incoming.forEach(::mergeIncoming)
+                    val open = (_state.value.screen as? Screen.Chat)?.contactId
+                    if (open != null) {
+                        refreshStates(currentToken, open)
+                    }
+                }
+        } finally {
+            syncLock.unlock()
         }
     }
 
@@ -228,4 +245,5 @@ class AppStore(
     }
 
     private var polling = false
+    private val syncLock = Mutex()
 }

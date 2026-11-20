@@ -31,13 +31,21 @@ import io.ktor.client.HttpClient
 import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.client.plugins.websocket.WebSockets
+import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
+import io.ktor.client.request.url
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
+import io.ktor.websocket.Frame
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 import java.nio.file.Path
@@ -61,6 +69,7 @@ class SecureBackend(
     private val client: HttpClient = HttpClient(CIO) {
         // 服务端要求 sealed 等字段显式出现，默认值必须参与序列化。
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true }) }
+        install(WebSockets)
     },
 ) : MessagingBackend {
 
@@ -77,6 +86,48 @@ class SecureBackend(
 
     /** 当前登录的设备与用户名（测试与设备管理界面用）。 */
     val currentDeviceId: String get() = cachedDeviceId
+
+    /**
+     * 下行推送：只用来「叫醒」HTTP 同步，不承载业务判断。
+     *
+     * 连接断开后每 3 秒重连；25 秒没收到任何帧就发一次文本心跳
+     * （服务端按报文里是否含 `"ping"` 识别）。
+     */
+    override suspend fun listenPush(onSignal: () -> Unit) {
+        val wsBase = server.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://")
+        while (currentCoroutineContext().isActive) {
+            val connected = runCatching {
+                client.webSocket(
+                    request = {
+                        url("$wsBase/websocket/compose")
+                        header("Authorization", "Bearer $cachedToken")
+                        header("X-Device-Id", cachedDeviceId)
+                    },
+                ) {
+                    while (isActive) {
+                        val frame = withTimeoutOrNull(25_000) { incoming.receive() }
+                        if (frame == null) {
+                            send(Frame.Text("{\"ping\":true}"))
+                            continue
+                        }
+                        if (frame is Frame.Text && isSignal(frame.data.decodeToString())) {
+                            onSignal()
+                        }
+                    }
+                }
+            }.isSuccess
+            if (!connected) {
+                delay(3_000)
+            }
+        }
+    }
+
+    private fun isSignal(payload: String): Boolean {
+        val type = runCatching {
+            JsonCodec.decode<PushEnvelope>(payload).type
+        }.getOrNull() ?: return false
+        return type == TYPE_NEW_MESSAGE || type == TYPE_READ_RECEIPT || type == TYPE_RECALLED
+    }
 
     override suspend fun login(username: String, password: String, deviceName: String): LoginResult {
         cachedUsername = username
@@ -592,5 +643,12 @@ class SecureBackend(
 
     companion object {
         const val ALGORITHM = "X3DH-P256-DOUBLE-RATCHET-AES-256-GCM"
+
+        private const val TYPE_NEW_MESSAGE = 100010
+        private const val TYPE_READ_RECEIPT = 100012
+        private const val TYPE_RECALLED = 100014
     }
 }
+
+@kotlinx.serialization.Serializable
+private data class PushEnvelope(val type: Int = 0, val data: JsonElement? = null)

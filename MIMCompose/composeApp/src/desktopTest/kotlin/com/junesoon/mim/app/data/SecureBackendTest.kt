@@ -8,7 +8,13 @@ import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.nio.file.Files
@@ -39,7 +45,16 @@ class SecureBackendTest {
         val bobLogin = bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
         pruneOtherDevices(server, bobLogin.token, bobBackend.currentDeviceId)
 
+        // 推送：A 发送后 B 的监听应立刻收到信号（不依赖轮询）。
+        val signal = CompletableDeferred<Unit>()
+        val listener = launch(Dispatchers.Default) {
+            bobBackend.listenPush { signal.complete(Unit) }
+        }
+        delay(800)
+
         val sent = aliceBackend.send(aliceLogin.token, bob, "secure hello")
+        withTimeout(10_000) { signal.await() }
+        listener.cancel()
         val received = bobBackend.poll(bobLogin.token)
         val incoming = received.firstOrNull { it.contactId == alice }
         assertTrue(incoming != null, "B 未收到 A 的消息；收到：$received")
@@ -88,7 +103,7 @@ class SecureBackendTest {
         }
     }
 
-    private fun withEnv(block: suspend (String) -> Unit) {
+    private fun withEnv(block: suspend CoroutineScope.(String) -> Unit) {
         val server = System.getenv("MIM_SERVER_URL") ?: return
         if (System.getenv("MIM_NATIVE_LIB").isNullOrBlank()) return
         runBlocking { block(server) }

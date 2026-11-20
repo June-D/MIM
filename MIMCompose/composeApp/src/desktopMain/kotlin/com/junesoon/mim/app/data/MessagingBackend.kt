@@ -35,6 +35,14 @@ interface MessagingBackend {
 
     /** 刷新已读 / 撤回状态（已读回执与实时撤回缺少推送时的补偿）。 */
     suspend fun historyStates(token: String, contactId: String): List<MessageState> = emptyList()
+
+    /**
+     * 监听下行推送，直到协程被取消。
+     *
+     * 只把「有新数据」这件事通知出去，具体拉取仍走 HTTP：
+     * 落库与鉴权都在 HTTP 上，推送丢失也不会影响一致性。
+     */
+    suspend fun listenPush(onSignal: () -> Unit) = Unit
 }
 
 /** 一条逻辑消息的外部状态。 */

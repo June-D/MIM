@@ -59,14 +59,23 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 | 撤回 | 无 | 发送时生成凭证；`POST /message/recall`，本地立即置「已撤回」 |
 | 已读回执 | 无 | 打开会话 `POST /message/read`；自己消息的已读靠历史轮询 |
 | 离线队列 | 无 | 投递失败入队，只重发同一份密文，不重复推进棘轮 |
+| 实时推送 | 无 | WebSocket `/websocket/*`，收到 100010/100012/100014 即触发同步 |
 
 协议计算全部在 Rust 核心；Kotlin 只做传输、入库与 UI 语义。
 
-### 状态刷新（没有推送时）
+### 实时推送与兜底
 
-`SecureBackend.historyStates` 每轮轮询对**当前打开的会话**查一次历史：
-更新自己消息的已读状态与双方的撤回状态。其它会话要等下次打开才刷新。
-接入 WebSocket 推送后可去掉这次轮询。
+`SecureBackend.listenPush` 连 `ws(s)://host/websocket/compose`，握手带
+`Authorization` 与 `X-Device-Id`；只把「有新数据」通知给上层，具体拉取仍走 HTTP。
+收到新消息 / 已读回执 / 撤回事件即时触发一次同步。
+
+同时保留 3 秒轮询兜底：推送断开或丢失时最多延迟 3 秒；重连间隔 3 秒，
+25 秒无帧就发文本心跳。
+
+### 状态刷新
+
+`historyStates` 每轮对**当前打开的会话**查一次历史，更新已读与撤回状态；
+其它会话在下次打开时刷新（推送只会触发同步，不会直接改本地状态）。
 
 ### 本地保险库
 
