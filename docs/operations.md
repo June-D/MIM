@@ -287,7 +287,7 @@ export MIM_SENDER_CERT_ENABLED=true
 它会归档无标签旧消息到 `t_message_legacy_archive`，然后删除、删列与旧索引。
 标签是随机值，无法回填，因此**旧消息不可能保留在聊天记录里**；
 需要保留证据时必须先自行备份归档表。设计说明见
-[docs/sealed-sender-design.md](docs/sealed-sender-design.md) 第 12 节。
+[docs/sealed-sender-design.md](sealed-sender-design.md) 第 12 节。
 
 ## 密钥轮换与备份
 
