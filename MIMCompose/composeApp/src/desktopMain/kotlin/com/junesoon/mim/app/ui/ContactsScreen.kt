@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -390,27 +391,39 @@ private fun Banner(text: String, danger: Boolean) {
 
 @Composable
 private fun EmptyContacts(onAddContact: () -> Unit) {
-    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+    // 空态渲染在 312dp 的列表栏里：必须自己收住宽度，否则正文会顶到两边缘。
+    Box(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
+        contentAlignment = Alignment.Center,
+    ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            verticalArrangement = Arrangement.spacedBy(9.dp),
         ) {
             Box(
                 modifier = Modifier
-                    .size(64.dp)
+                    .size(54.dp)
                     .clip(CircleShape)
                     .background(MimPalette.TealSoft),
                 contentAlignment = Alignment.Center,
             ) {
-                MimIcon(MimIcon.Shield, size = 26.dp, tint = MimPalette.Teal)
+                MimIcon(MimIcon.Shield, size = 23.dp, tint = MimPalette.Teal)
             }
-            Text("还没有联系人", style = MaterialTheme.typography.titleMedium)
+            Spacer(Modifier.height(2.dp))
             Text(
-                "输入对方的用户名发送申请，同意后即可开始加密对话。",
+                "还没有联系人",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                // 在 228dp 宽里手动断行：让两行长度接近，避免把「开始」这类词拆开。
+                "输入对方用户名并发送申请，\n同意后即可开始加密对话。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.widthIn(max = 228.dp),
             )
-            Spacer(Modifier.height(4.dp))
+            Spacer(Modifier.height(6.dp))
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(10.dp))
