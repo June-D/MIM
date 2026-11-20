@@ -165,6 +165,25 @@ data class FriendRequestDto(
 data class AddContactRequest(val username: String, val labelName: String? = null)
 
 @Serializable
+data class RegisterRequest(
+    val username: String,
+    val password: String,
+    val email: String? = null,
+    val agreedTerms: Boolean = true,
+    val termsVersion: String,
+)
+
+@Serializable
+data class RecoverEmailRequest(val username: String)
+
+@Serializable
+data class RecoverResetRequest(
+    val username: String,
+    val code: String,
+    val newPassword: String,
+)
+
+@Serializable
 data class ClearRequest(
     val peer: String,
     val forBoth: Boolean = false,

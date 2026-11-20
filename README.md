@@ -1007,6 +1007,12 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+140. PC 端修正 **注册流程**：注册只建账号，成功后回到登录页预填用户名，
+    首次登录才登记设备；注册页去掉设备名与「记住账号密码」。
+    注册请求改用显式 `@Serializable` DTO——此前用 `buildMap` 组装，
+    Ktor 拿到 `MapBuilder` 运行时类型，kotlinx.serialization 直接抛
+    「Class 'MapBuilder' is not registered」。
+    邮箱按服务端同一正则与 254 长度先做客户端校验。联调新增「注册后能登录」。
 139. PC 端补齐 **账号与隐私操作**：注册（含用户协议 2026-11、可选找回邮箱、
     设备名）、忘记密码（邮箱验证码，未配置 SMTP 时原样提示）、记住账号密码
     （`~/.mim/remember.bin`，AES-GCM + 0600，仅登录页提供；退出登录保留预填

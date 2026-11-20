@@ -23,6 +23,9 @@ import com.junesoon.mim.app.data.messaging.OpenFirstResponseJson
 import com.junesoon.mim.app.data.messaging.OpenSealedRequestJson
 import com.junesoon.mim.app.data.messaging.OpenSealedResponseJson
 import com.junesoon.mim.app.data.messaging.PreKeyBundleDto
+import com.junesoon.mim.app.data.messaging.RecoverEmailRequest
+import com.junesoon.mim.app.data.messaging.RecoverResetRequest
+import com.junesoon.mim.app.data.messaging.RegisterRequest
 import com.junesoon.mim.app.data.messaging.ReadRequest
 import com.junesoon.mim.app.data.messaging.RecallRequest
 import com.junesoon.mim.app.data.messaging.SessionMeta
@@ -154,13 +157,15 @@ class SecureBackend(
     }
 
     override suspend fun register(username: String, password: String, email: String?) {
-        val body = buildMap<String, Any> {
-            put("username", username)
-            put("password", password)
-            if (!email.isNullOrBlank()) put("email", email.trim())
-            put("agreedTerms", true)
-            put("termsVersion", TERMS_VERSION)
-        }
+        // 显式的 @Serializable DTO：buildMap 的运行时类型是 MapBuilder，
+        // kotlinx.serialization 会拒绝为它查找序列化器。
+        val body = RegisterRequest(
+            username = username,
+            password = password,
+            email = email?.trim()?.takeIf { it.isNotEmpty() },
+            agreedTerms = true,
+            termsVersion = TERMS_VERSION,
+        )
         val response: StatusEnvelope = client.post("$server/register/token") {
             contentType(ContentType.Application.Json)
             setBody(body)
@@ -171,7 +176,7 @@ class SecureBackend(
     override suspend fun sendRecoveryCode(username: String) {
         val response: StatusEnvelope = client.post("$server/recover/email") {
             contentType(ContentType.Application.Json)
-            setBody(mapOf("username" to username))
+            setBody(RecoverEmailRequest(username))
         }.body()
         require(response.status == 200) { response.message ?: "验证码发送失败" }
     }
@@ -179,7 +184,7 @@ class SecureBackend(
     override suspend fun resetPassword(username: String, code: String, newPassword: String) {
         val response: StatusEnvelope = client.post("$server/recover/reset") {
             contentType(ContentType.Application.Json)
-            setBody(mapOf("username" to username, "code" to code, "newPassword" to newPassword))
+            setBody(RecoverResetRequest(username, code, newPassword))
         }.body()
         require(response.status == 200) { response.message ?: "密码重置失败" }
     }

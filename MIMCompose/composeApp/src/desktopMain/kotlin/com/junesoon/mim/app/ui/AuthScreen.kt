@@ -65,21 +65,27 @@ fun AuthScreen(
     rememberMe: Boolean,
     onModeChange: (AuthMode) -> Unit,
     onLogin: (String, String, String, Boolean) -> Unit,
-    onRegister: (String, String, String, String) -> Unit,
+    onRegister: (String, String, String) -> Unit,
     onSendCode: (String) -> Unit,
     onReset: (String, String, String) -> Unit,
     onClearFeedback: () -> Unit,
 ) {
-    var username by remember(initialUsername) { mutableStateOf(initialUsername) }
-    var password by remember(initialPassword) { mutableStateOf(initialPassword) }
-    var confirm by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var code by remember { mutableStateOf("") }
+    // 只有登录页预填记住的账号密码；注册与找回都从空表单开始。
+    // 注册成功回到登录页时，模式变化会把旧密码清掉。
+    var username by remember(mode, initialUsername) {
+        mutableStateOf(if (mode == AuthMode.Login) initialUsername else "")
+    }
+    var password by remember(mode, initialPassword) {
+        mutableStateOf(if (mode == AuthMode.Login) initialPassword else "")
+    }
+    var confirm by remember(mode) { mutableStateOf("") }
+    var email by remember(mode) { mutableStateOf("") }
+    var code by remember(mode) { mutableStateOf("") }
     var deviceName by remember(initialDeviceName) {
         mutableStateOf(initialDeviceName.ifBlank { "Desktop" })
     }
     var remember by remember(rememberMe) { mutableStateOf(rememberMe) }
-    var agreed by remember { mutableStateOf(false) }
+    var agreed by remember(mode) { mutableStateOf(false) }
     var showTerms by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
 
@@ -113,7 +119,7 @@ fun AuthScreen(
                     Text(
                         when (mode) {
                             AuthMode.Login -> "用你的账号继续一段加密对话。"
-                            AuthMode.Register -> "账号创建后会在这台设备生成专属密钥。"
+                            AuthMode.Register -> "注册后回到登录页；首次登录才会在本机生成密钥。"
                             AuthMode.Recover -> "通过账号绑定的邮箱验证身份。"
                         },
                         style = MaterialTheme.typography.bodySmall,
@@ -177,11 +183,6 @@ fun AuthScreen(
                             onValueChange = { email = it },
                             label = "邮箱（可选，用于找回密码）",
                         )
-                        MimField(
-                            value = deviceName,
-                            onValueChange = { deviceName = it },
-                            label = "这台设备的名称",
-                        )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(),
@@ -202,17 +203,20 @@ fun AuthScreen(
                             LinkText("《用户协议》") { showTerms = true }
                         }
                         PrimaryButton(
-                            text = "注册并登录",
+                            text = "注册",
                             busy = busy,
                             onClick = {
+                                val cleanEmail = email.trim()
                                 localError = when {
                                     password.length < 8 -> "密码至少 8 位"
                                     password != confirm -> "两次输入的密码不一致"
+                                    cleanEmail.isNotEmpty() && !isEmail(cleanEmail) ->
+                                        "邮箱格式不正确"
                                     !agreed -> "请先阅读并同意用户协议"
                                     else -> null
                                 }
                                 if (localError == null) {
-                                    onRegister(username, password, email, deviceName)
+                                    onRegister(username, password, cleanEmail)
                                 }
                             },
                         )
@@ -500,6 +504,12 @@ private fun TermsDialog(onDismiss: () -> Unit, onAccept: () -> Unit) {
         titleContentColor = MimPalette.Ink,
     )
 }
+
+/** 与服务端 `ValidationUtil` 相同的邮箱规则：基本格式，不验证送达性。 */
+private val EmailPattern = Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
+
+private fun isEmail(value: String): Boolean =
+    value.length <= 254 && EmailPattern.matches(value)
 
 private fun loadTerms(): String =
     runCatching {

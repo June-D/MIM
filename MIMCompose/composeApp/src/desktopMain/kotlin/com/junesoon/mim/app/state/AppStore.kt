@@ -185,12 +185,7 @@ class AppStore(
         }
     }
 
-    fun register(
-        username: String,
-        password: String,
-        email: String,
-        deviceName: String,
-    ) {
+    fun register(username: String, password: String, email: String) {
         if (username.isBlank() || password.isEmpty()) {
             _state.update { it.copy(error = "请填写用户名与密码") }
             return
@@ -199,17 +194,17 @@ class AppStore(
         scope.launch {
             runCatching { backend.register(username.trim(), password, email.trim().ifBlank { null }) }
                 .onSuccess {
+                    // 注册只负责建账号：回到登录页，由用户自己登录。
                     _state.update {
                         it.copy(
                             busy = false,
                             authMode = AuthMode.Login,
                             rememberedUsername = username.trim(),
-                            notice = "注册成功，正在登录…",
+                            rememberedPassword = "",
+                            rememberMe = false,
+                            notice = "注册成功，请用刚才的密码登录。",
                         )
                     }
-                    val device = deviceName.trim().ifEmpty { "desktop" }
-                    // 「记住账号密码」只在登录页提供；注册后先以非记住状态登录。
-                    login(username.trim(), password, device, remember = false)
                 }
                 .onFailure { error ->
                     _state.update { it.copy(busy = false, error = error.message ?: "注册失败") }
