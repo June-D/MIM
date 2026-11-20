@@ -65,9 +65,17 @@ class CredentialStore(private val root: Path = LocalVault.defaultRoot()) {
     }
 }
 
+/**
+ * 记住的登录信息。
+ *
+ * `autoLogin` 区分两种状态：勾选记住后是 true（启动自动登录）；
+ * 用户主动退出登录后改为 false——密码仍保留用于预填，
+ * 但不会自动把用户登回去。
+ */
 @Serializable
 data class RememberedLogin(
     val username: String,
     val password: String,
     val deviceName: String,
+    val autoLogin: Boolean = true,
 )

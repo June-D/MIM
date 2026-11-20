@@ -98,7 +98,7 @@ class AppStore(
                     rememberMe = true,
                 )
             }
-            if (autoRestore) {
+            if (autoRestore && saved.autoLogin) {
                 login(saved.username, saved.password, saved.deviceName, remember = true, silent = true)
             }
         }
@@ -143,6 +143,10 @@ class AppStore(
                             error = null,
                             notice = null,
                             blockedPeers = blockedPeers.toSet(),
+                            rememberedUsername = if (remember) username.trim() else "",
+                            rememberedPassword = if (remember) password else "",
+                            rememberedDeviceName = if (remember) device else "",
+                            rememberMe = remember,
                         )
                         next.copy(
                             contacts = enrich(
@@ -153,7 +157,14 @@ class AppStore(
                     }
                     if (remember) {
                         runCatching {
-                            credentials.save(RememberedLogin(username.trim(), password, device))
+                            credentials.save(
+                                RememberedLogin(
+                                    username = username.trim(),
+                                    password = password,
+                                    deviceName = device,
+                                    autoLogin = true,
+                                ),
+                            )
                         }
                     } else {
                         runCatching { credentials.clear() }
@@ -179,7 +190,6 @@ class AppStore(
         password: String,
         email: String,
         deviceName: String,
-        remember: Boolean,
     ) {
         if (username.isBlank() || password.isEmpty()) {
             _state.update { it.copy(error = "请填写用户名与密码") }
@@ -198,7 +208,8 @@ class AppStore(
                         )
                     }
                     val device = deviceName.trim().ifEmpty { "desktop" }
-                    login(username.trim(), password, device, remember = remember)
+                    // 「记住账号密码」只在登录页提供；注册后先以非记住状态登录。
+                    login(username.trim(), password, device, remember = false)
                 }
                 .onFailure { error ->
                     _state.update { it.copy(busy = false, error = error.message ?: "注册失败") }
@@ -253,7 +264,13 @@ class AppStore(
         }
     }
 
-    /** 退出登录：清掉记住的凭据，回到登录页。本机密文缓存保留。 */
+    /**
+     * 退出登录：回到登录页，关闭自动登录。
+     *
+     * 勾选过「记住账号密码」时保留凭据用于表单预填——否则退出一次就要
+     * 重新输入，与「记住」的预期相矛盾；但 `autoLogin` 置为 false，
+     * 不会再自动把用户登录回去。
+     */
     fun logout() {
         token = null
         pushJob?.cancel()
@@ -261,11 +278,31 @@ class AppStore(
         pushJob = null
         loopJob = null
         polling = false
-        runCatching { credentials.clear() }
+        val current = _state.value
+        val saved = runCatching { credentials.load() }.getOrNull()
+        val remembered = if (current.rememberedUsername.isNotBlank()) {
+            RememberedLogin(
+                username = current.rememberedUsername,
+                password = current.rememberedPassword,
+                deviceName = current.rememberedDeviceName.ifBlank { current.deviceName },
+                autoLogin = false,
+            )
+        } else {
+            saved?.copy(autoLogin = false)
+        }
+        if (remembered != null) {
+            runCatching { credentials.save(remembered) }
+        } else {
+            runCatching { credentials.clear() }
+        }
         _state.update {
             AppState(
                 screen = Screen.Login,
                 authMode = AuthMode.Login,
+                rememberedUsername = remembered?.username.orEmpty(),
+                rememberedPassword = remembered?.password.orEmpty(),
+                rememberedDeviceName = remembered?.deviceName.orEmpty(),
+                rememberMe = remembered != null,
                 notice = "已退出登录",
             )
         }

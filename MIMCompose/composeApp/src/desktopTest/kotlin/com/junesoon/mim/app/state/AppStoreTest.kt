@@ -53,6 +53,27 @@ class AppStoreTest {
         assertTrue(store.state.value.messages.isEmpty())
     }
 
+    /**
+     * 勾选记住后退出登录：表单仍预填账号密码，但不再自动登录。
+     *
+     * 这里用假存储避免依赖 Rust 动态库；只验证状态与调用意图。
+     */
+    @Test
+    fun logout_keeps_remembered_credentials_for_prefill() {
+        val dir = Files.createTempDirectory("mim-remember")
+        val store = AppStore(
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(dir),
+        )
+        store.login("alice", "pass1234", "desktop", remember = true)
+        store.logout()
+
+        assertEquals("alice", store.state.value.rememberedUsername)
+        assertEquals("pass1234", store.state.value.rememberedPassword)
+        assertTrue(store.state.value.rememberMe)
+        assertEquals(Screen.Login, store.state.value.screen)
+    }
+
     @Test
     fun blocking_contact_marks_it_and_hides_composer_state() {
         val store = store()

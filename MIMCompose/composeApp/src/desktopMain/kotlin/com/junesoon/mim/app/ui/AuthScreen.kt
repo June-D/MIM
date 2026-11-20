@@ -65,7 +65,7 @@ fun AuthScreen(
     rememberMe: Boolean,
     onModeChange: (AuthMode) -> Unit,
     onLogin: (String, String, String, Boolean) -> Unit,
-    onRegister: (String, String, String, String, Boolean) -> Unit,
+    onRegister: (String, String, String, String) -> Unit,
     onSendCode: (String) -> Unit,
     onReset: (String, String, String) -> Unit,
     onClearFeedback: () -> Unit,
@@ -182,7 +182,6 @@ fun AuthScreen(
                             onValueChange = { deviceName = it },
                             label = "这台设备的名称",
                         )
-                        RememberRow(remember = remember, onChange = { remember = it })
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier.fillMaxWidth(),
@@ -213,7 +212,7 @@ fun AuthScreen(
                                     else -> null
                                 }
                                 if (localError == null) {
-                                    onRegister(username, password, email, deviceName, remember)
+                                    onRegister(username, password, email, deviceName)
                                 }
                             },
                         )

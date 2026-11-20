@@ -130,8 +130,11 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 - **注册**：用户名 / 密码 / 可选邮箱 / 设备名；必须勾选并查看《用户协议》
   （版本 `2026-11`，原文在 `resources/terms/2026-11.txt`，运行时读取）。
   注册成功后立即用同一账号登录。
-- **记住账号密码**：勾选后把账号、密码、设备名写入 `~/.mim/remember.bin`，
-  用同目录 `remember.key`（0600）做 AES-GCM 加密；下次启动自动登录。
+- **记住账号密码**：仅在登录页提供（注册页不勾选）。勾选后把账号、密码、
+  设备名写入 `~/.mim/remember.bin`，用同目录 `remember.key`（0600）做
+  AES-GCM 加密；下次启动自动登录。
+  退出登录时保留凭据用于表单预填，但把 `autoLogin` 置为 false，
+  不会再自动登回去；重新勾选登录后恢复自动登录。
   这只防「随手翻到明文」，不防能读你用户目录的恶意程序，界面已写明。
 - **找回密码**：`POST /recover/email` 发验证码、`POST /recover/reset` 重置。
   需要账号绑定邮箱且服务端配置 SMTP；未配置时服务端返回
