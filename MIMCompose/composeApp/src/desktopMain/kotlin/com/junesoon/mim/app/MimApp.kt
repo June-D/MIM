@@ -8,7 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.junesoon.mim.app.data.DemoBackend
-import com.junesoon.mim.app.data.HttpBackend
+import com.junesoon.mim.app.data.SecureBackend
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.state.AppStore
 import com.junesoon.mim.app.state.Screen
@@ -28,7 +28,7 @@ fun MimApp() {
     val store = remember {
         val server = System.getenv("MIM_SERVER_URL")
         val backend: MessagingBackend =
-            if (server.isNullOrBlank()) DemoBackend() else HttpBackend(server.trim())
+            if (server.isNullOrBlank()) DemoBackend() else SecureBackend(server.trim())
         AppStore(backend)
     }
     val state by store.state.collectAsState()

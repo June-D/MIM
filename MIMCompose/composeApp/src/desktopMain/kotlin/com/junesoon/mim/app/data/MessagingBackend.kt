@@ -19,7 +19,17 @@ interface MessagingBackend {
     suspend fun history(token: String, contactId: String): List<ChatMessage>
 
     suspend fun send(token: String, contactId: String, text: String): ChatMessage
+
+    /**
+     * 拉取尚未消费的消息。
+     *
+     * 真实实现会解密并把明文放进缓存；演示实现返回空。
+     */
+    suspend fun poll(token: String): List<IncomingMessage> = emptyList()
 }
+
+/** 一条新到达的消息，附带它属于哪个联系人。 */
+data class IncomingMessage(val contactId: String, val message: ChatMessage)
 
 data class LoginResult(
     val token: String,

@@ -241,6 +241,7 @@ MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Ru
 
 MIMCompose/             移动端 UI 骨架（Compose Multiplatform，当前验证桌面目标）
   composeApp/           登录 / 联系人 / 聊天三屏，AppStore 单一状态源
+                        SecureBackend 走真实协议：设备密钥 → 首条消息 → sealed 收发
   composeApp/.../data   MessagingBackend 契约 + DemoBackend（内存演示）
   README.md             运行方式与接 Android/iOS 的步骤
 
@@ -1001,6 +1002,13 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
     脚本化（首次联系、证书关闭无降级、匿名关闭、多设备历史），
     跑两个服务端实例（8080 全开 / 8081 全关）；
     纯界面项明确打印 `MANUAL`，当前 12 项通过 + 4 项人工。
+131. MIMCompose 接入 **真实收发**：新增 `SecureBackend` 与 `LocalVault`。
+    登录后自动补设备密钥；发送时按设备查会话，首条消息走证书+标签，之后走
+    sealed；接收轮询 `/undelivered`，Rust 解密后写入加密缓存并回执已投递。
+    保险库（密钥包/会话/消息）全部 AES-GCM 加密落盘，重启后历史与棘轮都还在。
+    `AppStore` 增加 3 秒轮询，把新消息合并进会话列表与未读计数。
+    联调测试跑通「A 发 → B 解 → B 回 → A 解」与重启后缓存读取。
+    限制：历史只来自本地缓存；桌面端保险库密钥仅受文件权限保护。
 130. Rust 补齐 **会话存储与 sealed 回信**：按 `sessionId` 索引双棘轮状态，
     记录从标签信封学到的标签（去重收敛），`compose_sealed` 包标签信封后加密，
     `open_sealed` 解密后学习标签；解密失败不写回状态，坏消息不会让棘轮失步。

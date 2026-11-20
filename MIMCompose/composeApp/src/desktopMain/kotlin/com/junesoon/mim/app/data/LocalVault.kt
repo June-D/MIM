@@ -1,0 +1,125 @@
+package com.junesoon.mim.app.data
+
+import com.junesoon.mim.core.MimCoreNative
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.attribute.PosixFilePermission
+
+/**
+ * 本地保险库：密钥包、会话存储、消息缓存。
+ *
+ * <p>所有内容都用 AES-256-GCM 加密（`MimCoreNative.encryptState`），
+ * 密钥保存在 `key.bin` 并限制为 0600。桌面端只能做到「文件权限保护」；
+ * Android/iOS 应把这段密钥换成 Keystore / Keychain。
+ */
+class LocalVault(
+    private val root: Path,
+    val username: String,
+    val deviceId: String,
+) {
+
+    private val dir: Path = root.resolve(username).resolve(deviceId)
+
+    init {
+        Files.createDirectories(dir)
+    }
+
+    private val key: ByteArray by lazy { loadOrCreateKey() }
+
+    fun loadBundle(): RustKeyBundle? =
+        read("bundle.bin")?.let {
+            runCatching { JsonCodec.decode<RustKeyBundle>(it) }.getOrNull()
+        }
+
+    fun saveBundle(bundle: RustKeyBundle) {
+        write("bundle.bin", JsonCodec.encode(bundle))
+    }
+
+    fun loadStore(): String = read("sessions.bin") ?: EMPTY_STORE
+
+    fun saveStore(storeJson: String) {
+        write("sessions.bin", storeJson)
+    }
+
+    fun loadMessages(): List<CachedMessage> =
+        read("messages.bin")?.let {
+            runCatching { JsonCodec.decode<List<CachedMessage>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveMessages(messages: List<CachedMessage>) {
+        write("messages.bin", JsonCodec.encode(messages))
+    }
+
+    private fun loadOrCreateKey(): ByteArray {
+        val file = dir.resolve("key.bin")
+        if (Files.exists(file)) {
+            return Files.readAllBytes(file)
+        }
+        val created = MimCoreNative.randomBytes(32)
+        Files.write(file, created)
+        restrict(file)
+        return created
+    }
+
+    private fun read(name: String): String? {
+        val file = dir.resolve(name)
+        if (!Files.exists(file)) {
+            return null
+        }
+        val sealed = String(Files.readAllBytes(file), Charsets.UTF_8)
+        return runCatching {
+            MimCoreNative.decryptState(sealed.toByteArray(Charsets.UTF_8), key)
+                .toString(Charsets.UTF_8)
+        }.getOrNull()
+    }
+
+    private fun write(name: String, content: String) {
+        val nonce = MimCoreNative.randomBytes(12)
+        val sealed = MimCoreNative.encryptState(content.toByteArray(Charsets.UTF_8), key, nonce)
+        val file = dir.resolve(name)
+        Files.write(file, sealed)
+        restrict(file)
+    }
+
+    private fun restrict(file: Path) {
+        runCatching {
+            Files.setPosixFilePermissions(
+                file,
+                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE),
+            )
+        }
+    }
+
+    companion object {
+        const val EMPTY_STORE = "{\"sessions\":[]}"
+
+        /** 默认位置：`~/.mim`，可用 `-Dmim.vault.dir` 覆盖（测试用）。 */
+        fun defaultRoot(): Path =
+            Paths.get(System.getProperty("mim.vault.dir") ?: "${System.getProperty("user.home")}/.mim")
+
+        /** 每台安装一个稳定设备标识，存在用户名目录下。 */
+        fun deviceIdFor(root: Path, username: String): String {
+            val dir = root.resolve(username)
+            Files.createDirectories(dir)
+            val file = dir.resolve("device.txt")
+            if (Files.exists(file)) {
+                return String(Files.readAllBytes(file), Charsets.UTF_8).trim()
+            }
+            val created = "desktop-" + java.util.UUID.randomUUID().toString().take(8)
+            Files.write(file, created.toByteArray(Charsets.UTF_8))
+            return created
+        }
+    }
+}
+
+/** 消息缓存条目：重启后聊天仍可见。 */
+@kotlinx.serialization.Serializable
+data class CachedMessage(
+    val contactId: String,
+    val id: String,
+    val fromMe: Boolean,
+    val text: String,
+    val time: String,
+    val epochMs: Long,
+)

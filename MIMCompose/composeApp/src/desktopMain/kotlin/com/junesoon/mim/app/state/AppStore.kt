@@ -2,9 +2,12 @@ package com.junesoon.mim.app.state
 
 import com.junesoon.mim.app.data.DemoBackend
 import com.junesoon.mim.app.data.MessagingBackend
+import com.junesoon.mim.app.data.IncomingMessage
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -72,6 +75,7 @@ class AppStore(
                             busy = false,
                         )
                     }
+                    startPolling()
                 }
                 .onFailure { error ->
                     _state.update { it.copy(busy = false, error = error.message ?: "登录失败") }
@@ -125,4 +129,49 @@ class AppStore(
     fun clearError() {
         _state.update { it.copy(error = null) }
     }
+
+    /**
+     * 轮询新消息：真实后端会解密并落缓存，演示后端返回空。
+     *
+     * 每 3 秒一次；页面离开登录态后不退出循环，因为断线重连仍需要它。
+     */
+    private fun startPolling() {
+        if (polling) {
+            return
+        }
+        polling = true
+        scope.launch {
+            while (scope.isActive) {
+                delay(3_000)
+                val currentToken = token ?: continue
+                runCatching { backend.poll(currentToken) }
+                    .onSuccess { incoming -> incoming.forEach(::mergeIncoming) }
+            }
+        }
+    }
+
+    private fun mergeIncoming(incoming: IncomingMessage) {
+        _state.update { state ->
+            val existing = state.messages[incoming.contactId].orEmpty()
+            if (existing.any { it.id == incoming.message.id }) {
+                return@update state
+            }
+            val chatOpen = (state.screen as? Screen.Chat)?.contactId == incoming.contactId
+            state.copy(
+                messages = state.messages + (incoming.contactId to (existing + incoming.message)),
+                contacts = state.contacts.map { contact ->
+                    when {
+                        contact.id != incoming.contactId -> contact
+                        chatOpen -> contact.copy(subtitle = incoming.message.text)
+                        else -> contact.copy(
+                            subtitle = incoming.message.text,
+                            unread = contact.unread + 1,
+                        )
+                    }
+                },
+            )
+        }
+    }
+
+    private var polling = false
 }

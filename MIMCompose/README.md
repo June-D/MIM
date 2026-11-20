@@ -19,8 +19,10 @@ MIMCompose/
     Main.kt               窗口入口（920×660）
     MimApp.kt             路由分发，只读状态
     domain/Model.kt       Contact / ChatMessage
-    data/MessagingBackend.kt  传输层契约（登录/联系人/历史/发送）
+    data/MessagingBackend.kt  传输层契约（登录/联系人/历史/发送/轮询）
     data/DemoBackend.kt   内存演示实现（含回声，仅用于跑通 UI）
+    data/SecureBackend.kt 真实收发：设备密钥 + 首条消息 + sealed 收发 + 本地缓存
+    data/LocalVault.kt    本地保险库（密钥包/会话/消息，全部加密落盘）
     state/AppStore.kt     唯一状态源：StateFlow + 动作
     ui/Theme.kt           纸墨配色，换主题只改这一处
     ui/LoginScreen.kt
@@ -46,14 +48,29 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 
 ### 当前接入范围
 
-| 能力 | 演示后端 | 真实服务端（HttpBackend） |
+| 能力 | 演示后端 | 真实后端（SecureBackend） |
 |---|---|---|
 | 登录 | 模拟 | `POST /login/token`，令牌绑定设备 |
+| 设备与密钥 | 无 | Rust 生成，登记 + 上传（缺失时自动补） |
 | 联系人 | 固定两条 | `GET /chat/contacts`（分组展开） |
-| 聊天历史 | 内存 | **未接入**（返回空） |
-| 发送 | 内存回声 | **未接入**（显式报错，不造假数据） |
+| 发送 | 内存回声 | 首条消息 / sealed 消息，Rust 组装后投递 |
+| 接收 | 无 | 轮询 `/undelivered`，Rust 解密 + 落缓存 |
+| 历史 | 内存 | 本地**加密缓存**（换设备或清库后不保留） |
 
-历史与发送需要端到端加密链路，是协议层迁移的下一步。
+协议计算全部在 Rust 核心；Kotlin 只做传输、入库与 UI 语义。
+
+### 本地保险库
+
+默认在 `~/.mim/<用户名>/<设备>/`（可用 `-Dmim.vault.dir` 覆盖）：
+
+- `key.bin` —— 32 字节保险库密钥（0600）
+- `bundle.bin` —— 身份密钥 / 预密钥（加密）
+- `sessions.bin` —— 会话存储（加密）
+- `messages.bin` —— 消息缓存（加密）
+- 同级的 `device.txt` 保存稳定设备标识
+
+桌面端只能做到文件权限保护；Android/iOS 应改用 Keystore / Keychain。
+清空该目录等于丢弃本设备的私钥与会话，旧消息将无法解密。
 
 ### 设备与密钥（KeyRegistry）
 
