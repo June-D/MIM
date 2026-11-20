@@ -1,14 +1,20 @@
 package com.junesoon.mim.websocket;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.junesoon.mim.crypto.DhKeyUtil;
 import com.junesoon.mim.crypto.IdentityStore;
 import com.junesoon.mim.crypto.PreKeyStore;
 import com.junesoon.mim.crypto.RatchetService;
 import com.junesoon.mim.crypto.SessionState;
 import java.io.BufferedReader;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Socket;
 import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -17,10 +23,15 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 /**
  * WebSocket 设备级路由端到端验证。
@@ -36,6 +47,8 @@ public final class WsDevicePushE2eTest {
     private static final String WS_URL = System.getenv().getOrDefault("MIM_WS_URL",
         "ws://127.0.0.1:8080/websocket/test");
     private static final String PASSWORD = "pass1234";
+
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     private static int passed = 0;
     private static int failed = 0;
@@ -167,27 +180,30 @@ public final class WsDevicePushE2eTest {
 
     /**
      * 记录收到的消息，供断言使用。
+     *
+     * <p>服务端下行通知是 {@code BaseNotify}：只关心 100010（新消息）。
      */
     private static final class RecordingClient {
-        private final WSClient client;
-        private final List<String> rawMessages = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private final MiniWsClient client;
+        private final List<String> rawMessages = new CopyOnWriteArrayList<>();
         private final CountDownLatch latch = new CountDownLatch(1);
         volatile CipherMessageView lastMessage;
 
-        RecordingClient(WSClient client) {
+        RecordingClient(MiniWsClient client) {
             this.client = client;
-            client.addListener(notify -> {
-                if (notify.getType() == null || notify.getType() != WSClient.NOTIFY_NEW_MESSAGE) {
-                    return;
+            client.addListener(raw -> {
+                try {
+                    JsonNode envelope = MAPPER.readTree(raw);
+                    if (envelope.path("type").asInt() != 100010) {
+                        return;
+                    }
+                    JsonNode data = envelope.path("data");
+                    lastMessage = new CipherMessageView(data);
+                    rawMessages.add(data.path("ciphertext").asText(""));
+                    latch.countDown();
+                } catch (Exception ignored) {
+                    // 心跳或非 JSON 帧不参与断言
                 }
-                if (!(notify.getData() instanceof com.junesoon.mim.model.CipherMessage)) {
-                    return;
-                }
-                com.junesoon.mim.model.CipherMessage msg =
-                    (com.junesoon.mim.model.CipherMessage) notify.getData();
-                lastMessage = new CipherMessageView(msg);
-                rawMessages.add(msg.getCiphertext() == null ? "" : msg.getCiphertext());
-                latch.countDown();
             });
         }
 
@@ -218,12 +234,198 @@ public final class WsDevicePushE2eTest {
 
     private static RecordingClient connect(String username, String deviceId, String token)
         throws Exception {
-        java.util.Map<String, String> headers = new java.util.HashMap<>();
+        Map<String, String> headers = new java.util.HashMap<>();
         headers.put("Authorization", "Bearer " + token);
         headers.put("X-Device-Id", deviceId);
-        WSClient client = WSClient.createWithHeaders(URI.create(WS_URL), headers);
+        MiniWsClient client = new MiniWsClient(URI.create(WS_URL), headers);
         client.connectBlocking();
         return new RecordingClient(client);
+    }
+
+    /**
+     * 极简 WebSocket 客户端（RFC 6455 文本帧）。
+     *
+     * <p>端到端脚本不再依赖原 JavaFX 客户端的 WSClient；这里只需要
+     * 握手、收文本帧、回 pong、关闭，够验证设备级路由即可。
+     */
+    private static final class MiniWsClient {
+
+        private final URI uri;
+        private final Map<String, String> headers;
+        private final List<Consumer<String>> listeners = new CopyOnWriteArrayList<>();
+        private final AtomicBoolean open = new AtomicBoolean(false);
+        private final Random random = new Random();
+        private Socket socket;
+        private InputStream input;
+        private OutputStream output;
+
+        MiniWsClient(URI uri, Map<String, String> headers) {
+            this.uri = uri;
+            this.headers = headers;
+        }
+
+        void addListener(Consumer<String> listener) {
+            listeners.add(listener);
+        }
+
+        boolean isOpen() {
+            return open.get() && socket != null && !socket.isClosed();
+        }
+
+        void connectBlocking() throws IOException {
+            int port = uri.getPort() <= 0 ? 80 : uri.getPort();
+            socket = new Socket(uri.getHost(), port);
+            socket.setTcpNoDelay(true);
+            input = socket.getInputStream();
+            output = socket.getOutputStream();
+
+            byte[] nonce = new byte[16];
+            random.nextBytes(nonce);
+            String path = uri.getRawPath() == null || uri.getRawPath().isEmpty()
+                ? "/" : uri.getRawPath();
+            String key = Base64.getEncoder().encodeToString(nonce);
+
+            StringBuilder request = new StringBuilder();
+            request.append("GET ").append(path).append(" HTTP/1.1\r\n")
+                .append("Host: ").append(uri.getHost()).append(':').append(port).append("\r\n")
+                .append("Upgrade: websocket\r\n")
+                .append("Connection: Upgrade\r\n")
+                .append("Sec-WebSocket-Key: ").append(key).append("\r\n")
+                .append("Sec-WebSocket-Version: 13\r\n");
+            for (Map.Entry<String, String> header : headers.entrySet()) {
+                request.append(header.getKey()).append(": ").append(header.getValue()).append("\r\n");
+            }
+            request.append("\r\n");
+            output.write(request.toString().getBytes(StandardCharsets.ISO_8859_1));
+            output.flush();
+
+            String status = readLine(input);
+            if (status == null || !status.contains("101")) {
+                throw new IllegalStateException("WebSocket 握手失败：" + status);
+            }
+            String line;
+            while ((line = readLine(input)) != null && !line.isEmpty()) {
+                // 读完响应头
+            }
+            open.set(true);
+            Thread reader = new Thread(this::readLoop, "mini-ws-reader");
+            reader.setDaemon(true);
+            reader.start();
+        }
+
+        private void readLoop() {
+            try {
+                while (open.get()) {
+                    int first = input.read();
+                    if (first < 0) {
+                        break;
+                    }
+                    int second = input.read();
+                    if (second < 0) {
+                        break;
+                    }
+                    int opcode = first & 0x0F;
+                    long length = second & 0x7F;
+                    if (length == 126) {
+                        length = ((long) input.read() << 8) | input.read();
+                    } else if (length == 127) {
+                        length = 0;
+                        for (int index = 0; index < 8; index++) {
+                            length = (length << 8) | input.read();
+                        }
+                    }
+                    byte[] payload = new byte[(int) length];
+                    int offset = 0;
+                    while (offset < payload.length) {
+                        int read = input.read(payload, offset, payload.length - offset);
+                        if (read < 0) {
+                            break;
+                        }
+                        offset += read;
+                    }
+                    switch (opcode) {
+                        case 0x1:
+                            String text = new String(payload, StandardCharsets.UTF_8);
+                            for (Consumer<String> listener : listeners) {
+                                listener.accept(text);
+                            }
+                            break;
+                        case 0x9:
+                            sendFrame(0xA, payload);
+                            break;
+                        case 0x8:
+                            close();
+                            return;
+                        default:
+                            break;
+                    }
+                }
+            } catch (IOException ignored) {
+                // 连接断开即退出读循环
+            } finally {
+                open.set(false);
+            }
+        }
+
+        private synchronized void sendFrame(int opcode, byte[] payload) throws IOException {
+            if (socket == null || socket.isClosed()) {
+                return;
+            }
+            ByteArrayOutputStream frame = new ByteArrayOutputStream();
+            frame.write(0x80 | opcode);
+            int length = payload.length;
+            if (length < 126) {
+                frame.write(0x80 | length);
+            } else if (length < 65536) {
+                frame.write(0x80 | 126);
+                frame.write((length >> 8) & 0xFF);
+                frame.write(length & 0xFF);
+            } else {
+                frame.write(0x80 | 127);
+                for (int shift = 56; shift >= 0; shift -= 8) {
+                    frame.write((int) (((long) length >> shift) & 0xFF));
+                }
+            }
+            byte[] mask = new byte[4];
+            random.nextBytes(mask);
+            frame.write(mask);
+            for (int index = 0; index < payload.length; index++) {
+                frame.write(payload[index] ^ mask[index % 4]);
+            }
+            output.write(frame.toByteArray());
+            output.flush();
+        }
+
+        void close() {
+            open.set(false);
+            try {
+                if (socket != null) {
+                    socket.close();
+                }
+            } catch (IOException ignored) {
+                // 关闭失败不影响测试结论
+            }
+        }
+
+        private static String readLine(InputStream in) throws IOException {
+            ByteArrayOutputStream line = new ByteArrayOutputStream();
+            int value;
+            while ((value = in.read()) >= 0) {
+                if (value == '\n') {
+                    break;
+                }
+                if (value != '\r') {
+                    line.write(value);
+                }
+                if (line.size() > 8192) {
+                    break;
+                }
+            }
+            if (value < 0 && line.size() == 0) {
+                return null;
+            }
+            return new String(line.toByteArray(), StandardCharsets.ISO_8859_1);
+        }
     }
 
     // ==================== 密钥准备 ====================
@@ -260,18 +462,19 @@ public final class WsDevicePushE2eTest {
         Boolean senderUsedOneTimePreKey;
         Integer consumedOneTimePreKeyId;
 
-        CipherMessageView(com.junesoon.mim.model.CipherMessage msg) {
-            this.targetDeviceId = msg.getTargetDeviceId();
-            this.ratchetPublic = msg.getRatchetPublic();
-            this.previousChainLength = msg.getPreviousChainLength() == null
-                ? 0 : msg.getPreviousChainLength();
-            this.messageNumber = msg.getMessageNumber() == null ? 0 : msg.getMessageNumber();
-            this.iv = msg.getIv();
-            this.ciphertext = msg.getCiphertext();
-            this.senderIdentityKey = msg.getSenderIdentityKey();
-            this.senderEphemeralKey = msg.getSenderEphemeralKey();
-            this.senderUsedOneTimePreKey = msg.getSenderUsedOneTimePreKey();
-            this.consumedOneTimePreKeyId = msg.getConsumedOneTimePreKeyId();
+        CipherMessageView(JsonNode message) {
+            this.targetDeviceId = message.path("targetDeviceId").asText(null);
+            this.ratchetPublic = message.path("ratchetPublic").asText(null);
+            this.previousChainLength = message.path("previousChainLength").asInt(0);
+            this.messageNumber = message.path("messageNumber").asInt(0);
+            this.iv = message.path("iv").asText(null);
+            this.ciphertext = message.path("ciphertext").asText(null);
+            this.senderIdentityKey = message.path("senderIdentityKey").asText(null);
+            this.senderEphemeralKey = message.path("senderEphemeralKey").asText(null);
+            this.senderUsedOneTimePreKey = message.has("senderUsedOneTimePreKey")
+                ? message.path("senderUsedOneTimePreKey").asBoolean() : null;
+            this.consumedOneTimePreKeyId = message.has("consumedOneTimePreKeyId")
+                ? message.path("consumedOneTimePreKeyId").asInt() : null;
         }
     }
 

@@ -156,16 +156,11 @@ WebSocket 只在握手时校验 JWT；服务端每分钟关闭一次已过期的
 
 ### 依赖
 
-- 服务端 **JDK 17**（无需 JavaFX）
-- 客户端 **JDK 8**（需**带 JavaFX**，如 Zulu FX 8；Corretto 8 不含 JavaFX）
-- Maven Wrapper（`./mvnw`）固定 **Maven 3.9.9**；也可使用系统 Maven 3.6.3+。
+- **JDK 17**：服务端、协议核心与 PC 客户端都用它
+- Rust 工具链（cargo）：安全内核与动态库
+- Maven Wrapper（`./mvnw`）固定 **Maven 3.9.9**；也可使用系统 Maven 3.6.3+
 - MySQL 8 / Redis 5+
 
-```bash
-curl -L -o zulu8fx.zip https://cdn.azul.com/zulu/bin/zulu8.98.0.111-ca-fx-jdk8.0.512-macosx_aarch64.zip
-unzip -q zulu8fx.zip -d ~/jdk
-export JAVA_HOME=~/jdk/zulu8.98.0.111-ca-fx-jdk8.0.512-macosx_aarch64/Contents/Home
-```
 
 ### 建库
 
@@ -242,8 +237,8 @@ export MIM_SENDER_CERT_ENABLED=true
 > 正在被 JVM 读取的 `target/*.jar` 被删掉会让运行中的服务端抛
 > `NoSuchFileException`，表现为登录突然 500。`--stop` 可停止已有实例。
 
-> 服务端需要 JDK 17；Maven 已由 `mvnw` 固定为 3.9.9。客户端仍需带 JavaFX 的 JDK 8。
-> 两个 JDK 可以并存，分别通过 `JAVA_HOME` / `MIM_CLIENT_JAVA_HOME` 指定。
+> 全仓库只需要 JDK 17；Maven 已由 `mvnw` 固定为 3.9.9。
+> 协议核心以 source/target 1.8 编译，但运行在 17 上，不再需要额外的 JDK 8 与 JavaFX。
 
 > `MIM_MASTER_KEY` 是 JWT RSA 私钥的静态加密密钥（Base64 32 字节）。
 > 配置后请务必备份；丢失或错误会导致服务端拒绝启动，且不会静默换钥。
@@ -322,15 +317,15 @@ export MIM_EMAIL_KEY_PREVIOUS_COMMAND='vault kv get -field=key secret/mim/email-
 - 一次只轮换一类密钥；完成并确认后再轮换另一类。保留 `_PREVIOUS` 期间不要
   再轮换到第三把密钥。
 
-### 启动客户端
+### 启动 PC 客户端
 
 ```bash
-cd MIMClient
-../mvnw compile
-../mvnw exec:java -Dexec.mainClass=com.junesoon.mim.MIMClientStarter
+MIMCompose/run-desktop.sh          # 真实服务端 + 自动构建 JNI 动态库
+MIMCompose/run-desktop.sh --check  # 只检查环境，不打开窗口
 ```
 
-首次登录生成身份密钥对，加密存到 `~/.mim/identity/`；会话棘轮状态存到 `~/.mim/sessions/`。
+保险库在 `~/.mim/<用户名>/<设备>/`：密钥包、会话状态、消息缓存、离线队列、
+屏蔽名单全部 AES-GCM 加密，密钥文件 0600。
 
 ### 自测
 
@@ -345,10 +340,7 @@ cd MIMCoreRust && cargo test      # 19 项：原语/ECDH/X3DH/握手/双棘轮/�
 cd MIMCoreRust && ./tools/interop.sh   # Rust 发起 → Java 解密回信 → Rust 解密（真实互通）
 cd MIMCoreRust && ./tools/ffi_test.sh  # C 程序经 C ABI 跑完整会话与状态恢复
 cd MIMCoreRust && ./tools/jni_test.sh  # 桌面 JVM 经 JNI 跑完整会话（Android 同款）
-cd MIMClient && ../mvnw test      # 11 项客户端用例（依赖已安装的 mim-core）
 
-# 首次构建顺序：先安装协议核心，再构建客户端
-cd MIMCore && ../mvnw install -DskipTests && cd ../MIMClient && ../mvnw test
 
 # PC 客户端（Compose；首次构建会下载 Gradle 与 Compose 依赖）
 cd MIMCompose && ./gradlew :composeApp:run            # 演示后端
@@ -372,7 +364,8 @@ export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_test?serverTimezone=Asia
 数据库不可用时集成测试会**跳过**（本地友好）；CI 里设置
 `MIM_TEST_DB_REQUIRED=true` 则**明确失败**，避免「0 个测试 + BUILD SUCCESS」的假绿。
 
-端到端回归需要先起 MySQL/Redis/服务端，然后：
+端到端脚本位于 `MIMCore/src/test/e2e`（只依赖 mim-core 与 JDK 自带 HTTP）。
+需要先起 MySQL/Redis/服务端，然后：
 
 ```bash
 ./verify.sh --e2e

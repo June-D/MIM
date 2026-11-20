@@ -30,11 +30,16 @@ class HttpBackend(private val baseUrl: String) : MessagingBackend {
         }
     }
 
-    override suspend fun login(username: String, password: String, deviceName: String): LoginResult {
+    override suspend fun login(
+        username: String,
+        password: String,
+        deviceName: String,
+        code: String?,
+    ): LoginResult {
         val response: LoginResponse = client.post("$baseUrl/login/token") {
             header("X-Device-Id", deviceName.ifBlank { "compose-desktop" })
             contentType(ContentType.Application.Json)
-            setBody(LoginRequest(username, password))
+            setBody(LoginRequest(username, password, code))
         }.body()
 
         val token = response.data
@@ -67,7 +72,11 @@ class HttpBackend(private val baseUrl: String) : MessagingBackend {
 }
 
 @Serializable
-private data class LoginRequest(val username: String, val password: String)
+private data class LoginRequest(
+    val username: String,
+    val password: String,
+    val code: String? = null,
+)
 
 @Serializable
 private data class LoginResponse(

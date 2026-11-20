@@ -16,7 +16,12 @@ import com.junesoon.mim.app.domain.UserSummary
  */
 interface MessagingBackend {
 
-    suspend fun login(username: String, password: String, deviceName: String): LoginResult
+    suspend fun login(
+        username: String,
+        password: String,
+        deviceName: String,
+        code: String? = null,
+    ): LoginResult
 
     suspend fun contacts(token: String): List<Contact>
 

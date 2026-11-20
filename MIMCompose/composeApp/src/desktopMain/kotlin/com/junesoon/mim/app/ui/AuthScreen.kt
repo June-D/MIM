@@ -63,8 +63,9 @@ fun AuthScreen(
     initialPassword: String,
     initialDeviceName: String,
     rememberMe: Boolean,
+    needsTwoFactor: Boolean,
     onModeChange: (AuthMode) -> Unit,
-    onLogin: (String, String, String, Boolean) -> Unit,
+    onLogin: (String, String, String, Boolean, String) -> Unit,
     onRegister: (String, String, String) -> Unit,
     onSendCode: (String) -> Unit,
     onReset: (String, String, String) -> Unit,
@@ -81,6 +82,7 @@ fun AuthScreen(
     var confirm by remember(mode) { mutableStateOf("") }
     var email by remember(mode) { mutableStateOf("") }
     var code by remember(mode) { mutableStateOf("") }
+    var twoFactorCode by remember(mode) { mutableStateOf("") }
     var deviceName by remember(initialDeviceName) {
         mutableStateOf(initialDeviceName.ifBlank { "Desktop" })
     }
@@ -147,13 +149,31 @@ fun AuthScreen(
                             onValueChange = { deviceName = it },
                             label = "这台设备的名称",
                         )
+                        if (needsTwoFactor) {
+                            MimField(
+                                value = twoFactorCode,
+                                onValueChange = { twoFactorCode = it; localError = null },
+                                label = "二次验证码 / 恢复码",
+                            )
+                            Text(
+                                "输入 6 位动态验证码；丢失验证器时可用一次性恢复码。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                         RememberRow(remember = remember, onChange = { remember = it })
                         PrimaryButton(
                             text = "登录",
                             busy = busy,
                             onClick = {
-                                localError = null
-                                onLogin(username, password, deviceName, remember)
+                                localError = if (needsTwoFactor && twoFactorCode.isBlank()) {
+                                    "请输入二次验证码或恢复码"
+                                } else {
+                                    null
+                                }
+                                if (localError == null) {
+                                    onLogin(username, password, deviceName, remember, twoFactorCode)
+                                }
                             },
                         )
                         Row(

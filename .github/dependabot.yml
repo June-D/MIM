@@ -20,12 +20,6 @@ updates:
       - dependency-name: "org.kordamp.ikonli:*"
         update-types: ["version-update:semver-major"]
 
-  - package-ecosystem: maven
-    directory: /MIMClient
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-
   - package-ecosystem: github-actions
     directory: /
     schedule:

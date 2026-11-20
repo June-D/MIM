@@ -35,6 +35,8 @@ MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Ru
                           SessionStore、PreKeyStore、IdentityStore、SecretBox、TrustStore、
                           SyncEnvelope、SenderCertEnvelope、TagEnvelope、BlindRsaToken
   src/test/java/          129 项协议单测
+  src/test/e2e/           端到端脚本（30 + 9 + 18 + 7 + 13 项，需真实服务端；
+                          只依赖 mim-core 与 JDK 自带 HTTP，不依赖 UI）
 
 MIMCompose/             PC 主客户端（Compose Multiplatform，JVM 17）
   composeApp/           登录 / 注册 / 联系人 / 添加 / 聊天 / 设备
@@ -44,14 +46,4 @@ MIMCompose/             PC 主客户端（Compose Multiplatform，JVM 17）
   .../ui               Theme（视觉系统）、Icons、Avatar、各页面
   README.md             运行方式与接入说明
 
-MIMClient/
-  crypto/                 DemoBot（联调用的演示客户端，依赖 WebSocket，故留在客户端）
-  service/                DeviceIdentity（设备标识）、KeyManager、PreKeyManager、
-                          MessageService（按设备收发+棘轮）
-  feign/                  Login / Register / Device / Key / PreKey / Message
-  websocket/              WSClient（只收推送）
-  utils/                  TlsSupport（HTTPS/WSS 信任配置）
-  gui/                    Login / Main / Chat / Loading
-  src/test/java/          11 项单元测试（其余协议测试在 MIMCore）
-  src/test/e2e/           多设备 / sealed / WebSocket 端到端回归（需外部服务，手动运行）
 ```

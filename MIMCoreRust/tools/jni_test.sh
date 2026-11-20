@@ -15,11 +15,7 @@ if ! command -v cargo >/dev/null 2>&1; then
 fi
 command -v cargo >/dev/null 2>&1 || { echo "需要 cargo（Rust 工具链）" >&2; exit 1; }
 
-if [ -x /Users/zhd/jdk/zulu8.98.0.111-ca-fx-jdk8.0.512-macosx_aarch64/Contents/Home/bin/javac ]; then
-  export JAVA_HOME="/Users/zhd/jdk/zulu8.98.0.111-ca-fx-jdk8.0.512-macosx_aarch64/Contents/Home"
-else
-  export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home -v 8 2>/dev/null || true)}"
-fi
+export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null || true)}"
 export PATH="$JAVA_HOME/bin:$PATH"
 command -v javac >/dev/null 2>&1 || { echo "需要 JDK（javac）" >&2; exit 1; }
 

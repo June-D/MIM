@@ -26,7 +26,12 @@ class DemoBackend : MessagingBackend {
         )
     }
 
-    override suspend fun login(username: String, password: String, deviceName: String): LoginResult {
+    override suspend fun login(
+        username: String,
+        password: String,
+        deviceName: String,
+        code: String?,
+    ): LoginResult {
         // 演示模式不校验密码强度；真实实现服务端会拒绝弱口令。
         val name = username.ifBlank { "未命名用户" }
         return LoginResult(

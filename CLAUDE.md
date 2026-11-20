@@ -1,7 +1,6 @@
 # MIM · 端到端加密私密通讯（项目宪法）
 
-Spring Boot 服务端 + Compose Multiplatform 桌面客户端（`MIMCompose`，主客户端）
-+ JavaFX 参考客户端（`MIMClient`）。
+Spring Boot 服务端 + Compose Multiplatform 桌面客户端（`MIMCompose`，唯一 UI）。
 **完整共识见根目录 `README.md` 的《产品基调（共识）》，动手前必须先读。**
 本文件只做 L1 摘要与导航，冲突时以 README 那一节为准。
 
@@ -19,7 +18,6 @@ MIMCoreRust/   Rust 安全内核：X3DH、双棘轮、HKDF、AES-GCM、信封、
                证书验签、状态加密；出口 JNI 与 C ABI
 MIMCore/       Java 协议核心：行为基准与测试向量（不在生产路径）
 MIMCompose/    Compose 桌面客户端（JVM 17）：传输、缓存、UI 语义
-MIMClient/     JavaFX 客户端：互通参考与回归验证，不再加新功能
 ```
 
 ## 硬约束
@@ -46,8 +44,9 @@ MIMClient/     JavaFX 客户端：互通参考与回归验证，不再加新功�
 
 ## 当前边界
 
-已完成：注册/登录/记住账号、好友申请与备注、屏蔽、双向移除、一对一收发、
+已完成：注册/登录/二次验证/记住账号、好友申请与备注、屏蔽、双向移除、一对一收发、
 撤回、已读、未读、清除、离线队列、WebSocket 推送、设备管理、安全码、附件外的一切文本能力。
-未完成：移动端、自有设备历史同步、附件/图片、Compose 端 TOTP、头像上传、部署文档。
+端到端回归脚本位于 `MIMCore/src/test/e2e`（只依赖 mim-core 与 JDK）。
+未完成：移动端、自有设备历史同步、附件/图片、二次验证开启界面、头像上传、部署文档。
 
 [PROTOCOL]: Update this header on change, then check README.md

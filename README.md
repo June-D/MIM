@@ -3,8 +3,8 @@
 [![CI](https://github.com/June-D/MIM/actions/workflows/ci.yml/badge.svg)](https://github.com/June-D/MIM/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Spring Boot 服务端 + Compose Multiplatform 桌面客户端（`MIMCompose`，当前主客户端）；
-JavaFX 客户端（`MIMClient`）保留为互通参考。**只做一对一私密交流，不做群聊**。
+Spring Boot 服务端 + Compose Multiplatform 桌面客户端（`MIMCompose`）。
+**只做一对一私密交流，不做群聊**。
 服务端不持有私钥，只保存必要的路由元数据与密文；私钥与所有会话密钥永远只在客户端。
 
 > 动手之前先读下面的《产品基调》。它是共识，不是建议。
@@ -81,14 +81,14 @@ MIMServer（Java）──────────► 鉴权、设备登记、预
 明确不做：群聊、云端明文备份、服务端内容扫描、以匿名为主卖点。
 
 尚未实现（不得在界面或文档中暗示已有）：附件 / 图片 / 语音、消息搜索、
-自有设备间的历史同步副本、Compose 端 TOTP 登录、头像上传、移动端。
+自有设备间的历史同步副本、二次验证的开启/管理界面（登录已支持验证码与恢复码）、
+头像上传、移动端。
 
 ### 五、支持的客户端
 
 | 客户端 | 目录 | 定位 | 状态 |
 |---|---|---|---|
-| PC 桌面 | `MIMCompose` | 当前主客户端，Compose Multiplatform + JVM 17 | 日常可用 |
-| JavaFX 桌面 | `MIMClient` | 参考实现 / 互通与回归验证，Java 8 + JavaFX 8 | 保留，不再加新功能 |
+| PC 桌面 | `MIMCompose` | 当前唯一桌面客户端，Compose Multiplatform + JVM 17 | 日常可用 |
 | Android | — | 复用 Compose UI 与 JNI | 未交付 |
 | iOS | — | 复用 C ABI 与 SwiftUI | 未交付 |
 
@@ -98,7 +98,7 @@ MIMServer（Java）──────────► 鉴权、设备登记、预
 ### 六、产品的完成度
 
 - **协议与服务端**：可运行，回归完整。服务端 210 项、协议核心 129 项、
-  Rust 19 项、JavaFX 客户端 11 项；端到端 30 + 9 + 18 + 7 + 13 项。
+  Rust 19 项；端到端 30 + 9 + 18 + 7 + 13 项（脚本在 `MIMCore/src/test/e2e`）。
 - **PC 客户端**：可日常使用。注册到聊天、撤回、已读、未读、清除、推送、
   设备管理、安全码、屏蔽、备注、移除好友、记住账号均已打通；
   桌面测试 13 项（6 状态 + 1 本地加密 + 6 真实服务端联调）。
@@ -166,7 +166,6 @@ MIMCompose/run-desktop.sh --check          # 只检查环境
 | `MIMCoreRust` | Rust | 唯一密码学执行内核：X3DH、双棘轮、信封、会话存储、证书验签、状态加密；出口 JNI 与 C ABI |
 | `MIMCore` | Java | 协议核心的行为基准与测试向量；不进入生产执行路径 |
 | `MIMCompose` | Compose Multiplatform / JVM 17 | PC 主客户端：传输、本地加密缓存、状态与 UI 语义 |
-| `MIMClient` | Java 8 / JavaFX 8 | 互通参考与回归验证；不再加新功能 |
 
 数据流：客户端用 Rust 组装密文 → HTTP 提交 → 服务端只落库与推送 →
 对端设备用 Rust 解密并写本地加密缓存。服务端全程不接触明文与私钥。
@@ -191,8 +190,7 @@ MIMCompose/run-desktop.sh --check          # 只检查环境
 | 服务端 | 210 |
 | 协议核心 `MIMCore` | 129 |
 | Rust 内核 `MIMCoreRust` | 19 |
-| JavaFX 客户端 | 11 |
-| Compose 桌面 | 13（6 状态 + 1 本地加密 + 6 真实服务端联调） |
+| Compose 桌面 | 14（6 状态 + 1 本地加密 + 7 真实服务端联调） |
 | 端到端 | 30 + 9 + 18 + 7 + 13 |
 
 `cargo test` 与 `MIMCoreRust/tools/interop.sh` 负责 Rust ⇄ Java 向量对拍；
@@ -215,5 +213,4 @@ MIMCompose/run-desktop.sh --check          # 只检查环境
 
 [MIT License](LICENSE) © 2026 June-D
 
-界面使用系统字体；登录页背景为原创素材；`MIMClient/libs/` 下的 DataFX 8
-快照 jar 仅用于 JavaFX 8 兼容，版权归其作者（Apache License 2.0）。
+界面使用系统字体，不包含不可再分发的商业字体或图片素材。

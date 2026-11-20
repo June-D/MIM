@@ -7,8 +7,7 @@
 #   ./verify.sh --e2e        额外跑端到端回归（需要可连接的 MySQL/Redis）
 #
 # 环境要求：
-#   MIM_SERVER_JAVA_HOME  服务端 JDK 17（无需 JavaFX）
-#   MIM_CLIENT_JAVA_HOME  客户端 JDK 8（必须带 JavaFX，如 Zulu FX 8）
+#   MIM_SERVER_JAVA_HOME  JDK 17（服务端与协议核心都用它；不再需要 JavaFX）
 #
 # 未设置 JAVA_HOME 时脚本会尝试常见路径，找不到则明确报错而不是静默跳过。
 
@@ -16,7 +15,6 @@ set -uo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_DIR="$ROOT_DIR/MIMServer"
-CLIENT_DIR="$ROOT_DIR/MIMClient"
 CORE_DIR="$ROOT_DIR/MIMCore"
 
 RUN_E2E=0
@@ -75,11 +73,6 @@ SERVER_JH="$(pick_java_home "${MIM_SERVER_JAVA_HOME:-}" \
   "/usr/lib/jvm/java-17-openjdk-amd64" \
   "/usr/lib/jvm/temurin-17")" || SERVER_JH=""
 
-CLIENT_JH="$(pick_java_home "${MIM_CLIENT_JAVA_HOME:-}" \
-  "$HOME/jdk/zulu8.98.0.111-ca-fx-jdk8.0.512-macosx_aarch64/Contents/Home" \
-  "$HOME/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home" \
-  "/Library/Java/JavaVirtualMachines/zulu-8.jdk/Contents/Home")" || CLIENT_JH=""
-
 MISSING_JAVA=0
 if [ -z "$SERVER_JH" ]; then
   fail "找不到服务端 JDK 17，请设置 MIM_SERVER_JAVA_HOME"
@@ -88,22 +81,10 @@ else
   ok "服务端 JDK：${SERVER_JH}（$("$SERVER_JH/bin/java" -version 2>&1 | head -1)）"
 fi
 
-if [ -z "$CLIENT_JH" ]; then
-  fail "找不到带 JavaFX 的客户端 JDK 8，请设置 MIM_CLIENT_JAVA_HOME"
-  MISSING_JAVA=1
-else
-  if [ ! -f "${CLIENT_JH}/jre/lib/ext/jfxrt.jar" ] && [ ! -f "${CLIENT_JH}/lib/ext/jfxrt.jar" ]; then
-    fail "客户端 JDK 缺少 JavaFX（未找到 jfxrt.jar）：${CLIENT_JH}"
-    MISSING_JAVA=1
-  else
-    ok "客户端 JDK：${CLIENT_JH}（含 JavaFX）"
-  fi
-fi
 
 if [ "$MISSING_JAVA" -ne 0 ]; then
   echo
   echo "JDK 环境不完整，后续步骤无法执行。" >&2
-  echo "客户端需要带 JavaFX 的 JDK 8，下载方式见 README。" >&2
   exit 1
 fi
 
@@ -137,14 +118,14 @@ section "服务端：编译 + 单元测试"
 section "协议核心 mim-core：编译 + 单元测试"
 (
   cd "$CORE_DIR" || exit 1
-  export JAVA_HOME="$CLIENT_JH"
+  export JAVA_HOME="$SERVER_JH"
   export PATH="$JAVA_HOME/bin:$PATH"
   "$ROOT_DIR/mvnw" -q -o install -DskipTests
 ) && ok "安装到本地仓库" || fail "mim-core 安装失败"
 
 (
   cd "$CORE_DIR" || exit 1
-  export JAVA_HOME="$CLIENT_JH"
+  export JAVA_HOME="$SERVER_JH"
   export PATH="$JAVA_HOME/bin:$PATH"
   "$ROOT_DIR/mvnw" -o test 2>&1 | tail -30
 ) || fail "mim-core 测试失败"
@@ -159,7 +140,7 @@ if command -v cargo >/dev/null 2>&1; then
   ) || fail "Rust 对拍失败"
 
   section "Rust ⇄ Java 互通联调"
-  CLIENT_JAVA_HOME="$CLIENT_JH" "$ROOT_DIR/MIMCoreRust/tools/interop.sh" /tmp/mim-interop > /tmp/mim-interop.log 2>&1 \
+  CLIENT_JAVA_HOME="$SERVER_JH" "$ROOT_DIR/MIMCoreRust/tools/interop.sh" /tmp/mim-interop > /tmp/mim-interop.log 2>&1 \
     && ok "Rust → Java → Rust 双向互通" \
     || fail "互通联调失败（日志：/tmp/mim-interop.log）"
 
@@ -176,23 +157,6 @@ else
   echo
   echo "跳过 Rust 对拍：未找到 cargo（CI 中会执行）"
 fi
-
-# ---------------- 客户端 ----------------
-
-section "客户端：编译 + 单元测试"
-(
-  cd "$CLIENT_DIR" || exit 1
-  export JAVA_HOME="$CLIENT_JH"
-  export PATH="$JAVA_HOME/bin:$PATH"
-  "$ROOT_DIR/mvnw" -q -o clean compile
-) && ok "编译通过" || fail "客户端编译失败"
-
-(
-  cd "$CLIENT_DIR" || exit 1
-  export JAVA_HOME="$CLIENT_JH"
-  export PATH="$JAVA_HOME/bin:$PATH"
-  "$ROOT_DIR/mvnw" -o test 2>&1 | tail -30
-) || fail "客户端测试失败"
 
 # ---------------- 端到端（可选） ----------------
 
@@ -236,14 +200,14 @@ if [ "$RUN_E2E" -eq 1 ]; then
     # 包路径按实际目录推导，避免把类名写死在脚本里。
     TMP_E2E="$(mktemp -d)"
     E2E_OK=1
-    for E2E_FILE in "$CLIENT_DIR"/src/test/e2e/*.java; do
+    for E2E_FILE in "$CORE_DIR"/src/test/e2e/*.java; do
       [ -f "$E2E_FILE" ] || continue
       E2E_NAME="$(basename "$E2E_FILE" .java)"
       echo "--- ${E2E_NAME} ---"
       clear_rate_limits
       (
-        cd "$CLIENT_DIR" || exit 1
-        export JAVA_HOME="$CLIENT_JH"
+        cd "$CORE_DIR" || exit 1
+        export JAVA_HOME="$SERVER_JH"
         export PATH="$JAVA_HOME/bin:$PATH"
         "$ROOT_DIR/mvnw" -o dependency:build-classpath -Dmdep.outputFile="$TMP_E2E/cp.txt" -q
         CP="target/classes:$(cat "$TMP_E2E/cp.txt")"

@@ -8,17 +8,17 @@
 
 - 当前代码：`main` HEAD（以 `git log -1` 为准；Phase 1 初版为 `a2b6458`）
 - CI：见顶部 badge；最近一次服务端/客户端/e2e 全绿
-- 回归基线：服务端 **210** 项、协议核心 **129** 项、Rust **19** 项、JavaFX 客户端 **11** 项、
-  Compose 桌面 **13** 项、e2e **30 + 9 + 18 + 7 + 13** 项
+- 回归基线：服务端 **210** 项、协议核心 **129** 项、Rust **19** 项、
+  Compose 桌面 **14** 项、e2e **30 + 9 + 18 + 7 + 13** 项
 
 ### 已完成
 
-- 服务端 Java 17 / Spring Boot 3.5.16；PC 主客户端为 Compose Multiplatform（JVM 17），
-  JavaFX 客户端保留为互通参考。
+- 服务端 Java 17 / Spring Boot 3.5.16；PC 客户端为 Compose Multiplatform（JVM 17）。
+  JavaFX 客户端已于 2026-11 移除，端到端脚本迁到 `MIMCore/src/test/e2e`。
 - X3DH + Double Ratchet、按设备多端、TOFU/60 位安全码、OPK 预留后消费。
 - 2FA、恢复码、邮箱/TOTP 密钥轮换、JWT 主密钥加密、Redis 安全边界、WS 过期断连。
-- 消息长度填充（能力协商）、协议断代（发送者列彻底移除）；
-  JavaFX 客户端具备跨设备历史同步，Compose 客户端尚未接入自有设备同步副本。
+- 消息长度填充（能力协商）、协议断代（发送者列彻底移除）。
+  Compose 客户端尚未接入自有设备同步副本（原 JavaFX 客户端有过实现，随移除退役）。
 - Phase 2a/2b：发送者证书签发/分发/TOFU 固定，证书是消息归属的唯一来源。
 - Phase 2c：盲签名令牌 + 匿名提交（默认关闭），客户端接入并支持降级。
 - 客户端本地屏蔽名单（匿名消息下唯一可用的滥用拦截手段）。
@@ -50,11 +50,12 @@
 1. **先读**：
    - `docs/sealed-sender-design.md`（重点第 9、10、11 节，实际实现与草案差异）
    - `MIMServer/src/main/java/com/junesoon/mim/service/impl/MessageServiceImpl.java`
-   - `MIMClient/src/main/java/com/junesoon/mim/service/MessageService.java`
+   - `MIMCompose/composeApp/src/desktopMain/kotlin/com/junesoon/mim/app/data/SecureBackend.kt`
+     与 `MIMCoreRust/src/session_store.rs`（客户端收发与棘轮状态）
    - `MIMServer/src/main/java/com/junesoon/mim/service/impl/SenderCertServiceImpl.java`
      与 `responses/SenderCertificate.java`（2a 的规范化串）
-   - `MIMClient/src/main/java/com/junesoon/mim/service/HistorySync.java` 与
-     `MIMClient/src/main/java/com/junesoon/mim/crypto/SyncEnvelope.java`（跨设备撤回归属这条链路）
+   - `docs/sealed-sender-design.md` 第 11 节（跨设备同步副本的归属设计；
+     原 JavaFX 实现已随客户端移除，重建时以此为准）
    - `MIMServer/sql/e2ee.sql` 末尾的升级补丁
 2. **Phase 2（进行中）**：2a、2b 已完成并默认关闭；`SenderCertE2eTest`
    已覆盖服务端契约与真实双棘轮往返，但 **`MessageService` 的接线仍只在
@@ -63,7 +64,7 @@
    但**预密钥领取与多端同步仍会关联账号**，所以只能宣称「提交与落库不含发送者」，
    不能宣称完全匿名。下一步：客户端侧拉黑、清理 `idx_ref_*`。见第 11 节。
 3. **运维收尾**：KMS SDK 直连（目前只有 CLI 命令桥接）、真实 SMTP、TOFU 人工核对流程。
-4. **长期迁移**：客户端 JavaFX 8/Boot 2.7 BOM 暂不升级；服务端保持 Java 17。
+4. **长期迁移**：全仓库统一 JDK 17；后续移动端另立 target，不再引入 JavaFX。
 
 ### 关键实现点
 
@@ -87,9 +88,8 @@
 ### 运行与验证
 
 ```bash
-# 服务端 JDK 17；客户端必须带 JavaFX 的 JDK 8
+# 全仓库只需要 JDK 17
 export MIM_SERVER_JAVA_HOME=/path/to/jdk-17
-export MIM_CLIENT_JAVA_HOME=/path/to/zulu-fx-8
 
 # 集成测试/本地 MySQL（仓库默认 3306；本地开发常用 13306）
 export MIM_TEST_DB_URL="jdbc:mysql://127.0.0.1:13306/mim_test?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8&allowMultiQueries=true"
@@ -101,7 +101,7 @@ export MIM_TEST_DB_PASSWORD=
 ./verify.sh --e2e
 ```
 
-- CI：`gh run list` / `gh run watch <id> --exit-status`；当前 workflow 同时跑服务端 17、客户端 FX8、e2e。
+- CI：`gh run list` / `gh run watch <id> --exit-status`；当前 workflow 跑服务端、Rust 对拍与 e2e。
 - 临时服务端验证完必须停掉，不要占用 8080。
 - 推送使用 **SSH**（`origin` 已是 `git@github.com:June-D/MIM.git`），不要再走 HTTPS。
 - 不要提交 `.commandcode/`。
@@ -118,7 +118,7 @@ export MIM_TEST_DB_PASSWORD=
 
 ## Phase 2 启用前验收清单
 
-**脚本化部分**（`MIMClient/src/test/e2e/AcceptanceE2eTest`）覆盖可断言的协议契约：
+**脚本化部分**（`MIMCore/src/test/e2e/AcceptanceE2eTest`）覆盖可断言的协议契约：
 
 ```bash
 # 8080：三个开关全开；8081：三者全关（用于验证关闭态没有降级路径）
@@ -126,7 +126,7 @@ SERVER_PORT=8081 MIM_SENDER_CERT_ENABLED=false \
 MIM_SENDER_TOKEN_ENABLED=false MIM_ANONYMOUS_SEND_ENABLED=false \
   java -jar MIMServer-1.0-SNAPSHOT-exec.jar &
 
-cd MIMClient
+cd MIMCore
 javac -encoding UTF-8 -cp "target/classes:$(cat /tmp/cp.txt)" \
   -d /tmp/e2e src/test/e2e/AcceptanceE2eTest.java
 java -cp "/tmp/e2e:target/classes:$(cat /tmp/cp.txt)" \
@@ -176,7 +176,7 @@ java -cp "/tmp/e2e:target/classes:$(cat /tmp/cp.txt)" \
   仍建议使用 KMS/Secret Manager 托管密钥；同时拿到数据库与主密钥仍可解密。
 - 旧版未绑定设备的 JWT 默认仍兼容；客户端全部升级后可设
   `MIM_AUTH_REQUIRE_DEVICE_BINDING=true` 强制其重新登录。
-- 服务端已迁移到 Boot 3.5.16 + Java 17；客户端仍为 JavaFX 8，
+- 服务端已迁移到 Boot 3.5.16 + Java 17；PC 客户端为 Compose/JVM 17，
   CI/部署需要同时准备两个 JDK。
 - **Phase 2 现状**：2a/2b 已生产化（证书默认开启，是消息归属的唯一来源）；
   2c 的令牌与匿名提交已落地但默认关闭，**不等于完全匿名**：预密钥领取与

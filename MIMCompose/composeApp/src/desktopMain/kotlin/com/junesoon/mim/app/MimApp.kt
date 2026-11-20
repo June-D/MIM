@@ -57,9 +57,16 @@ fun MimApp() {
                     initialPassword = state.rememberedPassword,
                     initialDeviceName = state.rememberedDeviceName,
                     rememberMe = state.rememberMe,
+                    needsTwoFactor = state.needsTwoFactor,
                     onModeChange = store::setAuthMode,
-                    onLogin = { username, password, device, remember ->
-                        store.login(username, password, device, remember)
+                    onLogin = { username, password, device, remember, code ->
+                        store.login(
+                            username = username,
+                            password = password,
+                            deviceName = device,
+                            remember = remember,
+                            code = code,
+                        )
                     },
                     onRegister = store::register,
                     onSendCode = store::sendRecoveryCode,

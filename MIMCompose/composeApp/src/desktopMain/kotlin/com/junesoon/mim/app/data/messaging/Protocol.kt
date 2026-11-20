@@ -165,6 +165,14 @@ data class FriendRequestDto(
 data class AddContactRequest(val username: String, val labelName: String? = null)
 
 @Serializable
+data class LoginRequest(
+    val username: String,
+    val password: String,
+    /** 开启二次验证时必填：6 位动态码或一次性恢复码。 */
+    val code: String? = null,
+)
+
+@Serializable
 data class RegisterRequest(
     val username: String,
     val password: String,

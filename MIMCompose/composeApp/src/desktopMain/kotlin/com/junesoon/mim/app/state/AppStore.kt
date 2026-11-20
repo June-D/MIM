@@ -6,6 +6,7 @@ import com.junesoon.mim.app.data.IncomingMessage
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.PushEvent
 import com.junesoon.mim.app.data.RememberedLogin
+import com.junesoon.mim.app.data.TwoFactorRequiredException
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
@@ -56,6 +57,8 @@ data class AppState(
     val rememberedPassword: String = "",
     val rememberedDeviceName: String = "",
     val rememberMe: Boolean = false,
+    /** 账号开启了二次验证，登录页需要补验证码输入框。 */
+    val needsTwoFactor: Boolean = false,
     val error: String? = null,
     /** 非错误提示，例如「验证码已发送」。 */
     val notice: String? = null,
@@ -107,7 +110,9 @@ class AppStore(
     // ---------------- 账号 ----------------
 
     fun setAuthMode(mode: AuthMode) {
-        _state.update { it.copy(authMode = mode, error = null, notice = null) }
+        _state.update {
+            it.copy(authMode = mode, error = null, notice = null, needsTwoFactor = false)
+        }
     }
 
     fun login(
@@ -116,6 +121,7 @@ class AppStore(
         deviceName: String,
         remember: Boolean = false,
         silent: Boolean = false,
+        code: String = "",
     ) {
         if (username.isBlank()) {
             _state.update { it.copy(error = "请输入用户名") }
@@ -128,7 +134,7 @@ class AppStore(
         val device = deviceName.trim().ifEmpty { "desktop" }
         _state.update { it.copy(busy = true, error = null, notice = null) }
         scope.launch {
-            runCatching { backend.login(username.trim(), password, device) }
+            runCatching { backend.login(username.trim(), password, device, code) }
                 .onSuccess { result ->
                     token = result.token
                     blockedPeers = backend.blockedContacts().toMutableSet()
@@ -147,6 +153,7 @@ class AppStore(
                             rememberedPassword = if (remember) password else "",
                             rememberedDeviceName = if (remember) device else "",
                             rememberMe = remember,
+                            needsTwoFactor = false,
                         )
                         next.copy(
                             contacts = enrich(
@@ -174,10 +181,12 @@ class AppStore(
                     refreshFriendRequests(result.token)
                 }
                 .onFailure { error ->
+                    val needsCode = error is TwoFactorRequiredException
                     _state.update {
                         it.copy(
                             busy = false,
                             error = error.message ?: "登录失败",
+                            needsTwoFactor = needsCode,
                             authMode = if (silent) AuthMode.Login else it.authMode,
                         )
                     }

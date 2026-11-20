@@ -14,10 +14,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CORE_DIR="$ROOT_DIR/MIMCore"
 RUST_DIR="$ROOT_DIR/MIMCoreRust"
 WORK_DIR="${1:-/tmp/mim-interop}"
-CLIENT_JH="${CLIENT_JAVA_HOME:-/Users/zhd/jdk/zulu8.98.0.111-ca-fx-jdk8.0.512-macosx_aarch64/Contents/Home}"
-
-if [ -x "$CLIENT_JH/bin/javac" ]; then
-  export JAVA_HOME="$CLIENT_JH"
+# 只需要 JDK 17：MIMCore 以 source/target 1.8 编译，可运行在 17 上。
+if [ -x "${CLIENT_JAVA_HOME:-}/bin/javac" ]; then
+  export JAVA_HOME="$CLIENT_JAVA_HOME"
 else
   export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null || true)}"
 fi

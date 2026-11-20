@@ -18,6 +18,7 @@ import com.junesoon.mim.app.data.messaging.FriendRequestDto
 import com.junesoon.mim.app.data.messaging.UserSummaryDto
 import com.junesoon.mim.app.data.messaging.DeviceListDto
 import com.junesoon.mim.app.data.messaging.InsertRequestJson
+import com.junesoon.mim.app.data.messaging.LoginRequest
 import com.junesoon.mim.app.data.messaging.OpenFirstRequestJson
 import com.junesoon.mim.app.data.messaging.OpenFirstResponseJson
 import com.junesoon.mim.app.data.messaging.OpenSealedRequestJson
@@ -278,10 +279,15 @@ class SecureBackend(
         vault.saveServerIds(serverIds)
     }
 
-    override suspend fun login(username: String, password: String, deviceName: String): LoginResult {
+    override suspend fun login(
+        username: String,
+        password: String,
+        deviceName: String,
+        code: String?,
+    ): LoginResult {
         cachedUsername = username
         cachedDeviceId = LocalVault.deviceIdFor(vaultRoot, username)
-        val token = loginToken(username, password, cachedDeviceId)
+        val token = loginToken(username, password, cachedDeviceId, code)
         cachedToken = token
 
         vault = LocalVault(vaultRoot, username, cachedDeviceId)
@@ -683,12 +689,20 @@ class SecureBackend(
 
     // ---------------- 网络 ----------------
 
-    private suspend fun loginToken(username: String, password: String, deviceId: String): String {
+    private suspend fun loginToken(
+        username: String,
+        password: String,
+        deviceId: String,
+        code: String? = null,
+    ): String {
         val response: ApiEnvelope<String> = client.post("$server/login/token") {
             header("X-Device-Id", deviceId)
             contentType(ContentType.Application.Json)
-            setBody(mapOf("username" to username, "password" to password))
+            setBody(LoginRequest(username, password, code?.trim()?.takeIf { it.isNotEmpty() }))
         }.body()
+        if (response.status == TWO_FACTOR_REQUIRED_CODE) {
+            throw TwoFactorRequiredException(response.message ?: "请输入二次验证码或恢复码")
+        }
         require(response.status == 200) { response.message ?: "登录失败" }
         return response.data ?: error("登录未返回令牌")
     }
@@ -857,6 +871,8 @@ class SecureBackend(
     companion object {
         const val ALGORITHM = "X3DH-P256-DOUBLE-RATCHET-AES-256-GCM"
         const val TERMS_VERSION = "2026-11"
+        /** 服务端业务状态码：账号开启了二次验证。 */
+        private const val TWO_FACTOR_REQUIRED_CODE = 40102
 
         private const val TYPE_NEW_MESSAGE = 100010
         private const val TYPE_READ_RECEIPT = 100012
