@@ -11,6 +11,7 @@ import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
+import com.junesoon.mim.app.domain.MessageHit
 import com.junesoon.mim.app.domain.SafetyEntry
 import com.junesoon.mim.app.domain.SafetyNumber
 import com.junesoon.mim.app.domain.TwoFactorSetup
@@ -36,6 +37,7 @@ sealed interface Screen {
     data object Devices : Screen
     data object AddContact : Screen
     data object Security : Screen
+    data object Search : Screen
     data class Chat(val contactId: String) : Screen
 }
 
@@ -68,6 +70,11 @@ data class AppState(
     /** 一次性恢复码；展示后由用户自行保存。 */
     val recoveryCodes: List<String> = emptyList(),
     val securityBusy: Boolean = false,
+    val messageHits: List<MessageHit> = emptyList(),
+    val messageQuery: String = "",
+    val messageSearched: Boolean = false,
+    /** 进入聊天后要定位到的消息；消费后清空。 */
+    val pendingScrollMessageId: String? = null,
     val error: String? = null,
     /** 非错误提示，例如「验证码已发送」。 */
     val notice: String? = null,
@@ -286,6 +293,54 @@ class AppStore(
      * 重新输入，与「记住」的预期相矛盾；但 `autoLogin` 置为 false，
      * 不会再自动把用户登录回去。
      */
+    // ---------------- 搜索 ----------------
+
+    fun openSearch() {
+        _state.update {
+            it.copy(
+                screen = Screen.Search,
+                messageHits = emptyList(),
+                messageQuery = "",
+                messageSearched = false,
+                error = null,
+                notice = null,
+            )
+        }
+    }
+
+    fun searchMessages(query: String) {
+        val keyword = query.trim()
+        if (keyword.isEmpty()) {
+            return
+        }
+        val names = _state.value.contacts.associate { it.id to it.name }
+        val hits = backend.searchLocal(keyword).map { hit ->
+            MessageHit(
+                contactId = hit.contactId,
+                contactName = names[hit.contactId] ?: hit.contactId,
+                messageId = hit.messageId,
+                text = hit.text,
+                time = hit.time,
+                epochMs = hit.epochMs,
+                fromMe = hit.fromMe,
+                kind = hit.kind,
+            )
+        }
+        _state.update {
+            it.copy(messageHits = hits, messageQuery = keyword, messageSearched = true)
+        }
+    }
+
+    /** 从搜索结果进入聊天，并在打开后定位到那条消息。 */
+    fun openSearchHit(contactId: String, messageId: String) {
+        _state.update { it.copy(pendingScrollMessageId = messageId) }
+        openChat(contactId)
+    }
+
+    fun consumeScrollTarget() {
+        _state.update { it.copy(pendingScrollMessageId = null) }
+    }
+
     fun logout() {
         token = null
         pushJob?.cancel()

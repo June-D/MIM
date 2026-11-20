@@ -5,6 +5,7 @@ import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.PeerIdentityKey
+import com.junesoon.mim.app.domain.LocalMessageHit
 import com.junesoon.mim.app.domain.TwoFactorSetup
 import com.junesoon.mim.app.domain.UserSummary
 
@@ -51,6 +52,13 @@ interface MessagingBackend {
 
     /** 读取并解密本地缓存的媒体明文；拿不到时返回 null。 */
     fun mediaBytes(message: ChatMessage): ByteArray? = null
+
+    /**
+     * 在本地加密缓存里搜索消息。
+     *
+     * 服务端不知道明文，搜索只能在已缓存的消息里做；换设备后没缓存就搜不到。
+     */
+    fun searchLocal(query: String): List<LocalMessageHit> = emptyList()
 
     /**
      * 拉取尚未消费的消息。

@@ -2,6 +2,7 @@ package com.junesoon.mim.app.data
 
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
+import com.junesoon.mim.app.domain.LocalMessageHit
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -70,6 +71,19 @@ class DemoBackend : MessagingBackend {
             )
         )
         return message
+    }
+
+    override fun searchLocal(query: String): List<LocalMessageHit> {
+        val keyword = query.trim()
+        if (keyword.isEmpty()) {
+            return emptyList()
+        }
+        return conversations.flatMap { (peer, list) ->
+            list.filter { it.text.contains(keyword, ignoreCase = true) }
+                .map {
+                    LocalMessageHit(peer, it.id, it.text, it.time, it.epochMs, it.fromMe, it.kind)
+                }
+        }.sortedByDescending { it.epochMs }
     }
 
     private fun now(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())

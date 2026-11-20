@@ -127,6 +127,27 @@ class AppStoreTest {
     }
 
     @Test
+    fun search_finds_local_messages_and_opens_chat_at_hit() {
+        val store = store()
+        store.login("alice", "pass1234", "desktop")
+        store.openChat("bob")
+        store.send("周末去看展")
+
+        store.openSearch()
+        store.searchMessages("看展")
+        assertEquals(Screen.Search, store.state.value.screen)
+        val hits = store.state.value.messageHits
+        assertTrue(hits.any { it.contactId == "bob" && it.text.contains("看展") }, "应命中本地消息：$hits")
+
+        val hit = hits.first()
+        store.openSearchHit(hit.contactId, hit.messageId)
+        assertEquals(Screen.Chat(hit.contactId), store.state.value.screen)
+        assertEquals(hit.messageId, store.state.value.pendingScrollMessageId)
+        store.consumeScrollTarget()
+        assertEquals(null, store.state.value.pendingScrollMessageId)
+    }
+
+    @Test
     fun sending_message_appends_to_history() {
         val store = store()
         store.login("alice", "pass1234", "desktop")

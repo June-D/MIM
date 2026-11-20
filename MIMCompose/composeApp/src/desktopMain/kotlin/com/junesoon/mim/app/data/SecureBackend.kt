@@ -47,6 +47,7 @@ import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
+import com.junesoon.mim.app.domain.LocalMessageHit
 import com.junesoon.mim.app.domain.MediaAttachment
 import com.junesoon.mim.app.domain.UserSummary
 import com.junesoon.mim.app.domain.PeerIdentityKey
@@ -771,6 +772,30 @@ class SecureBackend(
             plain
         }
         return cached
+    }
+
+    override fun searchLocal(query: String): List<LocalMessageHit> {
+        val keyword = query.trim()
+        if (keyword.isEmpty()) {
+            return emptyList()
+        }
+        return messages.asSequence()
+            .filter { it.text.contains(keyword, ignoreCase = true) }
+            .sortedByDescending { it.epochMs }
+            .take(200)
+            .map { hit ->
+                val parsed = hit.payload?.let(::parsePayload)
+                LocalMessageHit(
+                    contactId = hit.contactId,
+                    messageId = hit.id,
+                    text = hit.text,
+                    time = hit.time,
+                    epochMs = hit.epochMs,
+                    fromMe = hit.fromMe,
+                    kind = parsed?.kind ?: "text",
+                )
+            }
+            .toList()
     }
 
     /** 小容量 LRU：避免滚动时反复解密同一张图。 */

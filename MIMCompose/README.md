@@ -46,6 +46,7 @@ MIMCompose/
     ui/AddContactScreen.kt 搜索用户、好友申请、同意或拒绝
     ui/SecurityScreen.kt  二次验证开关与一次性恢复码
     ui/MediaTools.kt      选图与解码、录音（WAV）与播放
+    ui/SearchScreen.kt    本地消息搜索，命中后定位到原消息
     ui/ChatScreen.kt      聊天（撤回、安全码、清除）
     ui/DeviceScreen.kt    设备列表与注销
     data/CredentialStore.kt 记住账号密码（AES-GCM + 0600）
@@ -93,6 +94,7 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 | 未读数 | 内存计数 | `GET /message/unread/{peer}`，联系人页角标以服务端为准 |
 | 清除会话 | 无 | `POST /message/clear`，可只清自己的或双方清除；本地缓存一并丢弃 |
 | 图片 / 语音 | 无 | 文件用一次性密钥 AES-GCM 加密后上传 `/media`；消息里只带引用与密钥 |
+| 消息搜索 | 无 | 只在本地加密缓存里检索；命中后进会话并滚到该条 |
 | 添加联系人 | 无 | `GET /chat/search` 搜索 → `POST /chat/requests` 申请 → 对方同意 |
 
 协议计算全部在 Rust 核心；Kotlin 只做传输、入库与 UI 语义。
@@ -182,6 +184,14 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 
 限制：单文件上限 8MB；语音是原始 WAV（未压缩、无波形）；图片只在桌面端解码展示。
 服务端密文目前不会随会话删除而自动清理，需要后续加保留策略。
+
+### 消息搜索
+
+联系人页顶部放大镜进入搜索：在**本机已缓存的加密消息**里按关键词查找，
+支持文字、图片说明与语音说明；命中后进入会话并自动滚到那条消息。
+
+服务端没有明文，所以搜索只能在有缓存的消息里做：换设备或清空保险库后，
+旧消息搜不到。这一点在搜索页也写明了。
 
 ### 输入
 

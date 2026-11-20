@@ -18,6 +18,7 @@ import com.junesoon.mim.app.ui.AuthScreen
 import com.junesoon.mim.app.ui.ChatScreen
 import com.junesoon.mim.app.ui.ContactsScreen
 import com.junesoon.mim.app.ui.DeviceScreen
+import com.junesoon.mim.app.ui.SearchScreen
 import com.junesoon.mim.app.ui.SecurityScreen
 import com.junesoon.mim.app.ui.MimTheme
 import kotlinx.coroutines.delay
@@ -86,10 +87,20 @@ fun MimApp() {
                     onOpenChat = store::openChat,
                     onShowDevices = store::openDevices,
                     onAddContact = store::openAddContact,
+                    onOpenSearch = store::openSearch,
                     onOpenSecurity = store::openSecurity,
                     onLogout = store::logout,
                     notice = state.notice,
                     error = state.error,
+                )
+
+                Screen.Search -> SearchScreen(
+                    hits = state.messageHits,
+                    query = state.messageQuery,
+                    searched = state.messageSearched,
+                    onBack = store::backToContacts,
+                    onSearch = store::searchMessages,
+                    onOpenHit = store::openSearchHit,
                 )
 
                 Screen.Security -> SecurityScreen(
@@ -139,6 +150,7 @@ fun MimApp() {
                             onOpenChat = store::openChat,
                             onShowDevices = store::openDevices,
                             onAddContact = store::openAddContact,
+                            onOpenSearch = store::openSearch,
                             onOpenSecurity = store::openSecurity,
                             onLogout = store::logout,
                         )
@@ -151,6 +163,8 @@ fun MimApp() {
                             onSendImage = store::sendImage,
                             onSendVoice = store::sendVoice,
                             loadMedia = { message -> store.loadMedia(message) },
+                            scrollToMessageId = state.pendingScrollMessageId,
+                            onScrolled = store::consumeScrollTarget,
                             onRecall = { messageId -> store.recall(screen.contactId, messageId) },
                             onClear = store::clearConversation,
                             onRename = { label -> store.renameContact(screen.contactId, label) },

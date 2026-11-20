@@ -53,6 +53,7 @@ fun ContactsScreen(
     onOpenChat: (String) -> Unit,
     onShowDevices: () -> Unit,
     onAddContact: () -> Unit,
+    onOpenSearch: () -> Unit,
     onOpenSecurity: () -> Unit,
     onLogout: () -> Unit,
     notice: String? = null,
@@ -94,6 +95,7 @@ fun ContactsScreen(
                     )
                 }
             }
+            HeaderAction(MimIcon.Search) { onOpenSearch() }
             HeaderAction(MimIcon.Plus, badge = pendingRequestCount) { onAddContact() }
             HeaderAction(MimIcon.Device) { onShowDevices() }
             Box {

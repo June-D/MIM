@@ -56,3 +56,26 @@ data class MediaAttachment(
     val height: Int? = null,
     val durationMs: Long? = null,
 )
+
+/** 本地缓存里的一条搜索命中。 */
+data class MessageHit(
+    val contactId: String,
+    val contactName: String,
+    val messageId: String,
+    val text: String,
+    val time: String,
+    val epochMs: Long,
+    val fromMe: Boolean,
+    val kind: String,
+)
+
+/** 传输层返回的搜索命中（不含联系人显示名）。 */
+data class LocalMessageHit(
+    val contactId: String,
+    val messageId: String,
+    val text: String,
+    val time: String,
+    val epochMs: Long,
+    val fromMe: Boolean,
+    val kind: String,
+)

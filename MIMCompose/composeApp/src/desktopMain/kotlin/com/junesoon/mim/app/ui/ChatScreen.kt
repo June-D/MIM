@@ -90,6 +90,8 @@ fun ChatScreen(
     onSendImage: (ByteArray, String, String?) -> Unit = { _, _, _ -> },
     onSendVoice: (ByteArray, Long) -> Unit = { _, _ -> },
     loadMedia: suspend (ChatMessage) -> ByteArray? = { null },
+    scrollToMessageId: String? = null,
+    onScrolled: () -> Unit = {},
     onRecall: (String) -> Unit,
     onClear: (Boolean) -> Unit,
     onRename: (String) -> Unit,
@@ -128,6 +130,15 @@ fun ChatScreen(
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    LaunchedEffect(scrollToMessageId, messages.size) {
+        val target = scrollToMessageId ?: return@LaunchedEffect
+        val index = messages.indexOfFirst { it.id == target }
+        if (index >= 0) {
+            listState.animateScrollToItem(index)
+            onScrolled()
         }
     }
 
