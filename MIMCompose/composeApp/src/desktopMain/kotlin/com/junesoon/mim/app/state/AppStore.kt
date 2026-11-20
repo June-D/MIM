@@ -91,6 +91,7 @@ class AppStore(
                     }
                     startPolling()
                     refreshUnread(result.token, force = true)
+                    refreshFriendRequests(result.token)
                 }
                 .onFailure { error ->
                     _state.update { it.copy(busy = false, error = error.message ?: "登录失败") }
@@ -207,7 +208,11 @@ class AppStore(
     fun backToContacts() {
         _state.update { it.copy(screen = Screen.Contacts) }
         token?.let { currentToken ->
-            scope.launch { refreshUnread(currentToken, force = true) }
+            scope.launch {
+                refreshContacts(currentToken, force = true)
+                refreshUnread(currentToken, force = true)
+                refreshFriendRequests(currentToken)
+            }
         }
     }
 
@@ -240,6 +245,33 @@ class AppStore(
                     _state.update { it.copy(error = error.message ?: "清除会话失败") }
                 }
         }
+    }
+
+    /**
+     * 重新拉联系人列表。
+     *
+     * 服务端的联系人视图不带未读数，因此按 id 保留本地角标，
+     * 随后由 refreshUnread 校正；推送丢失时靠轮询在 15 秒内补上。
+     */
+    private suspend fun refreshContacts(currentToken: String, force: Boolean = false) {
+        val now = System.currentTimeMillis()
+        if (!force && now - lastContactsAt < 15_000) {
+            return
+        }
+        lastContactsAt = now
+        runCatching { backend.contacts(currentToken) }
+            .onSuccess { fresh ->
+                _state.update { state ->
+                    state.copy(
+                        contacts = fresh.map { contact ->
+                            contact.copy(
+                                unread = state.contacts.firstOrNull { it.id == contact.id }
+                                    ?.unread ?: 0,
+                            )
+                        },
+                    )
+                }
+            }
     }
 
     /**
@@ -357,6 +389,12 @@ class AppStore(
                 backend.listenPush { event ->
                     when (event) {
                         PushEvent.NewData -> scope.launch { syncOnce() }
+                        PushEvent.FriendsChanged -> scope.launch {
+                            val current = token ?: return@launch
+                            refreshFriendRequests(current)
+                            refreshContacts(current, force = true)
+                            refreshUnread(current, force = true)
+                        }
                         is PushEvent.Cleared -> {
                             backend.forgetLocalConversation(event.peer)
                             dropLocal(event.peer)
@@ -387,6 +425,7 @@ class AppStore(
                     if (open != null) {
                         refreshStates(currentToken, open)
                     } else if (_state.value.screen is Screen.Contacts) {
+                        refreshContacts(currentToken)
                         refreshUnread(currentToken)
                     } else if (_state.value.screen is Screen.AddContact) {
                         refreshFriendRequests(currentToken)
@@ -427,5 +466,6 @@ class AppStore(
 
     private var polling = false
     private var lastUnreadAt = 0L
+    private var lastContactsAt = 0L
     private val syncLock = Mutex()
 }

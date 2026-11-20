@@ -91,6 +91,9 @@ sealed interface PushEvent {
     /** 有新消息、已读回执或撤回，需要拉一次 HTTP。 */
     data object NewData : PushEvent
 
+    /** 好友关系变化：收到申请、被同意、被拒绝。 */
+    data object FriendsChanged : PushEvent
+
     /** 对方清除了与我们的会话。 */
     data class Cleared(val peer: String) : PushEvent
 }

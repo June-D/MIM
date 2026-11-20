@@ -139,9 +139,9 @@ class SecureBackend(
         val envelope = runCatching { JsonCodec.decode<PushEnvelope>(payload) }.getOrNull()
             ?: return null
         return when (envelope.type) {
-            TYPE_NEW_MESSAGE, TYPE_READ_RECEIPT, TYPE_RECALLED,
-            TYPE_FRIEND_REQUEST, TYPE_FRIEND_ACCEPTED, TYPE_FRIEND_REJECTED,
-            -> PushEvent.NewData
+            TYPE_NEW_MESSAGE, TYPE_READ_RECEIPT, TYPE_RECALLED -> PushEvent.NewData
+            TYPE_FRIEND_REQUEST, TYPE_FRIEND_ACCEPTED, TYPE_FRIEND_REJECTED ->
+                PushEvent.FriendsChanged
             TYPE_CONVERSATION_CLEARED -> {
                 val peer = runCatching {
                     envelope.data?.jsonObject?.get("peer")?.jsonPrimitive?.content
