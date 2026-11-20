@@ -264,6 +264,13 @@ data class ClearResultDto(
     val forBoth: Boolean = false,
 )
 
+/** 本人与某个对端的清除点（`GET /message/clear`）。 */
+@Serializable
+data class ClearPointDto(
+    val clearedBeforeId: Long = 0,
+    val updatedAt: Long = 0,
+)
+
 // ---------------- Rust 边界 ----------------
 
 @Serializable

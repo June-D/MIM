@@ -219,6 +219,60 @@ class SecureBackendTest {
         Files.write(dir.resolve("device.txt"), deviceId.toByteArray(Charsets.UTF_8))
     }
 
+    /**
+     * 对方执行「双方清除」而本机不在线：重新登录后必须靠服务端清除点丢掉旧缓存。
+     *
+     * 只靠 100019 推送的话，离线设备（以及重装后的同一设备）会一直显示
+     * 服务端已经抹掉的内容 —— 曾经就是这样表现成「双方清除只清了自己」。
+     */
+    @Test
+    fun peer_clear_drops_offline_cache() = withEnv { server ->
+        val alice = "composealice"
+        val bob = "composebob"
+        TestAccounts.ensure(server, alice)
+        TestAccounts.ensure(server, bob)
+        val root = Files.createTempDirectory("mim-clear-vault")
+        writeDeviceId(root, alice, "testalice-" + System.currentTimeMillis().toString().takeLast(6))
+        writeDeviceId(root, bob, "testbob-" + System.currentTimeMillis().toString().takeLast(6))
+
+        val aliceBackend = SecureBackend(server, root)
+        val aliceLogin = TestAccounts.withLoginBudget {
+            aliceBackend.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        }
+        pruneOtherDevices(server, aliceLogin.token, aliceBackend.currentDeviceId)
+
+        val bobBackend = SecureBackend(server, root)
+        val bobLogin = TestAccounts.withLoginBudget {
+            bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
+        }
+        pruneOtherDevices(server, bobLogin.token, bobBackend.currentDeviceId)
+
+        aliceBackend.send(aliceLogin.token, bob, "clear me")
+        bobBackend.poll(bobLogin.token)
+        assertTrue(bobBackend.history(bobLogin.token, alice).isNotEmpty(), "B 应先有本地缓存")
+
+        // A 双方清除；B 这段时间不在线，收不到推送。
+        aliceBackend.clearConversation(aliceLogin.token, bob, forBoth = true)
+
+        // B 重新登录：本地缓存还在（登录本身不清理），必须靠清除点对账。
+        val bobAgain = SecureBackend(server, root)
+        val bobAgainLogin = TestAccounts.withLoginBudget {
+            bobAgain.login(bob, TestAccounts.PASSWORD, "Bob Phone")
+        }
+        assertTrue(
+            bobAgain.history(bobAgainLogin.token, alice).isNotEmpty(),
+            "重新登录时旧缓存确实还在，正是原来会「看到已清除内容」的路径",
+        )
+        val points = bobAgain.clearPoints(bobAgainLogin.token, listOf(alice))
+        val point = points[alice]
+        assertTrue(point != null && point.clearedBeforeId > 0, "应读到清除点：$points")
+        assertTrue(
+            bobAgain.dropClearedMessages(alice, point!!.clearedBeforeId, point.updatedAt),
+            "清除点之前的缓存应被丢弃",
+        )
+        assertTrue(bobAgain.history(bobAgainLogin.token, alice).isEmpty(), "清除后本地不应再有内容")
+    }
+
     private fun withEnv(block: suspend CoroutineScope.(String) -> Unit) {
         val server = System.getenv("MIM_SERVER_URL") ?: return
         if (System.getenv("MIM_NATIVE_LIB").isNullOrBlank()) return

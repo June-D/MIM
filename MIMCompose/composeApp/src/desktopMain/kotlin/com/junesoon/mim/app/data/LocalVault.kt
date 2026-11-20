@@ -232,6 +232,13 @@ data class CachedMessage(
     val pending: Boolean = false,
     /** 媒体消息的原始载荷 JSON；纯文本消息为 null。 */
     val payload: String? = null,
+    /**
+     * 服务端消息 id；旧版本写入的缓存没有这个字段。
+     *
+     * 对方执行「双方清除」后本机要对账：有 id 的按 id 判断，
+     * 没有 id 的老数据按清除时间兜底。
+     */
+    val serverId: Long? = null,
 )
 
 /** 离线发送队列条目：密文已组装，重试只重发，不重新推进棘轮。 */

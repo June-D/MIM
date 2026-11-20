@@ -8,6 +8,7 @@ import com.junesoon.mim.app.data.messaging.ClearRequest
 import com.junesoon.mim.app.data.messaging.ClearResultDto
 import com.junesoon.mim.app.data.messaging.ChatContactGroup
 import com.junesoon.mim.app.data.messaging.CipherMessageDto
+import com.junesoon.mim.app.data.messaging.ClearPointDto
 import com.junesoon.mim.app.data.messaging.CipherMessageOut
 import com.junesoon.mim.app.data.messaging.ComposeRequestJson
 import com.junesoon.mim.app.data.messaging.ComposeResponseJson
@@ -44,6 +45,7 @@ import com.junesoon.mim.app.data.messaging.StoreJson
 import com.junesoon.mim.app.data.messaging.StoreResponseJson
 import com.junesoon.mim.app.data.messaging.WireJson
 import com.junesoon.mim.app.domain.ChatMessage
+import com.junesoon.mim.app.domain.ClearPoint
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
@@ -379,6 +381,52 @@ class SecureBackend(
         forgetLocalConversation(contactId)
     }
 
+    override suspend fun clearPoints(token: String, peers: List<String>): Map<String, ClearPoint> {
+        if (peers.isEmpty()) {
+            return emptyMap()
+        }
+        val query = peers.joinToString(",") { encodeQuery(it) }
+        val points: Map<String, ClearPointDto> =
+            getEnvelope("$server/message/clear?peers=$query", token)
+        return points.mapValues { (_, dto) -> ClearPoint(dto.clearedBeforeId, dto.updatedAt) }
+    }
+
+    /**
+     * 丢掉该对端在清除点之前的本机缓存。
+     *
+     * 有服务端 id 的按 id 判断；旧版本写入的缓存没有 id，按清除时间兜底
+     * （消息发送时间早于清除动作时间，就属于被清掉的那一段）。
+     */
+    override fun dropClearedMessages(contactId: String, cursor: Long, clearedAt: Long): Boolean {
+        if (cursor <= 0) {
+            return false
+        }
+        val doomed = messages.filter { cached ->
+            if (cached.contactId != contactId) {
+                false
+            } else {
+                val serverId = cached.serverId
+                if (serverId != null) {
+                    serverId <= cursor
+                } else {
+                    clearedAt > 0 && cached.epochMs <= clearedAt
+                }
+            }
+        }
+        if (doomed.isEmpty()) {
+            return false
+        }
+        val mediaIds = doomed.mapNotNull { cached ->
+            cached.payload?.let(::parsePayload)?.media?.id
+        }
+        messages.removeAll(doomed)
+        if (mediaIds.isNotEmpty()) {
+            vault.deleteMedia(mediaIds)
+        }
+        vault.saveMessages(messages)
+        return true
+    }
+
     override fun forgetLocalConversation(contactId: String) {
         val mediaIds = messages
             .filter { it.contactId == contactId }
@@ -660,9 +708,15 @@ class SecureBackend(
             epochMs = System.currentTimeMillis(),
             replicas = replicas,
         )
-        val delivered = runCatching {
+        val saved = runCatching {
             postList<List<CipherMessageOut>, List<CipherMessageDto>>("$server/message", token, replicas)
-        }.isSuccess
+        }.getOrNull()
+        val delivered = saved != null
+        // 记下服务端 id：对方之后执行「双方清除」时，本机靠它判断哪条该丢。
+        val serverId = saved?.mapNotNull { it.id }?.maxOrNull()
+        if (serverId != null) {
+            serverIds[contactId] = maxOf(serverIds[contactId] ?: 0L, serverId)
+        }
 
         if (!delivered) {
             outbox += entry
@@ -680,7 +734,14 @@ class SecureBackend(
             kind = kind,
             media = media,
         )
-        cache(contactId, message, entry.epochMs, recallToken = recallToken, payload = payloadJson)
+        cache(
+            contactId,
+            message,
+            entry.epochMs,
+            recallToken = recallToken,
+            payload = payloadJson,
+            serverId = serverId,
+        )
         vault.saveMessages(messages)
         return message
     }
@@ -869,7 +930,13 @@ class SecureBackend(
                     val peer = raw.toUsername ?: return@runCatching
                     val id = raw.clientMsgId ?: UUID.randomUUID().toString()
                     val message = ChatMessage(id, false, "已撤回", nowTime(), recalled = true)
-                    cache(peer, message, raw.clientTime ?: System.currentTimeMillis(), recalled = true)
+                    cache(
+                        peer,
+                        message,
+                        raw.clientTime ?: System.currentTimeMillis(),
+                        recalled = true,
+                        serverId = raw.id,
+                    )
                     delivered += IncomingMessage(peer, message)
                     return@runCatching
                 }
@@ -935,16 +1002,23 @@ class SecureBackend(
         val remaining = mutableListOf<OutboxEntry>()
         var changed = false
         for (entry in outbox) {
-            val ok = runCatching {
+            val saved = runCatching {
                 postList<List<CipherMessageOut>, List<CipherMessageDto>>(
                     "$server/message", token, entry.replicas,
                 )
-            }.isSuccess
-            if (ok) {
+            }.getOrNull()
+            if (saved != null) {
                 changed = true
+                val serverId = saved.mapNotNull { it.id }.maxOrNull()
+                if (serverId != null) {
+                    serverIds[entry.contactId] = maxOf(serverIds[entry.contactId] ?: 0L, serverId)
+                }
                 val index = messages.indexOfFirst { it.id == entry.clientMsgId }
                 if (index >= 0) {
-                    messages[index] = messages[index].copy(pending = false)
+                    messages[index] = messages[index].copy(
+                        pending = false,
+                        serverId = serverId ?: messages[index].serverId,
+                    )
                 }
             } else {
                 remaining += entry
@@ -1000,6 +1074,7 @@ class SecureBackend(
             message = message,
             epochMs = raw.clientTime ?: System.currentTimeMillis(),
             payload = if (parsed != null) plaintext else null,
+            serverId = raw.id,
         )
         into += IncomingMessage(peer, message)
     }
@@ -1040,6 +1115,7 @@ class SecureBackend(
         recalled: Boolean = message.recalled,
         recallToken: String? = null,
         payload: String? = null,
+        serverId: Long? = null,
     ) {
         if (messages.any { it.id == message.id }) {
             return
@@ -1056,6 +1132,7 @@ class SecureBackend(
             recallToken = recallToken,
             pending = message.pending,
             payload = payload,
+            serverId = serverId,
         )
     }
 

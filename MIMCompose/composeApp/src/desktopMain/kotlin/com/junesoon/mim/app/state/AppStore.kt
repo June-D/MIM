@@ -203,6 +203,8 @@ class AppStore(
                     startPolling()
                     refreshUnread(result.token, force = true)
                     refreshFriendRequests(result.token)
+                    // 断线期间对方清过会话的话，登录时先把本机缓存对齐再展示。
+                    reconcileCleared(result.token, result.contacts.map { it.id })
                 }
                 .onFailure { error ->
                     val needsCode = error is TwoFactorRequiredException
@@ -407,6 +409,8 @@ class AppStore(
             next.copy(contacts = enrich(next.contacts, next))
         }
         scope.launch {
+            // 先对账：对方可能在我们离线时清除了这段会话。
+            runCatching { reconcileCleared(currentToken, listOf(contactId)) }
             runCatching { backend.history(currentToken, contactId) }
                 .onSuccess { history ->
                     _state.update { current ->
@@ -923,6 +927,40 @@ class AppStore(
         _state.update { it.copy(notice = null) }
     }
 
+    /**
+     * 把本机缓存对齐到服务端的清除点。
+     *
+     * 对方执行「双方清除」时，如果这台设备不在线就收不到推送，
+     * 只靠推送会让本地加密缓存一直留着本该被抹掉的内容（重新登录后照旧显示）。
+     * 登录、刷新联系人和打开会话这三个时机各对一次账。
+     */
+    private suspend fun reconcileCleared(currentToken: String, peers: Collection<String>) {
+        if (peers.isEmpty()) {
+            return
+        }
+        val points = runCatching { backend.clearPoints(currentToken, peers.toList()) }
+            .getOrDefault(emptyMap())
+        if (points.isEmpty()) {
+            return
+        }
+        val dropped = points.filter { (peer, point) ->
+            runCatching {
+                backend.dropClearedMessages(peer, point.clearedBeforeId, point.updatedAt)
+            }.getOrDefault(false)
+        }
+        if (dropped.isEmpty()) {
+            return
+        }
+        // 缓存已经变了，重新读一遍本地历史，界面才会同步（预览、未读分界都跟着走）。
+        val refreshed = dropped.keys.associateWith { peer ->
+            runCatching { backend.history(currentToken, peer) }.getOrDefault(emptyList())
+        }
+        _state.update { current ->
+            val next = current.copy(messages = current.messages + refreshed)
+            next.copy(contacts = enrich(next.contacts, next))
+        }
+    }
+
     /** 已读 / 撤回状态靠历史轮询补偿，推送只是叫醒。 */
     private suspend fun refreshStates(currentToken: String, contactId: String) {
         runCatching { backend.historyStates(currentToken, contactId) }
@@ -1060,6 +1098,8 @@ class AppStore(
                     }
                     current.copy(contacts = enrich(merged, current))
                 }
+                // 顺带对账：对方在线时靠推送通知，离线时只能靠这一次查询。
+                reconcileCleared(currentToken, fresh.map { it.id })
             }
     }
 

@@ -1,6 +1,7 @@
 package com.junesoon.mim.app.data
 
 import com.junesoon.mim.app.domain.ChatMessage
+import com.junesoon.mim.app.domain.ClearPoint
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
@@ -89,6 +90,21 @@ interface MessagingBackend {
 
     /** 清除与某人的会话；forBoth 时对方也看不到这段消息。 */
     suspend fun clearConversation(token: String, contactId: String, forBoth: Boolean) = Unit
+
+    /**
+     * 服务端记录的清除点（批量）。
+     *
+     * 对方执行「双方清除」时，本机如果不在线就收不到推送；登录、刷新列表、
+     * 打开会话时用它对账，避免本地缓存继续显示已被抹掉的消息。
+     */
+    suspend fun clearPoints(token: String, peers: List<String>): Map<String, ClearPoint> = emptyMap()
+
+    /**
+     * 丢弃本机在该清除点之前的消息缓存，返回是否真的丢掉了内容。
+     *
+     * 有服务端 id 的消息按 id 判断；旧版本缓存没有 id，按清除时间兜底。
+     */
+    fun dropClearedMessages(contactId: String, cursor: Long, clearedAt: Long): Boolean = false
 
     /** 只丢弃本地缓存，不动服务端（对方清除会话时用）。 */
     fun forgetLocalConversation(contactId: String) = Unit

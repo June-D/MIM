@@ -6,6 +6,7 @@ import com.junesoon.mim.app.data.LoginResult
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.TwoFactorRequiredException
 import com.junesoon.mim.app.domain.ChatMessage
+import com.junesoon.mim.app.domain.ClearPoint
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.PeerIdentityKey
 import com.junesoon.mim.app.domain.sortedForList
@@ -229,6 +230,81 @@ class AppStoreTest {
         assertEquals("m3", store.state.value.firstUnreadMessageId)
         assertEquals("m3", store.state.value.pendingScrollMessageId)
         assertEquals(4_000L, mark, "打开会话后水位应推进到最新一条")
+    }
+
+    /**
+     * 对方执行「双方清除」时本机不在线：登录后必须按服务端清除点丢掉旧缓存，
+     * 否则会一直显示服务端已经抹掉的内容。
+     */
+    @Test
+    fun login_drops_local_cache_after_peer_cleared() {
+        val cached = mutableListOf(
+            ChatMessage("old", false, "清除前的内容", "10:00", epochMs = 1_000),
+            ChatMessage("fresh", false, "清除后的内容", "10:05", epochMs = 5_000),
+        )
+        val calls = mutableListOf<Triple<String, Long, Long>>()
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "")))
+
+            override suspend fun history(token: String, contactId: String): List<ChatMessage> =
+                cached.toList()
+
+            override suspend fun clearPoints(token: String, peers: List<String>): Map<String, ClearPoint> =
+                if ("bob" in peers) mapOf("bob" to ClearPoint(3_000, 4_000)) else emptyMap()
+
+            override fun dropClearedMessages(contactId: String, cursor: Long, clearedAt: Long): Boolean {
+                calls += Triple(contactId, cursor, clearedAt)
+                val before = cached.size
+                cached.removeAll { it.epochMs <= clearedAt }
+                return cached.size != before
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+
+        store.login("alice", "pass1234", "desktop")
+
+        assertEquals(1, calls.size, "登录时必须按服务端清除点对账一次")
+        assertEquals(Triple("bob", 3_000L, 4_000L), calls.first())
+        assertEquals(
+            listOf("fresh"),
+            store.state.value.messages["bob"].orEmpty().map { it.id },
+            "清除点之前的内容必须从本机缓存里消失",
+        )
+    }
+
+    /** 没有清除点时不动本机缓存（只清对方自己时不应影响到我）。 */
+    @Test
+    fun login_keeps_cache_when_peer_only_cleared_their_side() {
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "")))
+
+            override suspend fun clearPoints(token: String, peers: List<String>) = emptyMap<String, ClearPoint>()
+
+            override fun dropClearedMessages(contactId: String, cursor: Long, clearedAt: Long): Boolean =
+                error("没有清除点时不应触碰本机缓存")
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+
+        store.login("alice", "pass1234", "desktop")
+        assertTrue(store.state.value.messages.isEmpty())
     }
 
     /** 对端换密钥后安全码会变：必须提示，并等用户核对后才重新记基准。 */
