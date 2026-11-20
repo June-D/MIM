@@ -33,8 +33,10 @@ class KeyRegistryTest {
         val deviceId = TestAccounts.uniqueDevice("keys")
 
         TestAccounts.ensure(server, username)
-        val login = HttpBackend(server).login(username, password, deviceId)
-        KeyRegistry(server).pruneOtherDevices(login.token, deviceId)
+        val login = TestAccounts.withLoginBudget {
+            HttpBackend(server).login(username, password, deviceId)
+        }
+        KeyRegistry(server).pruneOtherDevices(login.token, deviceId, listOf("keys"))
 
         val registry = KeyRegistry(server)
         val bundle = registry.provision(

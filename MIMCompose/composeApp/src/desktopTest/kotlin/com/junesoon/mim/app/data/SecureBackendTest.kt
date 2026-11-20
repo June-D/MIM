@@ -1,13 +1,5 @@
 package com.junesoon.mim.app.data
 
-import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.engine.cio.CIO
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.delete
-import io.ktor.client.request.get
-import io.ktor.client.request.header
-import io.ktor.serialization.kotlinx.json.json
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,8 +7,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
-import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 import java.nio.file.Files
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -35,13 +25,20 @@ class SecureBackendTest {
         TestAccounts.ensure(server, alice)
         TestAccounts.ensure(server, bob)
         val root = Files.createTempDirectory("mim-vault")
+        // 固定 test 前缀的设备标识：清理时只删这些，不碰用户的 desktop- 设备。
+        writeDeviceId(root, alice, "testalice-" + System.currentTimeMillis().toString().takeLast(6))
+        writeDeviceId(root, bob, "testbob-" + System.currentTimeMillis().toString().takeLast(6))
 
-        val aliceBackend = SecureBackend(server, root, pruneOtherDevices = true)
-        val aliceLogin = aliceBackend.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        val aliceBackend = SecureBackend(server, root)
+        val aliceLogin = TestAccounts.withLoginBudget {
+            aliceBackend.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        }
         pruneOtherDevices(server, aliceLogin.token, aliceBackend.currentDeviceId)
 
-        val bobBackend = SecureBackend(server, root, pruneOtherDevices = true)
-        val bobLogin = bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
+        val bobBackend = SecureBackend(server, root)
+        val bobLogin = TestAccounts.withLoginBudget {
+            bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
+        }
         pruneOtherDevices(server, bobLogin.token, bobBackend.currentDeviceId)
 
         // 推送：A 发送后 B 的监听应立刻收到信号（不依赖轮询）。
@@ -99,7 +96,9 @@ class SecureBackendTest {
 
         // 重启：同一保险库、同一设备，历史来自加密缓存。
         val aliceAgain = SecureBackend(server, root)
-        aliceAgain.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        TestAccounts.withLoginBudget {
+            aliceAgain.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        }
         val history = aliceAgain.history(aliceLogin.token, bob)
         assertTrue(history.any { it.fromMe && it.recalled && it.id == sent.id }, "撤回记录应保留")
         assertTrue(history.any { !it.fromMe && it.text == "secure reply" }, "接收记录应保留")
@@ -121,6 +120,30 @@ class SecureBackendTest {
         // 双方清除：B 执行后，B 本地与 A 的历史都应被抹掉。
         bobBackend.clearConversation(bobLogin.token, alice, forBoth = true)
         assertTrue(bobBackend.history(bobLogin.token, alice).isEmpty(), "双方清除后 B 不应有记录")
+
+        // 设备被注销：同一设备标识不能再登录，必须给出可执行的提示。
+        aliceAgain.revokeDevice(aliceLogin.token, aliceAgain.currentDeviceId)
+        val revokedError = runCatching {
+            TestAccounts.withLoginBudget {
+                SecureBackend(server, root).login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+            }
+        }.exceptionOrNull()
+        assertTrue(
+            revokedError?.message?.contains("已被注销") == true,
+            "已注销设备应给出明确提示：$revokedError",
+        )
+
+        // 换新设备标识即可继续使用：旧设备目录保留，离线历史仍能打开。
+        val newRoot = Files.createTempDirectory("mim-vault-new")
+        writeDeviceId(newRoot, alice, "testalice-new-" + System.currentTimeMillis().toString().takeLast(6))
+        val aliceNew = SecureBackend(server, newRoot)
+        val newLogin = TestAccounts.withLoginBudget {
+            aliceNew.login(alice, TestAccounts.PASSWORD, "Alice Desktop 2")
+        }
+        bobBackend.send(bobLogin.token, alice, "after new device")
+        val afterNewDevice = aliceNew.poll(newLogin.token).firstOrNull { it.contactId == bob }
+        assertTrue(afterNewDevice != null, "新设备应能收到消息")
+        assertEquals("after new device", afterNewDevice.message.text)
     }
 
     private suspend fun safetyCode(
@@ -135,21 +158,15 @@ class SecureBackendTest {
         return com.junesoon.mim.app.domain.SafetyNumber.of(own, key.publicKeyBase64)
     }
 
-    /** 清掉历史遗留设备，避免多设备分发把测试放大。 */
+    /** 清掉历史遗留的测试设备，避免多设备分发把测试放大。 */
     private suspend fun pruneOtherDevices(server: String, token: String, keep: String) {
-        val response: Envelope<DeviceList> = client.get("$server/device") {
-            header("Authorization", "Bearer $token")
-        }.body()
-        if (response.status != 200) return
-        for (device in response.data?.devices.orEmpty()) {
-            val id = device.deviceId ?: continue
-            if (id == keep) continue
-            runCatching {
-                client.delete("$server/device/$id") {
-                    header("Authorization", "Bearer $token")
-                }
-            }
-        }
+        KeyRegistry(server).pruneOtherDevices(token, keep, listOf("test"))
+    }
+
+    private fun writeDeviceId(root: java.nio.file.Path, username: String, deviceId: String) {
+        val dir = root.resolve(username)
+        Files.createDirectories(dir)
+        Files.write(dir.resolve("device.txt"), deviceId.toByteArray(Charsets.UTF_8))
     }
 
     private fun withEnv(block: suspend CoroutineScope.(String) -> Unit) {
@@ -158,23 +175,4 @@ class SecureBackendTest {
         runBlocking { block(server) }
     }
 
-    private val client: HttpClient by lazy {
-        HttpClient(CIO) { install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) } }
-    }
-
-    @Serializable
-    private data class Envelope<T>(
-        val status: Int = 0,
-        val message: String? = null,
-        val data: T? = null,
-    )
-
-    @Serializable
-    private data class DeviceList(
-        val count: Int = 0,
-        val devices: List<DeviceDto> = emptyList(),
-    )
-
-    @Serializable
-    private data class DeviceDto(val deviceId: String? = null)
 }

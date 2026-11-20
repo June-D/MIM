@@ -24,7 +24,9 @@ class HttpBackendTest {
             TestAccounts.ensure(server, username)
 
             val backend = HttpBackend(server)
-            val result = backend.login(username, password, TestAccounts.uniqueDevice("login"))
+            val result = TestAccounts.withLoginBudget {
+                backend.login(username, password, TestAccounts.uniqueDevice("login"))
+            }
             assertTrue(result.token.isNotBlank(), "登录未返回令牌")
             assertTrue(result.displayName == username)
             // 新账号还没有联系人；这里只验证接口可用且能解析。

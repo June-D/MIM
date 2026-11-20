@@ -5,13 +5,13 @@ import io.ktor.client.call.body
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.client.request.get
-import io.ktor.client.request.delete
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.http.ContentType
 import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
+import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -59,36 +59,21 @@ object TestAccounts {
         }
     }
 
-    /** 登录拿令牌；登录本身不登记设备，可用于清理。 */
-    suspend fun loginToken(server: String, username: String, deviceId: String): String {
-        val response: TestEnvelope<String> = client.post("$server/login/token") {
-            header("X-Device-Id", deviceId)
-            contentType(ContentType.Application.Json)
-            setBody(mapOf("username" to username, "password" to PASSWORD))
-        }.body()
-        check(response.status == 200) { response.message ?: "登录失败" }
-        return response.data ?: error("登录未返回令牌")
-    }
-
     /**
-     * 清掉账号下的其它设备。
+     * 在登录限流内执行；撞到「请求过于频繁」就等一个窗口再试一次。
      *
-     * 服务端每账号最多 10 台；测试每次都建新设备，不清理很快就会撞上限。
+     * 服务端按 IP 限每分钟 10 次登录，整套联调共 8 次以上，
+     * 连着跑两遍必然撞上。等一个窗口比让测试随机失败更有用。
      */
-    suspend fun clearDevices(server: String, username: String) {
-        val temp = uniqueDevice("clean")
-        val token = loginToken(server, username, temp)
-        val list: TestEnvelope<AccountDeviceList> = client.get("$server/device") {
-            header("Authorization", "Bearer $token")
-        }.body()
-        if (list.status != 200) return
-        for (device in list.data?.devices.orEmpty()) {
-            val id = device.deviceId ?: continue
-            runCatching {
-                client.delete("$server/device/$id") {
-                    header("Authorization", "Bearer $token")
-                }
+    suspend fun <T> withLoginBudget(block: suspend () -> T): T {
+        return try {
+            block()
+        } catch (error: Exception) {
+            if (error.message?.contains("请求过于频繁") != true) {
+                throw error
             }
+            delay(61_000)
+            block()
         }
     }
 
@@ -117,12 +102,3 @@ internal data class TestEnvelope<T>(
     val message: String? = null,
     val data: T? = null,
 )
-
-@Serializable
-internal data class AccountDeviceList(
-    val count: Int = 0,
-    val devices: List<AccountDevice> = emptyList(),
-)
-
-@Serializable
-internal data class AccountDevice(val deviceId: String? = null)

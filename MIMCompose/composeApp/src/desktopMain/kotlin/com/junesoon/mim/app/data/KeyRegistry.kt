@@ -42,9 +42,60 @@ class KeyRegistry(
         deviceName: String,
         oneTimeCount: Int = 20,
     ): RustKeyBundle {
+        val bundle = NativeKeyProvider.newBundle(version = 1, oneTimeCount = oneTimeCount)
+        upload(bundle, token, password, deviceId, deviceName)
+        return bundle
+    }
+
+    /**
+     * 把已有的密钥包重新登记到服务端。
+     *
+     * 设备被注销（或测试清理）后，本地私钥还在但服务端看不到这台设备，
+     * 于是别人发不过来。这里复用同一份密钥包重新登记，不生成新密钥，
+     * 已有会话与棘轮状态因此不受影响。
+     */
+    suspend fun republish(
+        token: String,
+        password: String,
+        deviceId: String,
+        deviceName: String,
+        bundle: RustKeyBundle,
+    ) {
+        upload(bundle, token, password, deviceId, deviceName)
+    }
+
+    /**
+     * 本设备相对服务端的状态。
+     *
+     * 注销是软删除：已注销设备的令牌会被服务端直接拒绝，
+     * 所以必须与「设备行不存在」区分开，前者只能换设备重新登录。
+     */
+    suspend fun deviceState(token: String, deviceId: String): DeviceState {
+        val response: ApiEnvelope<DeviceListDto> = client.get("$baseUrl/device") {
+            header("Authorization", "Bearer $token")
+        }.body()
+        if (response.status != 200) {
+            return if (response.message?.contains("已注销") == true) {
+                DeviceState.REVOKED
+            } else {
+                DeviceState.UNKNOWN
+            }
+        }
+        val active = response.data?.devices.orEmpty().any {
+            it.deviceId == deviceId && it.revoked != true
+        }
+        return if (active) DeviceState.ACTIVE else DeviceState.UNREGISTERED
+    }
+
+    private suspend fun upload(
+        bundle: RustKeyBundle,
+        token: String,
+        password: String,
+        deviceId: String,
+        deviceName: String,
+    ) {
         postVoid("$baseUrl/device", token, DeviceRegisterRequest(deviceId, deviceName))
 
-        val bundle = NativeKeyProvider.newBundle(version = 1, oneTimeCount = oneTimeCount)
         postVoid(
             "$baseUrl/key", token,
             KeyUploadRequest(
@@ -76,15 +127,15 @@ class KeyRegistry(
                 },
             )
         }
-        return bundle
     }
 
     /**
-     * 注销本账号下的其它设备（只保留 keep）。
+     * 注销本账号下指定前缀的其它设备（只保留 keep）。
      *
-     * 服务端每账号最多 10 台；测试与设备管理都需要这个动作。
+     * 服务端每账号最多 10 台。测试每次新建设备，必须清理自己造的那些；
+     * 前缀是安全边界：绝不碰用户真实设备的 `desktop-` 标识。
      */
-    suspend fun pruneOtherDevices(token: String, keep: String) {
+    suspend fun pruneOtherDevices(token: String, keep: String, prefixes: List<String>) {
         val response: ApiEnvelope<DeviceListDto> = client.get("$baseUrl/device") {
             header("Authorization", "Bearer $token")
         }.body()
@@ -93,7 +144,7 @@ class KeyRegistry(
         }
         for (device in response.data?.devices.orEmpty()) {
             val id = device.deviceId ?: continue
-            if (id == keep) continue
+            if (id == keep || prefixes.none { id.startsWith(it) }) continue
             runCatching {
                 client.delete("$baseUrl/device/$id") {
                     header("Authorization", "Bearer $token")
@@ -120,6 +171,21 @@ class KeyRegistry(
         val envelope: StatusEnvelope = response.body()
         require(envelope.status == 200) { envelope.message ?: "请求失败：$url" }
     }
+}
+
+/** 本设备在服务端的登记状态。 */
+enum class DeviceState {
+    /** 已登记且未注销。 */
+    ACTIVE,
+
+    /** 设备行不存在，可用同一份密钥重新登记。 */
+    UNREGISTERED,
+
+    /** 已注销，令牌被拒；只能换设备或用新设备标识重新登录。 */
+    REVOKED,
+
+    /** 查询失败（网络或其它原因），本次不做处理。 */
+    UNKNOWN,
 }
 
 /** 由 Rust 生成的密钥包（字段名与 `keys.rs` 的序列化一致）。 */

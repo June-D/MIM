@@ -74,8 +74,6 @@ import java.util.UUID
 class SecureBackend(
     private val server: String,
     private val vaultRoot: Path = LocalVault.defaultRoot(),
-    /** 登录后先注销本账号的其它设备（测试与「重置」场景用）。 */
-    private val pruneOtherDevices: Boolean = false,
     private val client: HttpClient = HttpClient(CIO) {
         // 服务端要求 sealed 等字段显式出现，默认值必须参与序列化。
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true }) }
@@ -181,12 +179,28 @@ class SecureBackend(
         cachedToken = token
 
         vault = LocalVault(vaultRoot, username, cachedDeviceId)
-        if (pruneOtherDevices) {
-            KeyRegistry(server).pruneOtherDevices(token, cachedDeviceId)
+        val registry = KeyRegistry(server)
+        val stored = vault.loadBundle()
+        bundle = if (stored == null) {
+            registry
+                .provision(token, password, cachedDeviceId, deviceName.ifBlank { "Compose Desktop" })
+                .also { vault.saveBundle(it) }
+        } else {
+            // 本地私钥还在，但服务端可能没有这台设备（库被清理或换机）。
+            // 设备行缺失时用同一份密钥重新登记；已注销的设备令牌会被拒，只能换设备。
+            when (registry.deviceState(token, cachedDeviceId)) {
+                DeviceState.UNREGISTERED -> registry.republish(
+                    token, password, cachedDeviceId,
+                    deviceName.ifBlank { "Compose Desktop" }, stored,
+                )
+                DeviceState.REVOKED -> throw IllegalStateException(
+                    "本设备已被注销。请删除 ~/.mim/$cachedUsername 后重新登录" +
+                        "（旧消息将无法解密），或换一台设备登录。",
+                )
+                DeviceState.ACTIVE, DeviceState.UNKNOWN -> Unit
+            }
+            stored
         }
-        bundle = vault.loadBundle() ?: KeyRegistry(server)
-            .provision(token, password, cachedDeviceId, deviceName.ifBlank { "Compose Desktop" })
-            .also { vault.saveBundle(it) }
 
         storeJson = vault.loadStore()
         messages = vault.loadMessages().distinctBy { it.id }.toMutableList()
