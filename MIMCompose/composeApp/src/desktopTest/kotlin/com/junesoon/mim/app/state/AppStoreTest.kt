@@ -166,6 +166,84 @@ class AppStoreTest {
     }
 
     @Test
+    fun sending_file_goes_through_media_backend() {
+        val stored = mutableListOf<ChatMessage>()
+        val calls = mutableListOf<String>()
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "")))
+
+            override suspend fun sendFile(
+                token: String,
+                contactId: String,
+                bytes: ByteArray,
+                mime: String,
+                name: String,
+            ): ChatMessage {
+                calls += "$name|${bytes.size}|$mime"
+                val message = ChatMessage("f1", true, name, "10:00", epochMs = 1_000, kind = "file")
+                stored += message
+                return message
+            }
+
+            override suspend fun history(token: String, contactId: String): List<ChatMessage> =
+                stored.toList()
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+        store.openChat("bob")
+        store.sendFile(ByteArray(2048) { 7 }, "季度预算.xlsx", "application/vnd.ms-excel")
+
+        assertEquals(listOf("季度预算.xlsx|2048|application/vnd.ms-excel"), calls)
+        assertTrue(store.state.value.messages["bob"].orEmpty().any { it.kind == "file" })
+    }
+
+    /** 屏蔽期间不允许发文件，且不应调用到后端。 */
+    @Test
+    fun blocked_contact_cannot_send_file() {
+        var called = false
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "")))
+
+            override suspend fun sendFile(
+                token: String,
+                contactId: String,
+                bytes: ByteArray,
+                mime: String,
+                name: String,
+            ): ChatMessage {
+                called = true
+                return ChatMessage("f1", true, name, "10:00", kind = "file")
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+        store.openChat("bob")
+        store.toggleBlock("bob")
+        store.sendFile(ByteArray(16), "a.txt", "text/plain")
+
+        assertTrue(!called, "屏蔽后不应调用发送")
+        assertEquals("已屏蔽该联系人，解除屏蔽后才能发送", store.state.value.error)
+    }
+
+    @Test
     fun pinned_contact_sorts_before_recent_ones() {
         val store = store()
         store.login("alice", "pass1234", "desktop")

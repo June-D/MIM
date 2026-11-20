@@ -213,6 +213,7 @@ private fun ConversationWorkspace(state: AppState, store: AppStore, selectedId: 
                     onSend = store::send,
                     onSendImage = store::sendImage,
                     onSendVoice = store::sendVoice,
+                    onSendFile = store::sendFile,
                     loadMedia = { message -> store.loadMedia(message) },
                     scrollToMessageId = state.pendingScrollMessageId,
                     onScrolled = store::consumeScrollTarget,

@@ -43,6 +43,7 @@ enum class MimIcon {
     Pin,
     Down,
     Eye,
+    Clip,
 }
 
 @Composable
@@ -69,6 +70,20 @@ fun MimIcon(
             MimIcon.Down -> {
                 drawLine(tint, points(0.26f, 0.42f), points(0.5f, 0.66f), stroke.width, StrokeCap.Round)
                 drawLine(tint, points(0.5f, 0.66f), points(0.74f, 0.42f), stroke.width, StrokeCap.Round)
+            }
+            MimIcon.Clip -> {
+                // 回形针：斜向两段弧，末端收在右上。
+                val clip = Path().apply {
+                    moveTo(side * 0.66f, side * 0.22f)
+                    lineTo(side * 0.3f, side * 0.58f)
+                    quadraticBezierTo(side * 0.2f, side * 0.78f, side * 0.38f, side * 0.82f)
+                    quadraticBezierTo(side * 0.55f, side * 0.86f, side * 0.68f, side * 0.66f)
+                    lineTo(side * 0.8f, side * 0.38f)
+                    quadraticBezierTo(side * 0.86f, side * 0.16f, side * 0.66f, side * 0.2f)
+                    quadraticBezierTo(side * 0.48f, side * 0.24f, side * 0.4f, side * 0.42f)
+                    lineTo(side * 0.26f, side * 0.66f)
+                }
+                drawPath(clip, tint, style = stroke)
             }
             MimIcon.Eye -> {
                 // 杏仁形眼眶 + 瞳孔：密码可见性开关，比文字「显示」更省空间。

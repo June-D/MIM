@@ -68,6 +68,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
@@ -95,6 +96,7 @@ fun ChatScreen(
     onSend: (String) -> Unit,
     onSendImage: (ByteArray, String, String?) -> Unit = { _, _, _ -> },
     onSendVoice: (ByteArray, Long) -> Unit = { _, _ -> },
+    onSendFile: (ByteArray, String, String) -> Unit = { _, _, _ -> },
     loadMedia: suspend (ChatMessage) -> ByteArray? = { null },
     scrollToMessageId: String? = null,
     onScrolled: () -> Unit = {},
@@ -403,6 +405,15 @@ fun ChatScreen(
                         }
                         null
                     }.getOrElse { it.message ?: "图片读取失败" }
+                }
+                ComposerIcon(MimIcon.Clip, tooltip = "发送文件（≤8MB）", enabled = recorder == null) {
+                    localError = runCatching {
+                        val picked = MediaTools.pickFile()
+                        if (picked != null) {
+                            onSendFile(picked.bytes, picked.name, picked.mime)
+                        }
+                        null
+                    }.getOrElse { it.message ?: "文件读取失败" }
                 }
                 ComposerIcon(
                     MimIcon.Mic,
@@ -735,6 +746,7 @@ private fun MessageRow(
                     )
                     message.kind == "image" -> MessageImage(message, loadMedia, onOpenImage)
                     message.kind == "voice" -> MessageVoice(message, loadMedia)
+                    message.kind == "file" -> MessageFile(message, loadMedia)
                     else -> Text(
                         message.text,
                         style = MaterialTheme.typography.bodyMedium,
@@ -924,6 +936,100 @@ private fun MessageVoice(
                     color = if (message.fromMe) Color(0xCCFDFDFB) else MimPalette.InkSoft,
                 )
             }
+        }
+    }
+}
+
+private enum class FileStatus { Idle, Saving, Saved, Failed }
+
+/**
+ * 文件消息。
+ *
+ * 密文只在本地缓存里，点一下才会解密并落到用户选的路径；
+ * 保存失败要说明是「解密不出来」还是「写盘失败」，不假装成功。
+ */
+@Composable
+private fun MessageFile(message: ChatMessage, loadMedia: suspend (ChatMessage) -> ByteArray?) {
+    val attachment = message.media
+    val mine = message.fromMe
+    var status by remember(message.id) { mutableStateOf(FileStatus.Idle) }
+    val scope = rememberCoroutineScope()
+    val ink = if (mine) Color(0xFFFDFDFB) else MimPalette.Ink
+    val soft = if (mine) Color(0xCCFDFDFB) else MimPalette.InkSoft
+    val badge = if (mine) Color(0x22FFFFFF) else MimPalette.TealSoft
+
+    Row(
+        modifier = Modifier
+            .widthIn(min = 188.dp, max = 252.dp)
+            .clip(RoundedCornerShape(8.dp))
+            .mimHoverable(
+                shape = RoundedCornerShape(8.dp),
+                hoverColor = if (mine) Color(0x1FFFFFFF) else MimPalette.Hover,
+                enabled = attachment != null && status != FileStatus.Saving,
+                onClick = {
+                    val media = attachment ?: return@mimHoverable
+                    scope.launch {
+                        status = FileStatus.Saving
+                        val bytes = runCatching { loadMedia(message) }.getOrNull()
+                        if (bytes == null) {
+                            status = FileStatus.Failed
+                            return@launch
+                        }
+                        val saved = runCatching { MediaTools.saveFile(media.name ?: "mim-file", bytes) }
+                            .getOrNull()
+                        status = if (saved != null) FileStatus.Saved else FileStatus.Failed
+                    }
+                },
+            )
+            .padding(vertical = 1.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(9.dp),
+    ) {
+        Box(
+            modifier = Modifier.size(32.dp).clip(RoundedCornerShape(7.dp)).background(badge),
+            contentAlignment = Alignment.Center,
+        ) {
+            when (status) {
+                FileStatus.Saving -> Text("…", style = MaterialTheme.typography.bodyMedium, color = soft)
+                FileStatus.Saved -> MimIcon(
+                    MimIcon.Check,
+                    size = 15.dp,
+                    tint = if (mine) Color(0xFFFDFDFB) else MimPalette.Teal,
+                )
+                FileStatus.Failed -> MimIcon(
+                    MimIcon.Close,
+                    size = 15.dp,
+                    tint = if (mine) Color(0xFFFDFDFB) else MimPalette.Danger,
+                )
+                FileStatus.Idle -> MimIcon(
+                    MimIcon.Clip,
+                    size = 15.dp,
+                    tint = if (mine) Color(0xFFFDFDFB) else MimPalette.Teal,
+                )
+            }
+        }
+        Column(verticalArrangement = Arrangement.spacedBy(1.dp)) {
+            Text(
+                attachment?.name ?: message.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = ink,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                when (status) {
+                    FileStatus.Saving -> "解密中…"
+                    FileStatus.Saved -> "已保存到本机"
+                    FileStatus.Failed -> "保存失败，点一下重试"
+                    FileStatus.Idle -> MediaTools.humanSize((attachment?.size ?: 0).toLong()) + " · 点击保存"
+                },
+                style = MaterialTheme.typography.labelSmall,
+                color = if (status == FileStatus.Failed) {
+                    if (mine) Color(0xFFFFD9D4) else MimPalette.Danger
+                } else {
+                    soft
+                },
+            )
         }
     }
 }

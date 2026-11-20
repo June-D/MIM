@@ -51,6 +51,20 @@ interface MessagingBackend {
         caption: String,
     ): ChatMessage = unsupported("语音")
 
+    /**
+     * 发送任意文件。
+     *
+     * 与图片/语音同一条链路：一次性密钥 AES-GCM 加密后上传密文，
+     * 消息里只带媒体引用、密钥、文件名与大小；服务端拿不到文件名和类型。
+     */
+    suspend fun sendFile(
+        token: String,
+        contactId: String,
+        bytes: ByteArray,
+        mime: String,
+        name: String,
+    ): ChatMessage = unsupported("文件")
+
     /** 读取并解密本地缓存的媒体明文；拿不到时返回 null。 */
     fun mediaBytes(message: ChatMessage): ByteArray? = null
 

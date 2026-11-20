@@ -273,6 +273,54 @@ class SecureBackendTest {
         assertTrue(bobAgain.history(bobAgainLogin.token, alice).isEmpty(), "清除后本地不应再有内容")
     }
 
+    /**
+     * 任意文件附件：A 加密上传 → 只带引用与密钥发出 → B 解密拿到同一份字节。
+     * 服务端只见到密文，文件名与类型都在端到端密文里。
+     */
+    @Test
+    fun file_attachment_round_trip() = withEnv { server ->
+        val alice = "composealice"
+        val bob = "composebob"
+        TestAccounts.ensure(server, alice)
+        TestAccounts.ensure(server, bob)
+        val root = Files.createTempDirectory("mim-file-vault")
+        writeDeviceId(root, alice, "testalice-" + System.currentTimeMillis().toString().takeLast(6))
+        writeDeviceId(root, bob, "testbob-" + System.currentTimeMillis().toString().takeLast(6))
+
+        val aliceBackend = SecureBackend(server, root)
+        val aliceLogin = TestAccounts.withLoginBudget {
+            aliceBackend.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        }
+        pruneOtherDevices(server, aliceLogin.token, aliceBackend.currentDeviceId)
+
+        val bobBackend = SecureBackend(server, root)
+        val bobLogin = TestAccounts.withLoginBudget {
+            bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
+        }
+        pruneOtherDevices(server, bobLogin.token, bobBackend.currentDeviceId)
+
+        val payload = ByteArray(4096) { index -> (index % 251).toByte() }
+        aliceBackend.sendFile(
+            token = aliceLogin.token,
+            contactId = bob,
+            bytes = payload,
+            mime = "application/pdf",
+            name = "季度预算.pdf",
+        )
+
+        val incoming = bobBackend.poll(bobLogin.token).firstOrNull { it.contactId == alice }
+        assertTrue(incoming != null, "B 未收到文件消息")
+        val message = incoming!!.message
+        assertEquals("file", message.kind)
+        assertEquals("季度预算.pdf", message.media?.name, "文件名只在密文里，收到后应还原")
+        assertEquals("application/pdf", message.media?.mime)
+        assertEquals(payload.size, message.media?.size)
+
+        val received = bobBackend.mediaBytes(message)
+        assertTrue(received != null, "B 应能解密文件内容")
+        assertTrue(received!!.contentEquals(payload), "解密后的字节必须与发送的一致")
+    }
+
     private fun withEnv(block: suspend CoroutineScope.(String) -> Unit) {
         val server = System.getenv("MIM_SERVER_URL") ?: return
         if (System.getenv("MIM_NATIVE_LIB").isNullOrBlank()) return

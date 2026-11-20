@@ -787,6 +787,26 @@ class SecureBackend(
         durationMs = durationMs,
     )
 
+    /** 任意文件：与图片/语音共用加密上传与消息载荷，只是 kind 与文件名不同。 */
+    override suspend fun sendFile(
+        token: String,
+        contactId: String,
+        bytes: ByteArray,
+        mime: String,
+        name: String,
+    ): ChatMessage = sendMedia(
+        token = token,
+        contactId = contactId,
+        bytes = bytes,
+        kind = "file",
+        mime = mime.ifBlank { "application/octet-stream" },
+        name = name,
+        caption = "",
+        width = null,
+        height = null,
+        durationMs = null,
+    )
+
     private suspend fun sendMedia(
         token: String,
         contactId: String,
@@ -835,7 +855,14 @@ class SecureBackend(
                 durationMs = attachment.durationMs,
             ),
         )
-        val display = caption.ifBlank { if (kind == "image") "[图片]" else "[语音]" }
+        val display = caption.ifBlank {
+            when (kind) {
+                "image" -> "[图片]"
+                "voice" -> "[语音]"
+                // 文件用文件名当预览，列表里一眼能看出收到的是什么。
+                else -> name?.takeIf { it.isNotBlank() } ?: "[文件]"
+            }
+        }
         return sendEncoded(
             token = token,
             contactId = contactId,
@@ -1050,7 +1077,12 @@ class SecureBackend(
         val display = when {
             parsed == null -> plaintext
             else -> parsed.text.ifBlank {
-                if (parsed.kind == "image") "[图片]" else "[语音]"
+                when (parsed.kind) {
+                    "image" -> "[图片]"
+                    "voice" -> "[语音]"
+                    else -> parsed.media.name?.takeIf { it.isNotBlank() }?.let { "[文件] $it" }
+                        ?: "[文件]"
+                }
             }
         }
         if (parsed != null && attachment != null && vault.loadMedia(attachment.id) == null) {

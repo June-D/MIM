@@ -495,6 +495,23 @@ class AppStore(
         }
     }
 
+    /** 发送任意文件；媒体文件先加密再上传，消息里只带引用与密钥。 */
+    fun sendFile(bytes: ByteArray, name: String, mime: String) {
+        val currentToken = token ?: return
+        val chat = _state.value.screen as? Screen.Chat ?: return
+        if (chat.contactId in _state.value.blockedPeers) {
+            _state.update { it.copy(error = "已屏蔽该联系人，解除屏蔽后才能发送") }
+            return
+        }
+        scope.launch {
+            runCatching { backend.sendFile(currentToken, chat.contactId, bytes, mime, name) }
+                .onSuccess { refreshHistory(currentToken, chat.contactId) }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "文件发送失败") }
+                }
+        }
+    }
+
     /** 读取并解密媒体明文；在 IO 线程做，避免解密大文件卡住界面。 */
     suspend fun loadMedia(message: ChatMessage): ByteArray? = withContext(Dispatchers.IO) {
         runCatching { backend.mediaBytes(message) }.getOrNull()

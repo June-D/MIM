@@ -48,6 +48,16 @@ if [[ "$CHECK_ONLY" == "1" ]]; then
 fi
 
 # 3) 启动界面。
+# Gradle 8.10 的 Kotlin DSL 解析不了 JDK 25 的版本号（报 IllegalArgumentException: 25.x）。
+# 本机默认 java 可能是新版本，这里显式挑 17 / 21，避免启动时只看到一行看不懂的报错。
+if [[ -z "${JAVA_HOME:-}" ]] && [[ -x /usr/libexec/java_home ]]; then
+    CANDIDATE="$(/usr/libexec/java_home -v 17 2>/dev/null || /usr/libexec/java_home -v 21 2>/dev/null || true)"
+    if [[ -n "$CANDIDATE" ]]; then
+        export JAVA_HOME="$CANDIDATE"
+        echo "使用 JDK：$JAVA_HOME"
+    fi
+fi
+
 cd "$ROOT/MIMCompose"
 export MIM_SERVER_URL="$SERVER_URL"
 export MIM_NATIVE_LIB="$LIB"
