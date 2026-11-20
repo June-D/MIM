@@ -338,7 +338,7 @@ MIMCompose/run-desktop.sh --check  # 只检查环境，不打开窗口
 ```
 
 保险库在 `~/.mim/<用户名>/<设备>/`：密钥包、会话状态、消息缓存、离线队列、
-屏蔽名单全部 AES-GCM 加密，密钥文件 0600。
+屏蔽名单、媒体密文（`media/`）全部 AES-GCM 加密，密钥文件 0600。
 
 ### 自测
 
@@ -359,7 +359,8 @@ cd MIMCoreRust && ./tools/jni_test.sh  # 桌面 JVM 经 JNI 跑完整会话（An
 cd MIMCompose && ./gradlew :composeApp:run            # 演示后端
 MIMCompose/run-desktop.sh                             # 真实服务端 + Rust 动态库
 MIMCompose/run-desktop.sh --check                     # 只检查环境
-cd MIMCompose && ./gradlew :composeApp:desktopTest    # 状态测试；联调需 MIM_SERVER_URL
+# 16 项：8 状态 + 1 本地加密 + 7 真实服务端联调（需 MIM_SERVER_URL 与 MIM_NATIVE_LIB）
+cd MIMCompose && ./gradlew :composeApp:desktopTest
 
 # Rust 动态库必须带 jni 特性，否则 Kotlin 找不到 JNI 符号
 cd MIMCoreRust && cargo build --release --features jni

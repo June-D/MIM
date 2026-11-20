@@ -128,6 +128,26 @@ interface MessagingBackend {
     /** 本机已屏蔽的联系人。 */
     fun blockedContacts(): Set<String> = emptySet()
 
+    /** 本机置顶的会话；纯本地偏好，不上报服务端。 */
+    fun pinnedContacts(): Set<String> = emptySet()
+
+    fun setPinned(contactId: String, pinned: Boolean) = Unit
+
+    /** 该会话「已读到哪里」的时间水位；0 表示还没记录过。 */
+    fun readMark(contactId: String): Long = 0L
+
+    fun setReadMark(contactId: String, epochMs: Long) = Unit
+
+    /** 上次见到的对端设备安全码：设备 id → 安全码（仅当前联系人）。 */
+    fun safetyCodes(contactId: String): Map<String, String> = emptyMap()
+
+    /**
+     * 记住对端设备的安全码。
+     *
+     * 只记录公钥派生的安全码，不保存公钥本身；用于下一次比对是否变更。
+     */
+    fun rememberSafetyCodes(contactId: String, codes: Map<String, String>) = Unit
+
     /** 账号是否开启了二次验证。 */
     suspend fun twoFactorEnabled(token: String): Boolean = false
 

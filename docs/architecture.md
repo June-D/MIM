@@ -31,12 +31,12 @@ MIMCoreRust/             Rust 可行性 spike：对拍 + 互通 + C ABI（需要
   tools/interop.sh       Rust ⇄ Java 真实收发联调
   tools/ffi_test.sh      链接 Rust 静态库的 C 冒烟测试
   tools/jni_test.sh      桌面 JVM 经 JNI 跑完整会话（Android 调用形态）
-MIMCore/                 协议核心（不依赖 JavaFX/Feign，移动端与 Rust 移植的基准）
+MIMCore/                 协议核心（不依赖 UI/Feign，移动端与 Rust 移植的基准）
   crypto/                 Hkdf、DhKeyUtil、RatchetService(X3DH+双棘轮)、SessionState、
                           SessionStore、PreKeyStore、IdentityStore、SecretBox、TrustStore、
                           SyncEnvelope、SenderCertEnvelope、TagEnvelope、BlindRsaToken
   src/test/java/          129 项协议单测
-  src/test/e2e/           端到端脚本（30 + 9 + 18 + 7 + 13 项，需真实服务端；
+  src/test/e2e/           端到端脚本（30 + 18 + 8 + 13 + 6 项，需真实服务端；
                           只依赖 mim-core 与 JDK 自带 HTTP，不依赖 UI）
 
 MIMCompose/             PC 主客户端（Compose Multiplatform，JVM 17）

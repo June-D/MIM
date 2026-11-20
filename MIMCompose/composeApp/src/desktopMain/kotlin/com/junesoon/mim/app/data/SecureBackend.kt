@@ -108,6 +108,11 @@ class SecureBackend(
     private var messages: MutableList<CachedMessage> = mutableListOf()
     private var serverIds: MutableMap<String, Long> = mutableMapOf()
     private var blockedPeers: MutableSet<String> = mutableSetOf()
+    private var pinnedPeers: MutableSet<String> = mutableSetOf()
+    private var readMarks: MutableMap<String, Long> = mutableMapOf()
+
+    /** key 形如 `联系人|设备`，值是上次见到的安全码。 */
+    private var seenSafetyCodes: MutableMap<String, String> = mutableMapOf()
     private val mediaCache = object : LinkedHashMap<String, ByteArray>(8, 0.75f, true) {}
     private var mediaCacheSize = 0L
     private var outbox: MutableList<OutboxEntry> = mutableListOf()
@@ -219,6 +224,40 @@ class SecureBackend(
     }
 
     override fun blockedContacts(): Set<String> = blockedPeers.toSet()
+
+    override fun pinnedContacts(): Set<String> = pinnedPeers.toSet()
+
+    override fun setPinned(contactId: String, pinned: Boolean) {
+        if (pinned) pinnedPeers += contactId else pinnedPeers -= contactId
+        vault.savePinned(pinnedPeers)
+    }
+
+    override fun readMark(contactId: String): Long = readMarks[contactId] ?: 0L
+
+    override fun setReadMark(contactId: String, epochMs: Long) {
+        if (epochMs <= 0) {
+            return
+        }
+        // 水位只前进不后退：乱序到达的旧消息不能把已读位置往回拨。
+        if (epochMs <= readMark(contactId)) {
+            return
+        }
+        readMarks[contactId] = epochMs
+        vault.saveReadMarks(readMarks)
+    }
+
+    override fun safetyCodes(contactId: String): Map<String, String> =
+        seenSafetyCodes
+            .filterKeys { it.startsWith("$contactId|") }
+            .mapKeys { (key, _) -> key.substringAfter('|') }
+
+    override fun rememberSafetyCodes(contactId: String, codes: Map<String, String>) {
+        if (codes.isEmpty()) {
+            return
+        }
+        codes.forEach { (deviceId, code) -> seenSafetyCodes["$contactId|$deviceId"] = code }
+        vault.saveSafetyCodes(seenSafetyCodes)
+    }
 
     override suspend fun twoFactorEnabled(token: String): Boolean {
         val status: TwoFactorStatusDto = getEnvelope("$server/user/2fa/status", token)
@@ -391,6 +430,9 @@ class SecureBackend(
         serverIds = vault.loadServerIds().toMutableMap()
         outbox = vault.loadOutbox().toMutableList()
         blockedPeers = vault.loadBlocked().toMutableSet()
+        pinnedPeers = vault.loadPinned().toMutableSet()
+        readMarks = vault.loadReadMarks().toMutableMap()
+        seenSafetyCodes = vault.loadSafetyCodes().toMutableMap()
         return LoginResult(token, username, contacts(token))
     }
 

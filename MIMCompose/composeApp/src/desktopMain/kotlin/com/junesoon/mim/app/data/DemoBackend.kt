@@ -16,14 +16,16 @@ import java.util.Locale
 class DemoBackend : MessagingBackend {
 
     private val conversations = mutableMapOf<String, MutableList<ChatMessage>>()
+    private val pinned = mutableSetOf<String>()
+    private val readMarks = mutableMapOf<String, Long>()
 
     init {
         conversations["alice"] = mutableListOf(
-            ChatMessage("a1", false, "密钥指纹核对过了，可以开始。", now()),
-            ChatMessage("a2", true, "收到，先发一条测试消息。", now()),
+            ChatMessage("a1", false, "密钥指纹核对过了，可以开始。", now(), epochMs = stamp()),
+            ChatMessage("a2", true, "收到，先发一条测试消息。", now(), epochMs = stamp()),
         )
         conversations["bob"] = mutableListOf(
-            ChatMessage("b1", false, "晚点把配置文件发你。", now()),
+            ChatMessage("b1", false, "晚点把配置文件发你。", now(), epochMs = stamp()),
         )
     }
 
@@ -59,6 +61,7 @@ class DemoBackend : MessagingBackend {
             fromMe = true,
             text = text,
             time = now(),
+            epochMs = stamp(),
         )
         conversations.getOrPut(contactId) { mutableListOf() }.add(message)
         // 演示回声：真实实现由对端设备解密后产生。
@@ -68,6 +71,7 @@ class DemoBackend : MessagingBackend {
                 fromMe = false,
                 text = "已收到的演示回执",
                 time = now(),
+                epochMs = stamp(),
             )
         )
         return message
@@ -86,5 +90,21 @@ class DemoBackend : MessagingBackend {
         }.sortedByDescending { it.epochMs }
     }
 
+    override fun pinnedContacts(): Set<String> = pinned.toSet()
+
+    override fun setPinned(contactId: String, pinned: Boolean) {
+        if (pinned) this.pinned += contactId else this.pinned -= contactId
+    }
+
+    override fun readMark(contactId: String): Long = readMarks[contactId] ?: 0L
+
+    override fun setReadMark(contactId: String, epochMs: Long) {
+        if (epochMs > readMark(contactId)) {
+            readMarks[contactId] = epochMs
+        }
+    }
+
     private fun now(): String = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
+
+    private fun stamp(): Long = System.currentTimeMillis()
 }

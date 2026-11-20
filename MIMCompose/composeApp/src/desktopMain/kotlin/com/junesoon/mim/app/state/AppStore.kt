@@ -57,6 +57,8 @@ data class AppState(
     val searched: Boolean = false,
     val messages: Map<String, List<ChatMessage>> = emptyMap(),
     val blockedPeers: Set<String> = emptySet(),
+    /** 置顶的会话；只在本机生效。 */
+    val pinnedPeers: Set<String> = emptySet(),
     /** 记住的账号，用于表单预填与自动登录。 */
     val rememberedUsername: String = "",
     val rememberedPassword: String = "",
@@ -75,6 +77,10 @@ data class AppState(
     val messageSearched: Boolean = false,
     /** 进入聊天后要定位到的消息；消费后清空。 */
     val pendingScrollMessageId: String? = null,
+    /** 本次打开会话时的第一条未读；用于渲染「以下为新消息」分隔。 */
+    val firstUnreadMessageId: String? = null,
+    /** 对端设备的安全码与上次记录不一致的设备 id；需要用户重新核对。 */
+    val safetyChanges: Set<String> = emptySet(),
     val error: String? = null,
     /** 非错误提示，例如「验证码已发送」。 */
     val notice: String? = null,
@@ -154,6 +160,7 @@ class AppStore(
                 .onSuccess { result ->
                     token = result.token
                     blockedPeers = backend.blockedContacts().toMutableSet()
+                    pinnedPeers = backend.pinnedContacts().toMutableSet()
                     _state.update { current ->
                         val next = current.copy(
                             screen = Screen.Contacts,
@@ -165,6 +172,7 @@ class AppStore(
                             error = null,
                             notice = null,
                             blockedPeers = blockedPeers.toSet(),
+                            pinnedPeers = pinnedPeers.toSet(),
                             rememberedUsername = if (remember) username.trim() else "",
                             rememberedPassword = if (remember) password else "",
                             rememberedDeviceName = if (remember) device else "",
@@ -382,11 +390,16 @@ class AppStore(
 
     fun openChat(contactId: String) {
         val currentToken = token ?: return
+        // 打开前先记下未读数与本地已读水位：进入会话后角标会被清零。
+        val hadUnread = _state.value.contacts.firstOrNull { it.id == contactId }?.unread?.let { it > 0 } ?: false
+        val readMark = runCatching { backend.readMark(contactId) }.getOrDefault(0L)
         _state.update { current ->
             val next = current.copy(
                 screen = Screen.Chat(contactId),
                 error = null,
                 notice = null,
+                firstUnreadMessageId = null,
+                safetyChanges = emptySet(),
                 contacts = current.contacts.map { contact ->
                     if (contact.id == contactId) contact.copy(unread = 0) else contact
                 },
@@ -397,9 +410,21 @@ class AppStore(
             runCatching { backend.history(currentToken, contactId) }
                 .onSuccess { history ->
                     _state.update { current ->
-                        val next = current.copy(messages = current.messages + (contactId to history))
+                        // 搜索结果已经指定了定位目标时，不让未读起点覆盖它。
+                        val anchor = if (hadUnread && readMark > 0 && current.pendingScrollMessageId == null) {
+                            history.firstOrNull { !it.fromMe && it.epochMs > readMark }?.id
+                        } else {
+                            null
+                        }
+                        val next = current.copy(
+                            messages = current.messages + (contactId to history),
+                            pendingScrollMessageId = anchor ?: current.pendingScrollMessageId,
+                            firstUnreadMessageId = anchor,
+                        )
                         next.copy(contacts = enrich(next.contacts, next))
                     }
+                    val newest = history.maxOfOrNull { it.epochMs } ?: 0L
+                    runCatching { backend.setReadMark(contactId, newest) }
                 }
             runCatching { backend.markRead(currentToken, contactId) }
             refreshStates(currentToken, contactId)

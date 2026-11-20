@@ -74,6 +74,9 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 首次构建会下载 Gradle 与 Compose 依赖。国内网络可加 `MIM_GRADLE_MIRRORS=1`
 启用 Maven 镜像。
 
+当前测试 16 项：8 状态（演示后端）、1 本地加密往返、7 真实服务端联调
+（需要 `MIM_SERVER_URL` 与 `MIM_NATIVE_LIB`；未设置时联调用例会跳过）。
+
 ### 当前接入范围
 
 | 能力 | 演示后端 | 真实后端（SecureBackend） |

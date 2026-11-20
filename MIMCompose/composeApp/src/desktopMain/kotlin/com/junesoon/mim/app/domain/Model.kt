@@ -17,6 +17,19 @@ data class Contact(
     val time: String = "",
     /** 最后一条消息的时间（毫秒），用于会话排序。 */
     val lastEpochMs: Long = 0,
+    /** 置顶：只影响本机列表顺序，不上报服务端。 */
+    val pinned: Boolean = false,
+)
+
+/**
+ * 会话列表排序：置顶优先，其次按最后消息时间倒序，最后按显示名。
+ *
+ * 排序是稳定排序，键相同的会话保持后端返回的顺序，避免每次刷新跳动。
+ */
+fun List<Contact>.sortedForList(): List<Contact> = sortedWith(
+    compareByDescending<Contact> { it.pinned }
+        .thenByDescending { it.lastEpochMs }
+        .thenBy { it.name },
 )
 
 /** 聊天里的一条消息。`fromMe` 决定气泡方向，`pending` 表示尚未送达。 */

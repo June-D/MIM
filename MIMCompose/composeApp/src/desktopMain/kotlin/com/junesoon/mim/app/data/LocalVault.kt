@@ -112,6 +112,47 @@ class LocalVault(
         write("server_ids.bin", JsonCodec.encode(ids))
     }
 
+    /**
+     * 置顶的会话。纯本地偏好，不上报服务端：服务端知道谁被置顶等于多一条关联面。
+     */
+    fun loadPinned(): Set<String> =
+        read("pinned.bin")?.let {
+            runCatching { JsonCodec.decode<Set<String>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun savePinned(peers: Set<String>) {
+        write("pinned.bin", JsonCodec.encode(peers))
+    }
+
+    /**
+     * 每个会话「已读到哪里」的时间水位（毫秒）。
+     *
+     * 只用来在打开会话时定位第一条未读；消息本身不受影响。
+     */
+    fun loadReadMarks(): Map<String, Long> =
+        read("read_marks.bin")?.let {
+            runCatching { JsonCodec.decode<Map<String, Long>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveReadMarks(marks: Map<String, Long>) {
+        write("read_marks.bin", JsonCodec.encode(marks))
+    }
+
+    /**
+     * 上次见到的对端设备安全码，key 形如 `联系人|设备`。
+     *
+     * 只保存安全码本身（公钥派生的摘要），不含任何密钥材料；
+     * 对端换密钥后安全码会变，据此提醒用户重新核对。
+     */
+    fun loadSafetyCodes(): Map<String, String> =
+        read("safety.bin")?.let {
+            runCatching { JsonCodec.decode<Map<String, String>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveSafetyCodes(codes: Map<String, String>) {
+        write("safety.bin", JsonCodec.encode(codes))
+    }
+
     private fun loadOrCreateKey(): ByteArray {
         val file = dir.resolve("key.bin")
         if (Files.exists(file)) {
