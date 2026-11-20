@@ -653,7 +653,7 @@ private fun MessageImage(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         when (val current = state) {
             ImageState.Loading -> MediaPlaceholder("图片加载中…", message.fromMe)
-            ImageState.Missing -> MediaPlaceholder("图片不可用（本地缓存已清除）", message.fromMe)
+            ImageState.Missing -> MediaPlaceholder("图片无法显示（格式不支持或缓存缺失）", message.fromMe)
             is ImageState.Ready -> Image(
                 bitmap = current.bitmap,
                 contentDescription = "图片消息",
@@ -683,6 +683,7 @@ private fun MessageVoice(
     var bytes by remember(message.id) { mutableStateOf<ByteArray?>(null) }
     var loading by remember(message.id) { mutableStateOf(false) }
     var playing by remember(message.id) { mutableStateOf(false) }
+    var failed by remember(message.id) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val tint = if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Teal
 
@@ -700,8 +701,10 @@ private fun MessageVoice(
                 val loaded = bytes ?: runCatching { loadMedia(message) }.getOrNull()
                 loading = false
                 if (loaded == null) {
+                    failed = true
                     return@launch
                 }
+                failed = false
                 bytes = loaded
                 MediaTools.playVoice(loaded)
                 playing = true
@@ -724,9 +727,13 @@ private fun MessageVoice(
         }
         Column {
             Text(
-                "语音 " + formatDuration(message.media?.durationMs ?: 0),
+                if (failed) "语音不可用" else "语音 " + formatDuration(message.media?.durationMs ?: 0),
                 style = MaterialTheme.typography.bodyMedium,
-                color = if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Ink,
+                color = if (failed) {
+                    if (message.fromMe) Color(0xCCFDFDFB) else MimPalette.Danger
+                } else {
+                    if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Ink
+                },
             )
             val caption = captionOf(message, "[语音]")
             if (caption.isNotBlank()) {
