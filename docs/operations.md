@@ -220,7 +220,24 @@ export MIM_MEDIA_MAX_BYTES=18000000         # 单个密文文件上限
 
 上传先写 `.part` 再原子改名；记录落库失败会删掉文件。服务端只知道
 「谁上传、多大、什么时候」，不知道文件名、类型或内容。
-清理策略尚未实现：删除消息不会自动删除服务端密文，需要后续加保留期任务。
+**保留期**：服务端看不到密文里的媒体 id，无法判断某个密文是否还被某条消息
+引用，所以清理只有两条经过论证的路径：
+
+1. **引用解除**：发送方本机知道媒体 id，清除会话或撤回时调 `DELETE /media/{id}`
+   （接口只允许上传者删）。对方上传的密文由对方客户端处理。
+2. **保留期巡检**：每天 03:30 按 `crt_time` 删除超过 `MIM_MEDIA_RETENTION_DAYS`
+   的密文（默认 30 天）。先删文件再删库行：文件删不掉就保留记录，下一轮重试，
+   不会留下「库里没有、磁盘还在」的孤儿文件。
+
+```bash
+export MIM_MEDIA_RETENTION_DAYS=30          # 0 表示永不清理
+export MIM_MEDIA_PURGE_BATCH=200            # 单批清理条数
+export MIM_MEDIA_PURGE_CRON="0 30 3 * * ?"  # 巡检时间
+```
+
+过期后消息里的附件无法再下载，客户端显示「附件已过期或被清理」。这是有意的
+取舍：服务端不长期保存任何用户内容；需要长期留存的附件请在本机另存为。
+巡检日志：`媒体保留期巡检完成：保留 30 天，本次清理 N 个密文`。
 
 ### 启动服务端
 
@@ -347,7 +364,7 @@ MIMCompose/run-desktop.sh --check  # 只检查环境，不打开窗口
 ./verify.sh
 
 # 或分端执行（在各自目录）
-cd MIMServer && ../mvnw test      # 210 项（含真实 MySQL 集成）
+cd MIMServer && ../mvnw test      # 220 项（含真实 MySQL 集成）
 cd MIMCore   && ../mvnw test      # 129 项：HKDF/SecretBox、X3DH+双棘轮、信封、盲签名
 cd MIMCoreRust && cargo test      # 19 项：原语/ECDH/X3DH/握手/双棘轮/信封/证书验签/状态加密/密钥管理
 cd MIMCoreRust && ./tools/interop.sh   # Rust 发起 → Java 解密回信 → Rust 解密（真实互通）

@@ -8,6 +8,7 @@ import com.junesoon.mim.app.data.TwoFactorRequiredException
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.ClearPoint
 import com.junesoon.mim.app.domain.Contact
+import com.junesoon.mim.app.domain.MediaAttachment
 import com.junesoon.mim.app.domain.PeerIdentityKey
 import com.junesoon.mim.app.domain.sortedForList
 import java.nio.file.Files
@@ -277,6 +278,64 @@ class AppStoreTest {
         store.bindEmail("pass1234", " alice@example.com ")
         assertEquals(1, calls)
         assertEquals("alice@example.com", store.state.value.email)
+    }
+
+    /**
+     * 清除会话时只释放「我上传的」媒体密文：服务端删除接口只允许上传者操作，
+     * 对方上传的密文由对方的客户端或保留期巡检处理。
+     */
+    @Test
+    fun clearing_conversation_releases_only_my_media() {
+        var released: List<String> = emptyList()
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "")))
+
+            override suspend fun history(token: String, contactId: String): List<ChatMessage> = listOf(
+                ChatMessage(
+                    "m1",
+                    true,
+                    "[图片]",
+                    "10:00",
+                    epochMs = 1_000,
+                    kind = "image",
+                    media = MediaAttachment("mine-media-id-0001", "key", "image/png", 12),
+                ),
+                ChatMessage(
+                    "m2",
+                    false,
+                    "[图片]",
+                    "10:01",
+                    epochMs = 2_000,
+                    kind = "image",
+                    media = MediaAttachment("peer-media-id-0002", "key", "image/png", 12),
+                ),
+            )
+
+            override suspend fun clearConversation(
+                token: String,
+                contactId: String,
+                forBoth: Boolean,
+            ) = Unit
+
+            override suspend fun releaseUploadedMedia(token: String, mediaIds: List<String>) {
+                released = mediaIds
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+        store.openChat("bob")
+        store.clearConversation(forBoth = false)
+
+        assertEquals(listOf("mine-media-id-0001"), released)
     }
 
     @Test

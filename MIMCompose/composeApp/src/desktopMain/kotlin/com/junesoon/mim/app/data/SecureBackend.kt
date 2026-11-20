@@ -920,6 +920,20 @@ class SecureBackend(
         return cached
     }
 
+    override suspend fun releaseUploadedMedia(token: String, mediaIds: List<String>) {
+        for (id in mediaIds) {
+            if (!MediaIds.isValid(id)) {
+                continue
+            }
+            // 已经过期或不属于本机都无所谓：清不掉就交给服务端保留期巡检。
+            runCatching {
+                client.delete("$server/media/$id") {
+                    header("Authorization", "Bearer $token")
+                }.body<StatusEnvelope>()
+            }
+        }
+    }
+
     override fun searchLocal(query: String): List<LocalMessageHit> {
         val keyword = query.trim()
         if (keyword.isEmpty()) {

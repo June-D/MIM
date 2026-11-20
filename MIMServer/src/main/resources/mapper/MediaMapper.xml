@@ -18,4 +18,18 @@
         delete from t_media
         where id = #{id} and owner = #{owner}
     </delete>
+
+    <!-- 保留期巡检：只按创建时间筛，服务端无法反推密文里的引用关系。 -->
+    <select id="selectIdsOlderThan" resultType="java.lang.String">
+        select id
+        from t_media
+        where crt_time &lt; #{cutoff,jdbcType=BIGINT}
+        order by crt_time asc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <delete id="deleteById">
+        delete from t_media
+        where id = #{id,jdbcType=VARCHAR}
+    </delete>
 </mapper>

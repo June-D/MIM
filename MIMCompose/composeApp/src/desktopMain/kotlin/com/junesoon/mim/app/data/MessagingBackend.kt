@@ -69,6 +69,14 @@ interface MessagingBackend {
     fun mediaBytes(message: ChatMessage): ByteArray? = null
 
     /**
+     * 释放本机上传过、已经不再引用的媒体密文。
+     *
+     * 服务端只看得到密文、看不到引用关系，所以由发送方主动告知；
+     * 服务端仍然保留期兜底。失败不影响本地流程。
+     */
+    suspend fun releaseUploadedMedia(token: String, mediaIds: List<String>) = Unit
+
+    /**
      * 在本地加密缓存里搜索消息。
      *
      * 服务端不知道明文，搜索只能在已缓存的消息里做；换设备后没缓存就搜不到。

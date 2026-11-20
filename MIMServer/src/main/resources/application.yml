@@ -29,6 +29,14 @@ mim:
     dir: ${MIM_MEDIA_DIR:data/media}
     # 单个密文文件上限（8MB 明文的密文约 15MB）。
     max-bytes: ${MIM_MEDIA_MAX_BYTES:18000000}
+    # 保留天数：超过这个时间的密文会被巡检删除；0 表示永不清理。
+    # 服务端看不到密文里的媒体引用关系，只能按时间兜底，过期后消息里的
+    # 附件将无法再下载（客户端会提示「已过期或被清理」）。
+    retention-days: ${MIM_MEDIA_RETENTION_DAYS:30}
+    # 单批清理条数，避免一次删太多。
+    purge-batch: ${MIM_MEDIA_PURGE_BATCH:200}
+    # 巡检时间（默认每天 03:30）。
+    purge-cron: ${MIM_MEDIA_PURGE_CRON:0 30 3 * * ?}
   # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
   # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
   instance-id: ${HOSTNAME:local}

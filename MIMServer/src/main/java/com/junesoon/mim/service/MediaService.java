@@ -18,4 +18,12 @@ public interface MediaService {
     MediaObject metadata(String id);
 
     boolean delete(String owner, String id);
+
+    /**
+     * 清理早于 {@code cutoffMillis} 的密文，返回删除条数。
+     *
+     * <p>先删文件再删库行：文件删不掉时保留记录，下一轮再试，
+     * 这样不会出现「库里没有、磁盘留着」的孤儿文件。
+     */
+    int purgeOlderThan(long cutoffMillis, int batchSize);
 }

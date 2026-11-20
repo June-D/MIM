@@ -532,9 +532,16 @@ class AppStore(
 
     fun recall(contactId: String, messageId: String) {
         val currentToken = token ?: return
+        // 撤回后媒体不再被引用，顺手把服务端密文也释放掉。
+        val released = _state.value.messages[contactId].orEmpty()
+            .firstOrNull { it.id == messageId && it.fromMe }
+            ?.media?.id
         scope.launch {
             runCatching { backend.recall(currentToken, contactId, messageId) }
                 .onSuccess { updated ->
+                    if (released != null) {
+                        releaseMedia(currentToken, listOf(released))
+                    }
                     if (updated != null) {
                         _state.update { current ->
                             val next = current.copy(
@@ -565,9 +572,11 @@ class AppStore(
     fun clearConversation(forBoth: Boolean) {
         val currentToken = token ?: return
         val chat = _state.value.screen as? Screen.Chat ?: return
+        val released = ownMediaIds(chat.contactId)
         scope.launch {
             runCatching { backend.clearConversation(currentToken, chat.contactId, forBoth) }
                 .onSuccess {
+                    releaseMedia(currentToken, released)
                     _state.update { current ->
                         val next = current.copy(
                             messages = current.messages - chat.contactId,
@@ -1021,6 +1030,22 @@ class AppStore(
         }
     }
 
+    /** 本机发出、且带媒体的消息 id：只有上传者能删服务端密文。 */
+    private fun ownMediaIds(contactId: String): List<String> =
+        _state.value.messages[contactId].orEmpty()
+            .filter { it.fromMe }
+            .mapNotNull { it.media?.id }
+            .distinct()
+
+    /** 释放服务端密文；失败无所谓，保留期巡检会兜底。 */
+    private suspend fun releaseMedia(currentToken: String?, mediaIds: List<String>) {
+        val token = currentToken ?: return
+        if (mediaIds.isEmpty()) {
+            return
+        }
+        runCatching { backend.releaseUploadedMedia(token, mediaIds) }
+    }
+
     /** 已读 / 撤回状态靠历史轮询补偿，推送只是叫醒。 */
     private suspend fun refreshStates(currentToken: String, contactId: String) {
         runCatching { backend.historyStates(currentToken, contactId) }
@@ -1064,8 +1089,11 @@ class AppStore(
                             refreshUnread(current, force = true)
                         }
                         is PushEvent.Cleared -> {
+                            // 对方清除了会话：本机缓存与「我上传的密文」一起释放。
+                            val released = ownMediaIds(event.peer)
                             backend.forgetLocalConversation(event.peer)
                             dropLocal(event.peer)
+                            scope.launch { releaseMedia(token, released) }
                         }
                     }
                 }

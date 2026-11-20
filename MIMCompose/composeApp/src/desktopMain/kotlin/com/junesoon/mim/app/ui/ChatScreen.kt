@@ -846,7 +846,7 @@ private fun MessageImage(
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         when (val current = state) {
             ImageState.Loading -> MediaPlaceholder("图片加载中…", message.fromMe)
-            ImageState.Missing -> MediaPlaceholder("图片无法显示（格式不支持或缓存缺失）", message.fromMe)
+            ImageState.Missing -> MediaPlaceholder("图片不可用：可能已过期或被清理", message.fromMe)
             is ImageState.Ready -> Image(
                 bitmap = current.bitmap,
                 contentDescription = "图片消息",
@@ -920,7 +920,7 @@ private fun MessageVoice(
         }
         Column {
             Text(
-                if (failed) "语音不可用" else "语音 " + formatDuration(message.media?.durationMs ?: 0),
+                if (failed) "语音不可用或已过期" else "语音 " + formatDuration(message.media?.durationMs ?: 0),
                 style = MaterialTheme.typography.bodyMedium,
                 color = if (failed) {
                     if (message.fromMe) Color(0xCCFDFDFB) else MimPalette.Danger
@@ -1020,7 +1020,7 @@ private fun MessageFile(message: ChatMessage, loadMedia: suspend (ChatMessage) -
                 when (status) {
                     FileStatus.Saving -> "解密中…"
                     FileStatus.Saved -> "已保存到本机"
-                    FileStatus.Failed -> "保存失败，点一下重试"
+                    FileStatus.Failed -> "文件不可用或已过期，点一下重试"
                     FileStatus.Idle -> MediaTools.humanSize((attachment?.size ?: 0).toLong()) + " · 点击保存"
                 },
                 style = MaterialTheme.typography.labelSmall,

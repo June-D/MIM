@@ -11,6 +11,7 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.security.SecureRandom;
 import java.util.Base64;
+import java.util.List;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -105,6 +106,47 @@ public class MediaServiceImpl implements MediaService {
         }
         deleteQuietly(root.resolve(id));
         return true;
+    }
+
+    @Override
+    public int purgeOlderThan(long cutoffMillis, int batchSize) {
+        int size = Math.max(1, batchSize);
+        int removed = 0;
+        while (true) {
+            List<String> ids = mediaMapper.selectIdsOlderThan(cutoffMillis, size);
+            if (ids.isEmpty()) {
+                break;
+            }
+            int deletedThisRound = 0;
+            for (String id : ids) {
+                if (!removeFile(id)) {
+                    // 文件删不掉就留着这行，下一轮再试；不制造孤儿文件。
+                    continue;
+                }
+                mediaMapper.deleteById(id);
+                deletedThisRound++;
+            }
+            removed += deletedThisRound;
+            // 取回不足一批说明已经到底；整批都删不掉时退出，避免死循环。
+            if (ids.size() < size || deletedThisRound == 0) {
+                break;
+            }
+        }
+        if (removed > 0) {
+            log.info("媒体保留期清理：删除 {} 个早于 {} 的密文", removed, cutoffMillis);
+        }
+        return removed;
+    }
+
+    /** 文件不存在视为已删除成功；IO 失败返回 false。 */
+    private boolean removeFile(String id) {
+        try {
+            Files.deleteIfExists(root.resolve(id));
+            return true;
+        } catch (IOException e) {
+            log.warn("媒体密文删除失败，保留记录待下轮重试：{}（{}）", id, e.getMessage());
+            return false;
+        }
     }
 
     private String newId() {
