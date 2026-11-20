@@ -15,4 +15,10 @@ data class ChatMessage(
     val text: String,
     val time: String,
     val pending: Boolean = false,
+    /** 对端已读（仅自己发的消息有意义）。 */
+    val read: Boolean = false,
+    /** 已撤回，正文固定显示为「已撤回」。 */
+    val recalled: Boolean = false,
+    /** 本地持有撤回凭证，可以发起撤回。 */
+    val canRecall: Boolean = false,
 )

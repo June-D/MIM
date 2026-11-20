@@ -41,6 +41,7 @@ fun ChatScreen(
     messages: List<ChatMessage>,
     onBack: () -> Unit,
     onSend: (String) -> Unit,
+    onRecall: (String) -> Unit = {},
     error: String? = null,
 ) {
     var draft by remember { mutableStateOf("") }
@@ -121,16 +122,30 @@ fun ChatScreen(
                             .padding(horizontal = 14.dp, vertical = 10.dp),
                     ) {
                         Text(message.text, style = MaterialTheme.typography.bodyMedium)
-                        Text(
-                            buildString {
-                                append(message.time)
-                                if (message.pending) append(" · 发送中")
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            textAlign = TextAlign.End,
+                        Row(
                             modifier = Modifier.fillMaxWidth(),
-                        )
+                            horizontalArrangement = Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            if (message.canRecall) {
+                                TextButton(
+                                    onClick = { onRecall(message.id) },
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                ) {
+                                    Text("撤回", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                            Text(
+                                buildString {
+                                    append(message.time)
+                                    if (message.pending) append(" · 发送中")
+                                    if (message.read) append(" · 已读")
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.End,
+                            )
+                        }
                     }
                 }
             }

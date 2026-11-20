@@ -51,6 +51,24 @@ class LocalVault(
         write("messages.bin", JsonCodec.encode(messages))
     }
 
+    fun loadOutbox(): List<OutboxEntry> =
+        read("outbox.bin")?.let {
+            runCatching { JsonCodec.decode<List<OutboxEntry>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveOutbox(entries: List<OutboxEntry>) {
+        write("outbox.bin", JsonCodec.encode(entries))
+    }
+
+    fun loadServerIds(): Map<String, Long> =
+        read("server_ids.bin")?.let {
+            runCatching { JsonCodec.decode<Map<String, Long>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveServerIds(ids: Map<String, Long>) {
+        write("server_ids.bin", JsonCodec.encode(ids))
+    }
+
     private fun loadOrCreateKey(): ByteArray {
         val file = dir.resolve("key.bin")
         if (Files.exists(file)) {
@@ -122,4 +140,21 @@ data class CachedMessage(
     val text: String,
     val time: String,
     val epochMs: Long,
+    val read: Boolean = false,
+    val recalled: Boolean = false,
+    /** 撤回凭证：只在本地缓存，服务端只存哈希。 */
+    val recallToken: String? = null,
+    /** 离线队列中的消息：正文已组装，等待投递。 */
+    val pending: Boolean = false,
+)
+
+/** 离线发送队列条目：密文已组装，重试只重发，不重新推进棘轮。 */
+@kotlinx.serialization.Serializable
+data class OutboxEntry(
+    val clientMsgId: String,
+    val recallToken: String,
+    val contactId: String,
+    val text: String,
+    val epochMs: Long,
+    val replicas: List<com.junesoon.mim.app.data.messaging.CipherMessageOut>,
 )

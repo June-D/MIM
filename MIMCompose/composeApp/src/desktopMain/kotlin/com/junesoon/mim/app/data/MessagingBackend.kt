@@ -26,7 +26,24 @@ interface MessagingBackend {
      * 真实实现会解密并把明文放进缓存；演示实现返回空。
      */
     suspend fun poll(token: String): List<IncomingMessage> = emptyList()
+
+    /** 撤回自己发出的一条消息。 */
+    suspend fun recall(token: String, contactId: String, messageId: String): ChatMessage? = null
+
+    /** 把与该联系人的消息标记为已读。 */
+    suspend fun markRead(token: String, contactId: String) = Unit
+
+    /** 刷新已读 / 撤回状态（已读回执与实时撤回缺少推送时的补偿）。 */
+    suspend fun historyStates(token: String, contactId: String): List<MessageState> = emptyList()
 }
+
+/** 一条逻辑消息的外部状态。 */
+data class MessageState(
+    val id: String,
+    val read: Boolean = false,
+    val recalled: Boolean = false,
+    val pending: Boolean = false,
+)
 
 /** 一条新到达的消息，附带它属于哪个联系人。 */
 data class IncomingMessage(val contactId: String, val message: ChatMessage)

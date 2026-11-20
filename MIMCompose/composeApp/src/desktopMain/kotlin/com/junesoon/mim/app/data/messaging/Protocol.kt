@@ -89,6 +89,9 @@ data class CipherMessageDto(
     val recipientSignedPreKeyId: Int? = null,
     val clientTime: Long? = null,
     val sessionId: String? = null,
+    val readFlag: Boolean? = null,
+    val recalled: Boolean? = null,
+    val fromMe: Boolean? = null,
 )
 
 @Serializable
@@ -111,6 +114,21 @@ data class CipherMessageOut(
     val clientTime: Long,
     val sealed: Boolean = true,
     val sessionId: String,
+    /** 一次性撤回凭证；服务端只存哈希。 */
+    val recallToken: String? = null,
+)
+
+@Serializable
+data class ReadRequest(
+    val peer: String,
+    val beforeId: Long? = null,
+    val tags: List<String> = emptyList(),
+)
+
+@Serializable
+data class RecallRequest(
+    val recallToken: String? = null,
+    val tags: List<String> = emptyList(),
 )
 
 // ---------------- Rust 边界 ----------------

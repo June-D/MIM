@@ -39,11 +39,24 @@ class SecureBackendTest {
         val bobLogin = bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
         pruneOtherDevices(server, bobLogin.token, bobBackend.currentDeviceId)
 
-        aliceBackend.send(aliceLogin.token, bob, "secure hello")
+        val sent = aliceBackend.send(aliceLogin.token, bob, "secure hello")
         val received = bobBackend.poll(bobLogin.token)
         val incoming = received.firstOrNull { it.contactId == alice }
         assertTrue(incoming != null, "B 未收到 A 的消息；收到：$received")
         assertEquals("secure hello", incoming.message.text)
+
+        // 已读回执：B 标记已读后，A 通过历史状态看到 read。
+        bobBackend.markRead(bobLogin.token, alice)
+        val readState = aliceBackend.historyStates(aliceLogin.token, bob)
+            .firstOrNull { it.id == sent.id }
+        assertTrue(readState?.read == true, "A 应看到已读：$readState")
+
+        // 撤回：A 撤回后，B 通过历史状态看到 recalled。
+        val recalled = aliceBackend.recall(aliceLogin.token, bob, sent.id)
+        assertTrue(recalled?.recalled == true, "撤回应返回已撤回状态")
+        val recallState = bobBackend.historyStates(bobLogin.token, alice)
+            .firstOrNull { it.id == sent.id }
+        assertTrue(recallState?.recalled == true, "B 应看到已撤回：$recallState")
 
         bobBackend.send(bobLogin.token, alice, "secure reply")
         val reply = aliceBackend.poll(aliceLogin.token).firstOrNull { it.contactId == bob }
@@ -54,7 +67,7 @@ class SecureBackendTest {
         val aliceAgain = SecureBackend(server, root)
         aliceAgain.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
         val history = aliceAgain.history(aliceLogin.token, bob)
-        assertTrue(history.any { it.fromMe && it.text == "secure hello" }, "发送记录应保留")
+        assertTrue(history.any { it.fromMe && it.recalled && it.id == sent.id }, "撤回记录应保留")
         assertTrue(history.any { !it.fromMe && it.text == "secure reply" }, "接收记录应保留")
     }
 

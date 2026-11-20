@@ -56,8 +56,17 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 | 发送 | 内存回声 | 首条消息 / sealed 消息，Rust 组装后投递 |
 | 接收 | 无 | 轮询 `/undelivered`，Rust 解密 + 落缓存 |
 | 历史 | 内存 | 本地**加密缓存**（换设备或清库后不保留） |
+| 撤回 | 无 | 发送时生成凭证；`POST /message/recall`，本地立即置「已撤回」 |
+| 已读回执 | 无 | 打开会话 `POST /message/read`；自己消息的已读靠历史轮询 |
+| 离线队列 | 无 | 投递失败入队，只重发同一份密文，不重复推进棘轮 |
 
 协议计算全部在 Rust 核心；Kotlin 只做传输、入库与 UI 语义。
+
+### 状态刷新（没有推送时）
+
+`SecureBackend.historyStates` 每轮轮询对**当前打开的会话**查一次历史：
+更新自己消息的已读状态与双方的撤回状态。其它会话要等下次打开才刷新。
+接入 WebSocket 推送后可去掉这次轮询。
 
 ### 本地保险库
 
@@ -67,6 +76,7 @@ MIM_SERVER_URL=http://127.0.0.1:8080 ./gradlew :composeApp:desktopTest
 - `bundle.bin` —— 身份密钥 / 预密钥（加密）
 - `sessions.bin` —— 会话存储（加密）
 - `messages.bin` —— 消息缓存（加密）
+- `outbox.bin` —— 离线发送队列（加密，密文已组装，重试只重发）
 - 同级的 `device.txt` 保存稳定设备标识
 
 桌面端只能做到文件权限保护；Android/iOS 应改用 Keystore / Keychain。

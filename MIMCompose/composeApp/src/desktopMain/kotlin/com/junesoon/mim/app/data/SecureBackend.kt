@@ -17,6 +17,8 @@ import com.junesoon.mim.app.data.messaging.OpenFirstResponseJson
 import com.junesoon.mim.app.data.messaging.OpenSealedRequestJson
 import com.junesoon.mim.app.data.messaging.OpenSealedResponseJson
 import com.junesoon.mim.app.data.messaging.PreKeyBundleDto
+import com.junesoon.mim.app.data.messaging.ReadRequest
+import com.junesoon.mim.app.data.messaging.RecallRequest
 import com.junesoon.mim.app.data.messaging.SessionMeta
 import com.junesoon.mim.app.data.messaging.StatusEnvelope
 import com.junesoon.mim.app.data.messaging.StoreJson
@@ -66,6 +68,8 @@ class SecureBackend(
     private lateinit var bundle: RustKeyBundle
     private var storeJson: String = LocalVault.EMPTY_STORE
     private var messages: MutableList<CachedMessage> = mutableListOf()
+    private var serverIds: MutableMap<String, Long> = mutableMapOf()
+    private var outbox: MutableList<OutboxEntry> = mutableListOf()
     private var cachedCert: CertJson? = null
     private var cachedToken: String = ""
     private var cachedDeviceId: String = ""
@@ -87,6 +91,8 @@ class SecureBackend(
 
         storeJson = vault.loadStore()
         messages = vault.loadMessages().distinctBy { it.id }.toMutableList()
+        serverIds = vault.loadServerIds().toMutableMap()
+        outbox = vault.loadOutbox().toMutableList()
         return LoginResult(token, username, contacts(token))
     }
 
@@ -109,7 +115,80 @@ class SecureBackend(
     override suspend fun history(token: String, contactId: String): List<ChatMessage> =
         messages.filter { it.contactId == contactId }
             .sortedBy { it.epochMs }
-            .map { ChatMessage(it.id, it.fromMe, it.text, it.time) }
+            .map {
+                ChatMessage(
+                    id = it.id,
+                    fromMe = it.fromMe,
+                    text = if (it.recalled) "已撤回" else it.text,
+                    time = it.time,
+                    pending = it.pending,
+                    read = it.read,
+                    recalled = it.recalled,
+                    canRecall = it.fromMe && it.recallToken != null && !it.recalled,
+                )
+            }
+
+    override suspend fun recall(token: String, contactId: String, messageId: String): ChatMessage? {
+        val index = messages.indexOfFirst { it.id == messageId && it.fromMe }
+        if (index < 0) {
+            return null
+        }
+        val cached = messages[index]
+        val recallToken = cached.recallToken ?: return null
+        val response: ApiEnvelope<CipherMessageDto> = client.post("$server/message/recall/$messageId") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(RecallRequest(recallToken, tagsFor(contactId)))
+        }.body()
+        require(response.status == 200) { response.message ?: "撤回失败" }
+
+        val updated = cached.copy(recalled = true, text = "已撤回")
+        messages[index] = updated
+        vault.saveMessages(messages)
+        return ChatMessage(
+            id = updated.id,
+            fromMe = true,
+            text = "已撤回",
+            time = updated.time,
+            recalled = true,
+        )
+    }
+
+    override suspend fun markRead(token: String, contactId: String) {
+        val tags = tagsFor(contactId)
+        if (tags.isEmpty()) {
+            return
+        }
+        val beforeId = serverIds[contactId] ?: return
+        val response: StatusEnvelope = client.post("$server/message/read") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(ReadRequest(peer = contactId, beforeId = beforeId, tags = tags))
+        }.body()
+        require(response.status == 200) { response.message ?: "标记已读失败" }
+    }
+
+    override suspend fun historyStates(token: String, contactId: String): List<MessageState> {
+        val tags = tagsFor(contactId)
+        if (tags.isEmpty()) {
+            return emptyList()
+        }
+        val query = tags.joinToString(",")
+        val history: List<CipherMessageDto> =
+            getEnvelope("$server/message/history/$contactId?limit=50&tags=$query", token)
+        val states = history.mapNotNull { message ->
+            message.clientMsgId?.let {
+                MessageState(it, message.readFlag == true, message.recalled == true)
+            }
+        }.toMutableList()
+        // 队列里的消息服务端还看不到，pending 只能从本地补。
+        messages.filter { it.contactId == contactId && it.pending }.forEach { cached ->
+            if (states.none { it.id == cached.id }) {
+                states += MessageState(cached.id, pending = true)
+            }
+        }
+        return states
+    }
 
     override suspend fun send(token: String, contactId: String, text: String): ChatMessage {
         val devices = peerDevices(contactId, token)
@@ -119,6 +198,7 @@ class SecureBackend(
         val peerTag = anyTag(workingStore, contactId)
         var certificate: CertJson? = null
         val clientMsgId = UUID.randomUUID().toString()
+        val recallToken = newRecallToken()
         val replicas = mutableListOf<CipherMessageOut>()
 
         for (device in devices) {
@@ -145,6 +225,7 @@ class SecureBackend(
                     messageNumber = composed.wire.n,
                     clientTime = System.currentTimeMillis(),
                     sessionId = existing.sessionId,
+                    recallToken = recallToken,
                 )
             } else {
                 val preKey = preKeyBundle(contactId, deviceId, token) ?: continue
@@ -201,22 +282,43 @@ class SecureBackend(
                     recipientSignedPreKeyId = composed.recipient_signed_pre_key_id,
                     clientTime = System.currentTimeMillis(),
                     sessionId = composed.session_id,
+                    recallToken = recallToken,
                 )
             }
         }
 
         require(replicas.isNotEmpty()) { "没有可用预密钥，无法发起会话" }
-        postList<List<CipherMessageOut>, List<CipherMessageDto>>("$server/message", token, replicas)
 
+        // 先推进并保存棘轮状态，再尝试投递：失败时队列只重发同一份密文，
+        // 绝不重新组装，否则棘轮会多走一步、对端解不开。
         storeJson = workingStore
         vault.saveStore(workingStore)
-        val message = ChatMessage(clientMsgId, true, text, nowTime())
-        cache(contactId, message, System.currentTimeMillis())
+
+        val entry = OutboxEntry(
+            clientMsgId = clientMsgId,
+            recallToken = recallToken,
+            contactId = contactId,
+            text = text,
+            epochMs = System.currentTimeMillis(),
+            replicas = replicas,
+        )
+        val delivered = runCatching {
+            postList<List<CipherMessageOut>, List<CipherMessageDto>>("$server/message", token, replicas)
+        }.isSuccess
+
+        if (!delivered) {
+            outbox += entry
+            vault.saveOutbox(outbox)
+        }
+
+        val message = ChatMessage(clientMsgId, true, text, nowTime(), pending = !delivered, canRecall = true)
+        cache(contactId, message, entry.epochMs, recallToken = recallToken)
         vault.saveMessages(messages)
         return message
     }
 
     override suspend fun poll(token: String): List<IncomingMessage> {
+        retryOutbox(token)
         val incoming: List<CipherMessageDto> = getEnvelope("$server/message/undelivered", token)
         if (incoming.isEmpty()) {
             return emptyList()
@@ -229,6 +331,14 @@ class SecureBackend(
             maxId = maxOf(maxId, raw.id ?: 0)
             val sessionId = raw.sessionId ?: continue
             runCatching {
+                if (raw.recalled == true) {
+                    val peer = raw.toUsername ?: return@runCatching
+                    val id = raw.clientMsgId ?: UUID.randomUUID().toString()
+                    val message = ChatMessage(id, false, "已撤回", nowTime(), recalled = true)
+                    cache(peer, message, raw.clientTime ?: System.currentTimeMillis(), recalled = true)
+                    delivered += IncomingMessage(peer, message)
+                    return@runCatching
+                }
                 val wire = wireOf(raw)
                 if (!raw.senderIdentityKey.isNullOrBlank() && !raw.senderEphemeralKey.isNullOrBlank()) {
                     val opened = openFirst(raw, wire, token)
@@ -265,6 +375,7 @@ class SecureBackend(
             storeJson = workingStore
             vault.saveStore(workingStore)
             vault.saveMessages(messages)
+            vault.saveServerIds(serverIds)
         }
         if (maxId > 0) {
             runCatching {
@@ -274,6 +385,35 @@ class SecureBackend(
             }
         }
         return delivered
+    }
+
+    private suspend fun retryOutbox(token: String) {
+        if (outbox.isEmpty()) {
+            return
+        }
+        val remaining = mutableListOf<OutboxEntry>()
+        var changed = false
+        for (entry in outbox) {
+            val ok = runCatching {
+                postList<List<CipherMessageOut>, List<CipherMessageDto>>(
+                    "$server/message", token, entry.replicas,
+                )
+            }.isSuccess
+            if (ok) {
+                changed = true
+                val index = messages.indexOfFirst { it.id == entry.clientMsgId }
+                if (index >= 0) {
+                    messages[index] = messages[index].copy(pending = false)
+                }
+            } else {
+                remaining += entry
+            }
+        }
+        outbox = remaining
+        if (changed) {
+            vault.saveMessages(messages)
+        }
+        vault.saveOutbox(outbox)
     }
 
     private suspend fun remember(
@@ -286,14 +426,32 @@ class SecureBackend(
         val id = raw.clientMsgId ?: UUID.randomUUID().toString()
         val message = ChatMessage(id, false, plaintext, nowTime())
         cache(peer, message, raw.clientTime ?: System.currentTimeMillis())
+        raw.id?.let { serverIds[peer] = maxOf(serverIds[peer] ?: 0L, it) }
         into += IncomingMessage(peer, message)
     }
 
-    private fun cache(contactId: String, message: ChatMessage, epochMs: Long) {
+    private fun cache(
+        contactId: String,
+        message: ChatMessage,
+        epochMs: Long,
+        recalled: Boolean = message.recalled,
+        recallToken: String? = null,
+    ) {
         if (messages.any { it.id == message.id }) {
             return
         }
-        messages += CachedMessage(contactId, message.id, message.fromMe, message.text, message.time, epochMs)
+        messages += CachedMessage(
+            contactId = contactId,
+            id = message.id,
+            fromMe = message.fromMe,
+            text = message.text,
+            time = message.time,
+            epochMs = epochMs,
+            read = message.read,
+            recalled = recalled,
+            recallToken = recallToken,
+            pending = message.pending,
+        )
     }
 
     // ---------------- 网络 ----------------
@@ -404,6 +562,17 @@ class SecureBackend(
         runCatching { JsonCodec.decode<StoreJson>(store) }.getOrNull()
             ?.sessions?.firstOrNull { it.peer == peer && it.tags.isNotEmpty() }
             ?.tags?.firstOrNull()
+
+    private fun tagsFor(peer: String): List<String> =
+        runCatching { JsonCodec.decode<StoreJson>(storeJson) }.getOrNull()
+            ?.sessions?.filter { it.peer == peer }
+            ?.flatMap { it.tags }
+            ?.distinct()
+            .orEmpty()
+
+    private fun newRecallToken(): String =
+        Base64.getUrlEncoder().withoutPadding()
+            .encodeToString(MimCoreNative.randomBytes(32))
 
     private fun sessionPeer(store: String, sessionId: String): String? =
         runCatching { JsonCodec.decode<StoreJson>(store) }.getOrNull()

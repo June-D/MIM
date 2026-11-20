@@ -98,6 +98,8 @@ class AppStore(
                 .onSuccess { history ->
                     _state.update { it.copy(messages = it.messages + (contactId to history)) }
                 }
+            runCatching { backend.markRead(currentToken, contactId) }
+            refreshStates(currentToken, contactId)
         }
     }
 
@@ -126,8 +128,54 @@ class AppStore(
         }
     }
 
+    fun recall(contactId: String, messageId: String) {
+        val currentToken = token ?: return
+        scope.launch {
+            runCatching { backend.recall(currentToken, contactId, messageId) }
+                .onSuccess { updated ->
+                    if (updated != null) {
+                        _state.update { state ->
+                            state.copy(
+                                messages = state.messages.mapValues { (id, list) ->
+                                    if (id != contactId) list else list.map {
+                                        if (it.id == messageId) updated else it
+                                    }
+                                },
+                            )
+                        }
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "撤回失败") }
+                }
+        }
+    }
+
     fun clearError() {
         _state.update { it.copy(error = null) }
+    }
+
+    /** 已读 / 撤回状态缺少推送，靠轮询历史补偿。 */
+    private suspend fun refreshStates(currentToken: String, contactId: String) {
+        runCatching { backend.historyStates(currentToken, contactId) }
+            .onSuccess { states ->
+                if (states.isEmpty()) {
+                    return@onSuccess
+                }
+                _state.update { state ->
+                    val updated = state.messages[contactId]?.map { message ->
+                        val fresh = states.firstOrNull { it.id == message.id } ?: return@map message
+                        message.copy(
+                            read = fresh.read,
+                            recalled = fresh.recalled,
+                            pending = fresh.pending || message.pending,
+                            text = if (fresh.recalled) "已撤回" else message.text,
+                            canRecall = if (fresh.recalled) false else message.canRecall,
+                        )
+                    }
+                    state.copy(messages = state.messages + (contactId to (updated ?: emptyList())))
+                }
+            }
     }
 
     /**
@@ -145,7 +193,13 @@ class AppStore(
                 delay(3_000)
                 val currentToken = token ?: continue
                 runCatching { backend.poll(currentToken) }
-                    .onSuccess { incoming -> incoming.forEach(::mergeIncoming) }
+                    .onSuccess { incoming ->
+                        incoming.forEach(::mergeIncoming)
+                        val open = (_state.value.screen as? Screen.Chat)?.contactId
+                        if (open != null) {
+                            refreshStates(currentToken, open)
+                        }
+                    }
             }
         }
     }
