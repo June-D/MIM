@@ -3,7 +3,9 @@ package com.junesoon.mim.controller;
 import com.junesoon.mim.auth.CurrentDevice;
 import com.junesoon.mim.auth.CurrentUser;
 import com.junesoon.mim.entity.UserInfo;
+import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.ratelimit.RateLimit;
+import com.junesoon.mim.requests.BindEmailRequest;
 import com.junesoon.mim.requests.PasswordChangeRequest;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.responses.PasswordChangeResult;
@@ -46,6 +48,24 @@ public class UserController {
     @PostMapping("/heartbeat")
     public ObjectRestResponse<Boolean> heartbeat(@CurrentUser String username) {
         return new ObjectRestResponse<Boolean>().data(userService.heartbeat(username)).rel(true);
+    }
+
+    /**
+     * 绑定 / 更换 / 解绑找回邮箱。
+     *
+     * <p>邮箱只在账号本人视角可见；这条接口要求当前密码，避免令牌泄漏后
+     * 直接把找回通道改成攻击者的地址。
+     */
+    @PostMapping("/email")
+    @RateLimit(limit = 5, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<Boolean> bindEmail(@CurrentUser String username,
+        @RequestBody BindEmailRequest request) {
+        if (request == null) {
+            throw new UserInvalidException("请求不能为空");
+        }
+        userService.bindEmail(username, request.getPassword(), request.getEmail());
+        log.info("用户 {} 更新了找回邮箱", username);
+        return new ObjectRestResponse<Boolean>().data(Boolean.TRUE).rel(true);
     }
 
     /**

@@ -1,6 +1,8 @@
 package com.junesoon.mim.app.data
 
 import com.junesoon.mim.app.data.messaging.ApiEnvelope
+import com.junesoon.mim.app.data.messaging.BindEmailRequest
+import com.junesoon.mim.app.data.messaging.UserInfoDto
 import com.junesoon.mim.app.data.messaging.CertDto
 import com.junesoon.mim.app.data.messaging.CertJson
 import com.junesoon.mim.app.data.messaging.AddContactRequest
@@ -259,6 +261,20 @@ class SecureBackend(
         }
         codes.forEach { (deviceId, code) -> seenSafetyCodes["$contactId|$deviceId"] = code }
         vault.saveSafetyCodes(seenSafetyCodes)
+    }
+
+    override suspend fun userEmail(token: String): String {
+        val info: UserInfoDto = getEnvelope("$server/user/info", token)
+        return info.email.orEmpty()
+    }
+
+    override suspend fun bindEmail(token: String, password: String, email: String) {
+        val response: StatusEnvelope = client.post("$server/user/email") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(BindEmailRequest(password = password, email = email))
+        }.body()
+        require(response.status == 200) { response.message ?: "保存邮箱失败" }
     }
 
     override suspend fun twoFactorEnabled(token: String): Boolean {

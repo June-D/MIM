@@ -178,6 +178,12 @@ interface MessagingBackend {
      */
     fun rememberSafetyCodes(contactId: String, codes: Map<String, String>) = Unit
 
+    /** 当前账号绑定的找回邮箱；未绑定或后端不支持时返回空串。 */
+    suspend fun userEmail(token: String): String = ""
+
+    /** 绑定 / 更换找回邮箱；email 传空串表示解绑。需要当前密码。 */
+    suspend fun bindEmail(token: String, password: String, email: String) = Unit
+
     /** 账号是否开启了二次验证。 */
     suspend fun twoFactorEnabled(token: String): Boolean = false
 

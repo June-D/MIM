@@ -10,6 +10,7 @@ import com.junesoon.mim.app.data.TwoFactorRequiredException
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
+import com.junesoon.mim.app.domain.EmailRules
 import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.MessageHit
 import com.junesoon.mim.app.domain.SafetyEntry
@@ -66,6 +67,8 @@ data class AppState(
     val rememberMe: Boolean = false,
     /** 账号开启了二次验证，登录页需要补验证码输入框。 */
     val needsTwoFactor: Boolean = false,
+    /** 账号绑定的找回邮箱；空串表示未绑定。 */
+    val email: String = "",
     val twoFactorEnabled: Boolean = false,
     /** 尚未启用的共享密钥；只在开启流程里展示一次。 */
     val twoFactorSetup: TwoFactorSetup? = null,
@@ -765,6 +768,46 @@ class AppStore(
                 .onSuccess { enabled -> _state.update { it.copy(twoFactorEnabled = enabled) } }
                 .onFailure { error ->
                     _state.update { it.copy(error = error.message ?: "查询二次验证失败") }
+                }
+            runCatching { backend.userEmail(currentToken) }
+                .onSuccess { email -> _state.update { it.copy(email = email) } }
+        }
+    }
+
+    /**
+     * 绑定 / 更换 / 解绑找回邮箱。
+     *
+     * 服务端要求当前密码：改找回通道等于改账号恢复路径，令牌不够。
+     */
+    fun bindEmail(password: String, email: String) {
+        val currentToken = token ?: return
+        if (password.isEmpty()) {
+            _state.update { it.copy(error = "请输入当前密码") }
+            return
+        }
+        val target = email.trim()
+        if (target.isNotEmpty() && !EmailRules.isValid(target)) {
+            _state.update { it.copy(error = "邮箱格式不正确") }
+            return
+        }
+        _state.update { it.copy(securityBusy = true, error = null, notice = null) }
+        scope.launch {
+            runCatching { backend.bindEmail(currentToken, password, target) }
+                .onSuccess {
+                    _state.update {
+                        it.copy(
+                            securityBusy = false,
+                            email = target,
+                            notice = if (target.isEmpty()) {
+                                "已解绑找回邮箱，之后无法用邮箱找回密码"
+                            } else {
+                                "找回邮箱已更新为 $target"
+                            },
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(securityBusy = false, error = error.message ?: "保存邮箱失败") }
                 }
         }
     }

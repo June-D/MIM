@@ -13,6 +13,7 @@
 | GET | `/user/info` | 当前用户信息 |
 | POST | `/user/heartbeat` | 在线心跳续期 |
 | POST | `/user/password` | 修改登录密码（限流 5/分，成功后旧令牌全部失效） |
+| POST | `/user/email` | 绑定/更换/解绑找回邮箱（需当前密码；空串表示解绑，限流 5/分） |
 | GET | `/user/2fa/status` | 查询二次验证是否启用 |
 | POST | `/user/2fa/setup` | 生成 TOTP 共享密钥（返回密钥与 otpauth URI） |
 | POST | `/user/2fa/enable` | 校验验证码并启用，返回新令牌与 10 个恢复码 |

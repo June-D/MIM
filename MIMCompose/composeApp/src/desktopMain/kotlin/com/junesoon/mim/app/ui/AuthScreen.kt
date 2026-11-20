@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.junesoon.mim.app.domain.EmailRules
 import com.junesoon.mim.app.state.AuthMode
 
 /**
@@ -548,10 +549,7 @@ private fun TermsDialog(onDismiss: () -> Unit, onAccept: () -> Unit) {
 }
 
 /** 与服务端 `ValidationUtil` 相同的邮箱规则：基本格式，不验证送达性。 */
-private val EmailPattern = Regex("^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}$")
-
-private fun isEmail(value: String): Boolean =
-    value.length <= 254 && EmailPattern.matches(value)
+private fun isEmail(value: String): Boolean = EmailRules.isValid(value)
 
 private fun loadTerms(): String =
     runCatching {

@@ -64,9 +64,12 @@ fun SecurityScreen(
     onDisable: (String, String) -> Unit,
     onRegenerate: (String, String) -> Unit,
     onDismissCodes: () -> Unit,
+    email: String = "",
+    onBindEmail: (String, String) -> Unit = { _, _ -> },
 ) {
     var showDisable by remember { mutableStateOf(false) }
     var showRegenerate by remember { mutableStateOf(false) }
+    var showBindEmail by remember { mutableStateOf(false) }
 
     Column(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
         Row(
@@ -77,16 +80,11 @@ fun SecurityScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onBack() },
-                contentAlignment = Alignment.Center,
-            ) {
-                MimIcon(MimIcon.Back, size = 17.dp, tint = MimPalette.Ink)
-            }
+            MimIconAction(MimIcon.Back, tooltip = "返回") { onBack() }
             Column {
                 Text("安全设置", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "二次验证与恢复码",
+                    "二次验证、恢复码与找回邮箱",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -179,6 +177,50 @@ fun SecurityScreen(
                     color = Color(0xFF3E2B12),
                 )
             }
+
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(MimPalette.Card)
+                    .padding(18.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
+                Box(
+                    modifier = Modifier.size(42.dp).clip(CircleShape).background(MimPalette.TealSoft),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MimIcon(MimIcon.Person, size = 20.dp, tint = MimPalette.Teal)
+                }
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("找回邮箱", style = MaterialTheme.typography.titleMedium)
+                        Spacer(Modifier.width(8.dp))
+                        Tag(
+                            if (email.isBlank()) "未绑定" else "已绑定",
+                            if (email.isBlank()) MimPalette.InkSoft else MimPalette.Teal,
+                            if (email.isBlank()) MimPalette.Paper else MimPalette.TealSoft,
+                        )
+                    }
+                    Text(
+                        if (email.isBlank()) {
+                            "没有绑定邮箱时，忘记密码只能靠其它设备或重装；绑定后才能用邮件验证码重置。"
+                        } else {
+                            email
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (email.isBlank()) {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        } else {
+                            MimPalette.Ink
+                        },
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    TextButton(onClick = { showBindEmail = true }, enabled = !busy) {
+                        Text(if (email.isBlank()) "绑定邮箱" else "更换或解绑")
+                    }
+                }
+            }
         }
     }
 
@@ -220,6 +262,83 @@ fun SecurityScreen(
             },
         )
     }
+
+    if (showBindEmail) {
+        BindEmailDialog(
+            current = email,
+            busy = busy,
+            onDismiss = { showBindEmail = false },
+            onConfirm = { password, target ->
+                showBindEmail = false
+                onBindEmail(password, target)
+            },
+        )
+    }
+}
+
+/**
+ * 绑定 / 更换 / 解绑找回邮箱。
+ *
+ * 必须输入当前密码：改找回通道等于改账号的恢复路径。留空表示解绑，
+ * 弹窗里直接写清后果，不让用户自己猜。
+ */
+@Composable
+private fun BindEmailDialog(
+    current: String,
+    busy: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String, String) -> Unit,
+) {
+    var password by remember { mutableStateOf("") }
+    var email by remember { mutableStateOf(current) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (current.isBlank()) "绑定找回邮箱" else "更换找回邮箱") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "邮箱只在你自己的账号信息里可见，用于接收找回密码的验证码。修改需要输入当前密码。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = { email = it },
+                    label = { Text("邮箱（留空表示解绑）") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MimPalette.Teal,
+                        unfocusedBorderColor = MimPalette.Line,
+                        cursorColor = MimPalette.Teal,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text("当前密码") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    shape = RoundedCornerShape(10.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MimPalette.Teal,
+                        unfocusedBorderColor = MimPalette.Line,
+                        cursorColor = MimPalette.Teal,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(password, email.trim()) },
+                enabled = !busy && password.isNotEmpty(),
+            ) { Text(if (email.isBlank()) "解绑" else "保存") }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } },
+        containerColor = MimPalette.Card,
+    )
 }
 
 

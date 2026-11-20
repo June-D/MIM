@@ -153,6 +153,8 @@ fun MimApp() {
                     onDisable = store::disableTwoFactor,
                     onRegenerate = store::regenerateRecoveryCodes,
                     onDismissCodes = store::dismissRecoveryCodes,
+                    email = state.email,
+                    onBindEmail = store::bindEmail,
                 )
 
                 Screen.AddContact -> AddContactScreen(

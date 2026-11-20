@@ -264,6 +264,22 @@ data class ClearResultDto(
     val forBoth: Boolean = false,
 )
 
+/** 绑定 / 解绑找回邮箱（`POST /user/email`）。 */
+@Serializable
+data class BindEmailRequest(
+    val password: String,
+    /** 空串表示解绑：解绑后无法用邮箱找回密码。 */
+    val email: String,
+)
+
+/** `GET /user/info` 只回给账号本人。 */
+@Serializable
+data class UserInfoDto(
+    val username: String? = null,
+    val nickname: String? = null,
+    val email: String? = null,
+)
+
 /** 本人与某个对端的清除点（`GET /message/clear`）。 */
 @Serializable
 data class ClearPointDto(

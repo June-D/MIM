@@ -3,6 +3,7 @@ package com.junesoon.mim.service.impl;
 import com.junesoon.mim.constant.CommonConstants;
 import com.junesoon.mim.entity.User;
 import com.junesoon.mim.entity.UserInfo;
+import com.junesoon.mim.exception.UserInvalidException;
 import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.requests.JwtAuthenticationRequest;
 import com.junesoon.mim.service.PresenceService;
@@ -86,6 +87,33 @@ public class UserServiceImpl implements UserService {
         user.setTermsVersion(CommonConstants.TERMS_VERSION);
         user.setAgreedAt(new Date());
         userMapper.insertSelective(user);
+    }
+
+    @Override
+    public void bindEmail(String username, String password, String email) {
+        ValidationUtil.validateUsername(username);
+        if (!StringUtils.hasText(password)) {
+            throw new UserInvalidException("请输入当前密码");
+        }
+        User user = getUserByUsername(username);
+        if (user == null) {
+            throw new UserInvalidException("账号不存在");
+        }
+        if (!encoder.matches(password, user.getPassword())) {
+            throw new UserInvalidException("密码不正确");
+        }
+        String target = email == null ? "" : email.trim();
+        if (StringUtils.hasText(target)) {
+            // 格式与找回密码接口共用同一套校验，避免「能存进去但发不出验证码」。
+            ValidationUtil.validateEmail(target);
+        }
+        User update = new User();
+        update.setId(user.getId());
+        // 解绑要真的把列清空：selective 更新会跳过 null，所以用空串而不是 null。
+        update.setEmailCipher(StringUtils.hasText(target)
+            ? emailCryptoService.encrypt(username, target) : "");
+        update.setUpdTime(new Date());
+        userMapper.updateByPrimaryKeySelective(update);
     }
 
     @Override

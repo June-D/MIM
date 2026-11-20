@@ -243,6 +243,42 @@ class AppStoreTest {
         assertEquals("已屏蔽该联系人，解除屏蔽后才能发送", store.state.value.error)
     }
 
+    /** 绑定找回邮箱：先卡密码与格式，再落到后端。 */
+    @Test
+    fun binding_email_validates_before_calling_backend() {
+        var calls = 0
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, emptyList())
+
+            override suspend fun bindEmail(token: String, password: String, email: String) {
+                calls++
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+
+        store.bindEmail("", "alice@example.com")
+        assertEquals("请输入当前密码", store.state.value.error)
+        assertEquals(0, calls)
+
+        store.bindEmail("pass1234", "not-an-email")
+        assertEquals("邮箱格式不正确", store.state.value.error)
+        assertEquals(0, calls)
+
+        store.bindEmail("pass1234", " alice@example.com ")
+        assertEquals(1, calls)
+        assertEquals("alice@example.com", store.state.value.email)
+    }
+
     @Test
     fun pinned_contact_sorts_before_recent_ones() {
         val store = store()
