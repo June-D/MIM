@@ -6,8 +6,9 @@ PC 桌面客户端（Compose Multiplatform）。
 
 当前先做透桌面端，再把同一套状态与职责划分复用到手机端。
 
-- 已有：登录 → 联系人 → 聊天 → 设备；真实端到端收发、撤回、已读、离线队列、
-  WebSocket 推送、未读数、清除会话、设备管理、安全码核对
+- 已有：注册 / 登录 / 找回密码 → 联系人 → 聊天 → 设备；真实端到端收发、撤回、
+  已读、离线队列、WebSocket 推送、未读数、清除会话、设备管理、安全码核对、
+  添加联系人、好友备注、屏蔽、移除好友、记住账号密码、用户协议
 - 不在这里：协议与密码学。基准实现在 `MIMCore`，实际执行在 `MIMCoreRust`
   （C ABI / JNI）。本模块只做传输、入库与 UI 语义
 
@@ -34,12 +35,16 @@ MIMCompose/
     data/Codec.kt         十六进制 / Base64 转换
     data/JsonCodec.kt     统一 JSON 配置
     state/AppStore.kt     唯一状态源：StateFlow + 动作 + 同步循环
-    ui/Theme.kt           纸墨配色，换主题只改这一处
-    ui/LoginScreen.kt     登录
+    ui/Theme.kt           配色、字体、圆角（视觉系统唯一来源）
+    ui/Icons.kt           本地 Canvas 图标，避免额外依赖
+    ui/Avatar.kt          首字母头像，颜色由名字稳定推导
+    ui/AuthScreen.kt      登录 / 注册 / 找回密码 / 用户协议
     ui/ContactsScreen.kt  联系人（含未读角标、添加与设备入口，空态提示）
     ui/AddContactScreen.kt 搜索用户、好友申请、同意或拒绝
     ui/ChatScreen.kt      聊天（撤回、安全码、清除）
     ui/DeviceScreen.kt    设备列表与注销
+    data/CredentialStore.kt 记住账号密码（AES-GCM + 0600）
+    resources/terms/2026-11.txt 用户协议原文（运行时读取）
   composeApp/src/desktopTest/kotlin/  状态流测试 + 真实后端联调
 ```
 
@@ -117,6 +122,30 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 明确提示（删除 `~/.mim/<用户名>` 后重新登录，或换设备）；旧设备目录保留，
 离线仍可查看历史。若只是服务端缺少设备行（库被清理），登录时会用**同一份**
 密钥重新登记，已有会话与棘轮不受影响。
+
+### 账号入口
+
+登录页同时承载三种形态：登录、注册、找回密码。
+
+- **注册**：用户名 / 密码 / 可选邮箱 / 设备名；必须勾选并查看《用户协议》
+  （版本 `2026-11`，原文在 `resources/terms/2026-11.txt`，运行时读取）。
+  注册成功后立即用同一账号登录。
+- **记住账号密码**：勾选后把账号、密码、设备名写入 `~/.mim/remember.bin`，
+  用同目录 `remember.key`（0600）做 AES-GCM 加密；下次启动自动登录。
+  这只防「随手翻到明文」，不防能读你用户目录的恶意程序，界面已写明。
+- **找回密码**：`POST /recover/email` 发验证码、`POST /recover/reset` 重置。
+  需要账号绑定邮箱且服务端配置 SMTP；未配置时服务端返回
+  「邮件服务未配置」，界面原样提示，不假装成功。
+
+### 联系人操作
+
+聊天页右上「更多」提供：设置备注（`POST /chat/contacts/{peer}/label`）、
+屏蔽此人 / 解除屏蔽、清除会话、移除联系人（`DELETE /chat/contacts/{peer}`，双向）。
+
+- **屏蔽是本地行为**：消息仍会解密以推进棘轮，但明文直接丢弃、不提示；
+  联系人标记「已屏蔽」，未读数固定为 0，输入区替换为说明条。对方不会收到通知。
+- **移除好友是双向的**：服务端同时解除双方关系，本机历史仍保留在保险库里。
+- **备注**只影响自己看到的显示名，清空备注即恢复对方昵称。
 
 ### 未读数与清除会话
 

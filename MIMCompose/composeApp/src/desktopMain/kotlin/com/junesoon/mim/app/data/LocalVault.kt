@@ -60,6 +60,16 @@ class LocalVault(
         write("outbox.bin", JsonCodec.encode(entries))
     }
 
+    /** 本机屏蔽的联系人。屏蔽是本地行为：不通知服务端，也不影响对方。 */
+    fun loadBlocked(): Set<String> =
+        read("blocked.bin")?.let {
+            runCatching { JsonCodec.decode<Set<String>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveBlocked(peers: Set<String>) {
+        write("blocked.bin", JsonCodec.encode(peers))
+    }
+
     fun loadServerIds(): Map<String, Long> =
         read("server_ids.bin")?.let {
             runCatching { JsonCodec.decode<Map<String, Long>>(it) }.getOrNull()

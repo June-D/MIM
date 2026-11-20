@@ -72,6 +72,29 @@ interface MessagingBackend {
     /** 删除好友（双向）。 */
     suspend fun removeContact(token: String, peer: String) = Unit
 
+    /** 修改好友备注名。 */
+    suspend fun renameContact(token: String, peer: String, label: String) = Unit
+
+    /** 注册账号；email 可选，用于找回密码。 */
+    suspend fun register(username: String, password: String, email: String?): Unit =
+        unsupported("注册")
+
+    /** 发送邮箱验证码（忘记密码）。 */
+    suspend fun sendRecoveryCode(username: String): Unit = unsupported("邮箱找回")
+
+    /** 用邮箱验证码重置密码。 */
+    suspend fun resetPassword(username: String, code: String, newPassword: String): Unit =
+        unsupported("密码重置")
+
+    /** 本机屏蔽 / 解除屏蔽某个联系人。 */
+    fun setBlocked(contactId: String, blocked: Boolean) = Unit
+
+    /** 本机已屏蔽的联系人。 */
+    fun blockedContacts(): Set<String> = emptySet()
+
+    private fun unsupported(action: String): Nothing =
+        throw IllegalStateException("当前后端不支持$action")
+
     /** 本账号的设备列表。 */
     suspend fun devices(token: String): List<DeviceInfo> = emptyList()
 

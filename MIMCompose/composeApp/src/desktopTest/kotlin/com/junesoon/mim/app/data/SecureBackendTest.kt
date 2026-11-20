@@ -144,6 +144,28 @@ class SecureBackendTest {
         val afterNewDevice = aliceNew.poll(newLogin.token).firstOrNull { it.contactId == bob }
         assertTrue(afterNewDevice != null, "新设备应能收到消息")
         assertEquals("after new device", afterNewDevice.message.text)
+
+        // 屏蔽：仍然解密（棘轮必须前进），但明文不入库、不提示。
+        aliceNew.setBlocked(bob, true)
+        assertTrue(aliceNew.blockedContacts().contains(bob), "屏蔽状态应保存")
+        bobBackend.send(bobLogin.token, alice, "blocked one")
+        assertTrue(
+            aliceNew.poll(newLogin.token).none { it.contactId == bob },
+            "屏蔽后不应出现新消息",
+        )
+        bobBackend.send(bobLogin.token, alice, "while blocked")
+        assertTrue(
+            aliceNew.poll(newLogin.token).none { it.contactId == bob },
+            "屏蔽期间的消息也不应出现",
+        )
+
+        // 解除屏蔽后继续收发：证明屏蔽期间棘轮没有断。
+        aliceNew.setBlocked(bob, false)
+        assertTrue(aliceNew.blockedContacts().isEmpty(), "解除后不应再有屏蔽记录")
+        bobBackend.send(bobLogin.token, alice, "after unblock")
+        val resumed = aliceNew.poll(newLogin.token).firstOrNull { it.contactId == bob }
+        assertTrue(resumed != null, "解除屏蔽后应能收到消息")
+        assertEquals("after unblock", resumed.message.text)
     }
 
     private suspend fun safetyCode(

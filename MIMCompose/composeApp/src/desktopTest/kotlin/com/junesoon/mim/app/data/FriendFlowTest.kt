@@ -53,6 +53,23 @@ class FriendFlowTest {
             // 已是好友后，搜索不再返回对方。
             val afterAccept = SecureBackend(server).searchUsers(firstLogin.token, second)
             assertEquals(emptyList(), afterAccept, "已是好友不应出现在搜索结果里")
+
+            // 备注：只对我生效，联系人显示名变成备注。
+            SecureBackend(server).renameContact(firstLogin.token, second, "测试备注")
+            val renamed = SecureBackend(server).contacts(firstLogin.token)
+                .firstOrNull { it.id == second }
+            assertEquals("测试备注", renamed?.name, "备注应覆盖显示名")
+
+            // 移除好友：双方关系解除。
+            SecureBackend(server).removeContact(firstLogin.token, second)
+            assertTrue(
+                SecureBackend(server).contacts(firstLogin.token).none { it.id == second },
+                "移除后不应再出现在我的联系人里",
+            )
+            assertTrue(
+                SecureBackend(server).contacts(secondLogin.token).none { it.id == first },
+                "移除是双向的",
+            )
         }
     }
 }

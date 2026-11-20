@@ -5,54 +5,82 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import com.junesoon.mim.app.data.DemoBackend
-import com.junesoon.mim.app.data.SecureBackend
 import com.junesoon.mim.app.data.MessagingBackend
+import com.junesoon.mim.app.data.SecureBackend
 import com.junesoon.mim.app.state.AppStore
 import com.junesoon.mim.app.state.Screen
 import com.junesoon.mim.app.ui.AddContactScreen
+import com.junesoon.mim.app.ui.AuthScreen
 import com.junesoon.mim.app.ui.ChatScreen
-import com.junesoon.mim.app.ui.DeviceScreen
 import com.junesoon.mim.app.ui.ContactsScreen
-import com.junesoon.mim.app.ui.LoginScreen
+import com.junesoon.mim.app.ui.DeviceScreen
 import com.junesoon.mim.app.ui.MimTheme
+import kotlinx.coroutines.delay
 
 /**
  * 顶层组装：只做路由与状态分发。
  *
- * 换成真实后端时，只需在构造 [AppStore] 时传入另一个实现。
+ * 设置 MIM_SERVER_URL 时连真实服务端，并用本机记住的账号自动登录；
+ * 未设置时用内存演示后端，方便在没有服务端的情况下看界面。
  */
 @Composable
 fun MimApp() {
-    // 设置了 MIM_SERVER_URL 就走真实服务端，否则用内存演示后端。
     val store = remember {
         val server = System.getenv("MIM_SERVER_URL")
         val backend: MessagingBackend =
             if (server.isNullOrBlank()) DemoBackend() else SecureBackend(server.trim())
-        AppStore(backend)
+        AppStore(backend, autoRestore = !server.isNullOrBlank())
     }
     val state by store.state.collectAsState()
+
+    // 提示类消息 4 秒后自动消失，错误则留到用户下次操作。
+    LaunchedEffect(state.notice) {
+        if (state.notice != null) {
+            delay(4_000)
+            store.clearNotice()
+        }
+    }
 
     MimTheme {
         Surface(modifier = Modifier.fillMaxSize()) {
             when (val screen = state.screen) {
-                Screen.Login -> LoginScreen(
+                Screen.Login -> AuthScreen(
+                    mode = state.authMode,
                     busy = state.busy,
                     error = state.error,
-                    onLogin = store::login,
+                    notice = state.notice,
+                    initialUsername = state.rememberedUsername,
+                    initialPassword = state.rememberedPassword,
+                    initialDeviceName = state.rememberedDeviceName,
+                    rememberMe = state.rememberMe,
+                    onModeChange = store::setAuthMode,
+                    onLogin = { username, password, device, remember ->
+                        store.login(username, password, device, remember)
+                    },
+                    onRegister = store::register,
+                    onSendCode = store::sendRecoveryCode,
+                    onReset = store::resetPassword,
+                    onClearFeedback = {
+                        store.clearError()
+                        store.clearNotice()
+                    },
                 )
 
                 Screen.Contacts -> ContactsScreen(
                     selfName = state.selfName,
                     deviceName = state.deviceName,
                     contacts = state.contacts,
+                    pendingRequestCount = state.pendingRequestCount,
                     onOpenChat = store::openChat,
                     onShowDevices = store::openDevices,
                     onAddContact = store::openAddContact,
-                    pendingRequestCount = state.friendRequests
-                        .count { it.incoming && it.pending },
+                    onLogout = store::logout,
+                    notice = state.notice,
+                    error = state.error,
                 )
 
                 Screen.AddContact -> AddContactScreen(
@@ -63,12 +91,16 @@ fun MimApp() {
                     onSearch = store::searchUsers,
                     onRequest = store::sendFriendRequest,
                     onRespond = store::respondFriendRequest,
+                    error = state.error,
+                    notice = state.notice,
                 )
 
                 Screen.Devices -> DeviceScreen(
                     devices = state.devices,
                     onBack = store::backToContacts,
                     onRevoke = store::revokeDevice,
+                    notice = state.notice,
+                    error = state.error,
                 )
 
                 is Screen.Chat -> {
@@ -78,7 +110,11 @@ fun MimApp() {
                             selfName = state.selfName,
                             deviceName = state.deviceName,
                             contacts = state.contacts,
+                            pendingRequestCount = state.pendingRequestCount,
                             onOpenChat = store::openChat,
+                            onShowDevices = store::openDevices,
+                            onAddContact = store::openAddContact,
+                            onLogout = store::logout,
                         )
                     } else {
                         ChatScreen(
@@ -88,8 +124,12 @@ fun MimApp() {
                             onSend = store::send,
                             onRecall = { messageId -> store.recall(screen.contactId, messageId) },
                             onClear = store::clearConversation,
+                            onRename = { label -> store.renameContact(screen.contactId, label) },
+                            onToggleBlock = { store.toggleBlock(screen.contactId) },
+                            onRemove = { store.removeContact(screen.contactId) },
                             safetyNumbers = state.safetyNumbers,
                             error = state.error,
+                            notice = state.notice,
                         )
                     }
                 }

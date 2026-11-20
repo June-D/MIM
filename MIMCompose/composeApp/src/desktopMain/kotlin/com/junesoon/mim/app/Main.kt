@@ -9,8 +9,8 @@ import androidx.compose.ui.window.application
 fun main() = application {
     Window(
         onCloseRequest = ::exitApplication,
-        title = "MiM",
-        state = WindowState(size = DpSize(920.dp, 660.dp)),
+        title = "MiM · 私密通讯",
+        state = WindowState(size = DpSize(1000.dp, 700.dp)),
     ) {
         MimApp()
     }

@@ -91,6 +91,7 @@ class SecureBackend(
     private var storeJson: String = LocalVault.EMPTY_STORE
     private var messages: MutableList<CachedMessage> = mutableListOf()
     private var serverIds: MutableMap<String, Long> = mutableMapOf()
+    private var blockedPeers: MutableSet<String> = mutableSetOf()
     private var outbox: MutableList<OutboxEntry> = mutableListOf()
     private var cachedCert: CertJson? = null
     private var cachedToken: String = ""
@@ -151,6 +152,53 @@ class SecureBackend(
             else -> null
         }
     }
+
+    override suspend fun register(username: String, password: String, email: String?) {
+        val body = buildMap<String, Any> {
+            put("username", username)
+            put("password", password)
+            if (!email.isNullOrBlank()) put("email", email.trim())
+            put("agreedTerms", true)
+            put("termsVersion", TERMS_VERSION)
+        }
+        val response: StatusEnvelope = client.post("$server/register/token") {
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }.body()
+        require(response.status == 200) { response.message ?: "注册失败" }
+    }
+
+    override suspend fun sendRecoveryCode(username: String) {
+        val response: StatusEnvelope = client.post("$server/recover/email") {
+            contentType(ContentType.Application.Json)
+            setBody(mapOf("username" to username))
+        }.body()
+        require(response.status == 200) { response.message ?: "验证码发送失败" }
+    }
+
+    override suspend fun resetPassword(username: String, code: String, newPassword: String) {
+        val response: StatusEnvelope = client.post("$server/recover/reset") {
+            contentType(ContentType.Application.Json)
+            setBody(mapOf("username" to username, "code" to code, "newPassword" to newPassword))
+        }.body()
+        require(response.status == 200) { response.message ?: "密码重置失败" }
+    }
+
+    override suspend fun renameContact(token: String, peer: String, label: String) {
+        val response: StatusEnvelope = client.post("$server/chat/contacts/$peer/label") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(AddContactRequest(peer, label.ifBlank { null }))
+        }.body()
+        require(response.status == 200) { response.message ?: "修改备注失败" }
+    }
+
+    override fun setBlocked(contactId: String, blocked: Boolean) {
+        if (blocked) blockedPeers += contactId else blockedPeers -= contactId
+        vault.saveBlocked(blockedPeers)
+    }
+
+    override fun blockedContacts(): Set<String> = blockedPeers.toSet()
 
     override suspend fun searchUsers(token: String, keyword: String): List<UserSummary> {
         val users: List<UserSummaryDto> =
@@ -259,6 +307,7 @@ class SecureBackend(
         messages = vault.loadMessages().distinctBy { it.id }.toMutableList()
         serverIds = vault.loadServerIds().toMutableMap()
         outbox = vault.loadOutbox().toMutableList()
+        blockedPeers = vault.loadBlocked().toMutableSet()
         return LoginResult(token, username, contacts(token))
     }
 
@@ -271,8 +320,10 @@ class SecureBackend(
                 val name = user.username ?: "未命名"
                 Contact(
                     id = name,
-                    name = user.nickname ?: user.labelName ?: name,
+                    name = user.labelName?.takeIf { it.isNotBlank() }
+                        ?: user.nickname ?: name,
                     subtitle = if (user.online == true) "在线" else group.groupName.orEmpty(),
+                    online = user.online == true,
                 )
             }
         }
@@ -291,6 +342,7 @@ class SecureBackend(
                     read = it.read,
                     recalled = it.recalled,
                     canRecall = it.fromMe && it.recallToken != null && !it.recalled,
+                    epochMs = it.epochMs,
                 )
             }
 
@@ -590,9 +642,13 @@ class SecureBackend(
         into: MutableList<IncomingMessage>,
     ) {
         val id = raw.clientMsgId ?: UUID.randomUUID().toString()
+        raw.id?.let { serverIds[peer] = maxOf(serverIds[peer] ?: 0L, it) }
+        // 已屏蔽：棘轮必须继续前进，否则后面的消息解不开；明文直接丢弃。
+        if (peer in blockedPeers) {
+            return
+        }
         val message = ChatMessage(id, false, plaintext, nowTime())
         cache(peer, message, raw.clientTime ?: System.currentTimeMillis())
-        raw.id?.let { serverIds[peer] = maxOf(serverIds[peer] ?: 0L, it) }
         into += IncomingMessage(peer, message)
     }
 
@@ -795,6 +851,7 @@ class SecureBackend(
 
     companion object {
         const val ALGORITHM = "X3DH-P256-DOUBLE-RATCHET-AES-256-GCM"
+        const val TERMS_VERSION = "2026-11"
 
         private const val TYPE_NEW_MESSAGE = 100010
         private const val TYPE_READ_RECEIPT = 100012
