@@ -101,17 +101,15 @@ fun ContactsScreen(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    MimIcon(MimIcon.Lock, size = 9.dp, tint = MimPalette.InkSoft)
-                    Spacer(Modifier.width(4.dp))
-                    Text(
-                        deviceName.ifBlank { "本机" },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
+                // 只留设备名：9dp 的锁图标在 1x 屏上只是一团墨点，加密提示
+                // 由聊天页头部与右栏空态承担，这里不再叠加视觉噪声。
+                Text(
+                    deviceName.ifBlank { "本机" },
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MimPalette.InkSoft.copy(alpha = 0.85f),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             MimIconAction(MimIcon.Search, tooltip = "搜索消息") { onOpenSearch() }
             MimIconAction(
