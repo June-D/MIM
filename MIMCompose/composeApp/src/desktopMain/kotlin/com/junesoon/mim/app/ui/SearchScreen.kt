@@ -75,12 +75,7 @@ fun SearchScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onBack() },
-                contentAlignment = Alignment.Center,
-            ) {
-                MimIcon(MimIcon.Back, size = 17.dp, tint = MimPalette.Ink)
-            }
+            MimIconAction(MimIcon.Back, tooltip = "返回") { onBack() }
             Column {
                 Text("搜索消息", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -92,30 +87,18 @@ fun SearchScreen(
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-        OutlinedTextField(
-            value = keyword,
-            onValueChange = { keyword = it },
-            placeholder = { Text("输入关键词", style = MaterialTheme.typography.bodySmall) },
-            leadingIcon = { MimIcon(MimIcon.Search, size = 15.dp, tint = MimPalette.InkSoft) },
-            singleLine = true,
-            shape = RoundedCornerShape(12.dp),
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
-            keyboardActions = KeyboardActions(onSearch = { onSearch(keyword) }),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = MimPalette.Teal,
-                unfocusedBorderColor = MimPalette.Line,
-                focusedContainerColor = MimPalette.Card,
-                unfocusedContainerColor = MimPalette.Card,
-                cursorColor = MimPalette.Teal,
-            ),
-            modifier = Modifier
-                .weight(1f)
-                .focusRequester(focus),
-        )
+            MimSearchField(
+                value = keyword,
+                onValueChange = { keyword = it },
+                placeholder = "输入关键词",
+                focusRequester = focus,
+                onSubmit = { onSearch(keyword) },
+                modifier = Modifier.weight(1f),
+            )
             TextButton(
                 onClick = { onSearch(keyword) },
                 enabled = keyword.isNotBlank(),
@@ -138,8 +121,12 @@ fun SearchScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onOpenHit(hit.contactId, hit.messageId) }
-                            .padding(horizontal = 20.dp, vertical = 11.dp),
+                            .padding(horizontal = 8.dp, vertical = 1.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .mimHoverable(shape = RoundedCornerShape(10.dp)) {
+                                onOpenHit(hit.contactId, hit.messageId)
+                            }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.Top,
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                     ) {

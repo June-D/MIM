@@ -38,6 +38,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -407,13 +408,41 @@ private fun MimField(
     label: String,
     secret: Boolean = false,
 ) {
+    // 密码框默认遮挡，给一个显隐开关：输错时不用整段删掉重打。
+    var visible by remember { mutableStateOf(false) }
+    val reveal: (@Composable () -> Unit)? = if (!secret) {
+        null
+    } else {
+        @Composable {
+            MimTooltip(if (visible) "隐藏密码" else "显示密码") {
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .mimHoverable(shape = CircleShape, onClick = { visible = !visible })
+                        .padding(7.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    MimIcon(
+                        MimIcon.Eye,
+                        size = 15.dp,
+                        tint = if (visible) MimPalette.Teal else MimPalette.InkSoft,
+                    )
+                }
+            }
+        }
+    }
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
         label = { Text(label) },
         singleLine = true,
         shape = RoundedCornerShape(12.dp),
-        visualTransformation = if (secret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None,
+        trailingIcon = reveal,
+        visualTransformation = if (secret && !visible) {
+            PasswordVisualTransformation()
+        } else {
+            androidx.compose.ui.text.input.VisualTransformation.None
+        },
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MimPalette.Teal,
             unfocusedBorderColor = MimPalette.Line,
@@ -470,14 +499,7 @@ private fun PrimaryButton(text: String, busy: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun LinkText(text: String, onClick: () -> Unit) {
-    Text(
-        text,
-        style = MaterialTheme.typography.labelMedium,
-        color = MimPalette.Teal,
-        modifier = Modifier.clickable { onClick() },
-    )
-}
+private fun LinkText(text: String, onClick: () -> Unit) = MimLink(text, onClick)
 
 @Composable
 private fun Feedback(error: String?, notice: String?) {

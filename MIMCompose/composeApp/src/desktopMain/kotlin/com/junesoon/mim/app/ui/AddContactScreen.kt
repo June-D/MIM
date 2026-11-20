@@ -28,6 +28,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,12 +67,7 @@ fun AddContactScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onBack() },
-                contentAlignment = Alignment.Center,
-            ) {
-                MimIcon(MimIcon.Back, size = 17.dp, tint = MimPalette.Ink)
-            }
+            MimIconAction(MimIcon.Back, tooltip = "返回") { onBack() }
             Column {
                 Text("添加联系人", style = MaterialTheme.typography.titleMedium)
                 Text(
@@ -98,34 +94,31 @@ fun AddContactScreen(
         }
 
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            OutlinedTextField(
+            MimSearchField(
                 value = keyword,
                 onValueChange = { keyword = it },
-                placeholder = { Text("输入对方的用户名", style = MaterialTheme.typography.bodySmall) },
-                leadingIcon = { MimIcon(MimIcon.Search, size = 15.dp, tint = MimPalette.InkSoft) },
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MimPalette.Teal,
-                    unfocusedBorderColor = MimPalette.Line,
-                    focusedContainerColor = MimPalette.Card,
-                    unfocusedContainerColor = MimPalette.Card,
-                    cursorColor = MimPalette.Teal,
-                ),
+                placeholder = "输入对方的用户名",
+                onSubmit = { onSearch(keyword) },
                 modifier = Modifier.weight(1f),
             )
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(12.dp))
+                    .clip(RoundedCornerShape(10.dp))
                     .background(
-                        if (keyword.isBlank()) MimPalette.Line else MimPalette.Teal,
+                        if (keyword.isBlank()) MimPalette.LineSoft else MimPalette.Teal,
                     )
-                    .clickable(enabled = keyword.isNotBlank()) { onSearch(keyword) }
-                    .padding(horizontal = 16.dp, vertical = 15.dp),
+                    .mimHoverable(
+                        shape = RoundedCornerShape(10.dp),
+                        hoverColor = Color(0x1FFFFFFF),
+                        pressColor = Color(0x38FFFFFF),
+                        enabled = keyword.isNotBlank(),
+                        onClick = { onSearch(keyword) },
+                    )
+                    .padding(horizontal = 15.dp, vertical = 11.dp),
             ) {
                 Text(
                     "搜索",

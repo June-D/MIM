@@ -41,6 +41,8 @@ enum class MimIcon {
     Mic,
     Stop,
     Pin,
+    Down,
+    Eye,
 }
 
 @Composable
@@ -63,6 +65,21 @@ fun MimIcon(
                 for (x in listOf(0.22f, 0.5f, 0.78f)) {
                     drawCircle(tint, side * 0.055f, points(x, 0.5f))
                 }
+            }
+            MimIcon.Down -> {
+                drawLine(tint, points(0.26f, 0.42f), points(0.5f, 0.66f), stroke.width, StrokeCap.Round)
+                drawLine(tint, points(0.5f, 0.66f), points(0.74f, 0.42f), stroke.width, StrokeCap.Round)
+            }
+            MimIcon.Eye -> {
+                // 杏仁形眼眶 + 瞳孔：密码可见性开关，比文字「显示」更省空间。
+                val eye = Path().apply {
+                    moveTo(side * 0.1f, side * 0.5f)
+                    quadraticBezierTo(side * 0.5f, side * 0.16f, side * 0.9f, side * 0.5f)
+                    quadraticBezierTo(side * 0.5f, side * 0.84f, side * 0.1f, side * 0.5f)
+                    close()
+                }
+                drawPath(eye, tint, style = stroke)
+                drawCircle(tint, side * 0.1f, Offset(side * 0.5f, side * 0.5f))
             }
             MimIcon.Send -> {
                 drawLine(tint, points(0.5f, 0.82f), points(0.5f, 0.2f), stroke.width, StrokeCap.Round)

@@ -53,12 +53,7 @@ fun DeviceScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onBack() },
-                contentAlignment = Alignment.Center,
-            ) {
-                MimIcon(MimIcon.Back, size = 17.dp, tint = MimPalette.Ink)
-            }
+            MimIconAction(MimIcon.Back, tooltip = "返回") { onBack() }
             Column {
                 Text("设备", style = MaterialTheme.typography.titleMedium)
                 Text(

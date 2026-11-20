@@ -1,5 +1,11 @@
 package com.junesoon.mim.app.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -100,6 +106,8 @@ fun ChatScreen(
     onToggleBlock: () -> Unit,
     onRemove: () -> Unit,
     safetyNumbers: List<SafetyEntry>,
+    /** 分栏布局里列表一直可见，不需要返回箭头。 */
+    showBack: Boolean = true,
     /** 本次打开会话的第一条未读：在它上面画「以下为新消息」。 */
     firstUnreadId: String? = null,
     /** 安全码与上次记录不一致的设备 id。 */
@@ -122,6 +130,8 @@ fun ChatScreen(
     var showRename by remember { mutableStateOf(false) }
     var showRemove by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // 往上翻过历史时露出「回到最新」，否则新消息到达后用户会不知道自己在哪。
+    val canScrollBack = listState.canScrollBackward && messages.isNotEmpty()
 
     LaunchedEffect(recorder) {
         if (recorder == null) {
@@ -134,22 +144,28 @@ fun ChatScreen(
         }
     }
 
-    // 有新消息时滚到底部；但还有待定位目标（搜索命中 / 第一条未读）时不抢位置。
-    LaunchedEffect(messages.size, scrollToMessageId) {
-        if (scrollToMessageId == null && messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.lastIndex)
-        }
-    }
+    // 记住上次处理过的消息条数：锚点消费后不能让「滚到底部」把定位结果顶掉。
+    var lastListSize by remember { mutableStateOf(0) }
 
     LaunchedEffect(scrollToMessageId, messages.size) {
-        val target = scrollToMessageId ?: return@LaunchedEffect
-        val index = messages.indexOfFirst { it.id == target }
-        if (index >= 0) {
-            listState.animateScrollToItem(index)
-            onScrolled()
-        } else if (messages.isNotEmpty()) {
-            // 目标已不在缓存里（例如被清除过）：消费掉锚点，恢复「新消息滚到底部」。
-            onScrolled()
+        val target = scrollToMessageId
+        if (target != null) {
+            val index = messages.indexOfFirst { it.id == target }
+            if (index >= 0) {
+                listState.animateScrollToItem(index)
+                lastListSize = messages.size
+                onScrolled()
+            } else if (messages.isNotEmpty()) {
+                // 目标已不在缓存里（例如被清除过）：消费掉锚点，恢复「新消息滚到底部」。
+                lastListSize = messages.size
+                onScrolled()
+            }
+            return@LaunchedEffect
+        }
+        // 没有待定位目标时：消息条数变化就滚到底部。
+        if (messages.isNotEmpty() && messages.size != lastListSize) {
+            lastListSize = messages.size
+            listState.animateScrollToItem(messages.lastIndex)
         }
     }
 
@@ -162,14 +178,23 @@ fun ChatScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            HeaderIcon(MimIcon.Back, onClick = onBack)
-            Avatar(name = contact.name, size = 38.dp, online = contact.online)
-            Column(modifier = Modifier.weight(1f)) {
+            if (showBack) {
+                MimIconAction(MimIcon.Back, tooltip = "返回列表", onClick = onBack)
+            }
+            Avatar(name = contact.name, size = 36.dp, online = contact.online)
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(1.dp),
+            ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(contact.name, style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        contact.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                     if (pinned) {
                         Spacer(Modifier.width(6.dp))
-                        MimIcon(MimIcon.Pin, size = 12.dp, tint = MimPalette.Teal)
+                        MimIcon(MimIcon.Pin, size = 11.dp, tint = MimPalette.Brass)
                     }
                 }
                 Text(
@@ -179,12 +204,12 @@ fun ChatScreen(
                         else -> "端到端加密"
                     },
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (contact.online && !contact.blocked) MimPalette.Teal else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            HeaderIcon(MimIcon.Shield, onClick = { showSafety = true })
+            MimIconAction(MimIcon.Shield, tooltip = "安全码") { showSafety = true }
             Box {
-                HeaderIcon(MimIcon.More, onClick = { showMenu = true })
+                MimIconAction(MimIcon.More, tooltip = "更多") { showMenu = true }
                 DropdownMenu(
                     expanded = showMenu,
                     onDismissRequest = { showMenu = false },
@@ -224,6 +249,8 @@ fun ChatScreen(
                 }
             }
         }
+
+        HorizontalDivider(color = MimPalette.LineSoft)
 
         val banner = localError ?: error ?: notice
         if (banner != null) {
@@ -297,27 +324,47 @@ fun ChatScreen(
             } else {
                 LazyColumn(
                     state = listState,
-                    modifier = Modifier.fillMaxSize().padding(horizontal = 20.dp),
-                    contentPadding = PaddingValues(top = 14.dp, bottom = 14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
+                    contentPadding = PaddingValues(top = 12.dp, bottom = 12.dp),
                 ) {
                     itemsIndexed(messages, key = { _, message -> message.id }) { index, message ->
                         val previous = messages.getOrNull(index - 1)
+                        val next = messages.getOrNull(index + 1)
                         val label = dayLabel(message.epochMs)
-                        if (label.isNotBlank() && dayKey(previous?.epochMs) != dayKey(message.epochMs)) {
+                        val newDay = label.isNotBlank() && dayKey(previous?.epochMs) != dayKey(message.epochMs)
+                        if (newDay) {
                             DaySeparator(label = label)
                         }
                         if (message.id == firstUnreadId) {
                             UnreadSeparator()
                         }
+                        // 同一人、同一分钟内的连续消息算一组：组内贴紧，组间留白。
+                        val grouped = !newDay && previous != null &&
+                            previous.fromMe == message.fromMe &&
+                            message.epochMs - previous.epochMs <= GROUP_WINDOW_MS &&
+                            message.kind == "text" && previous.kind == "text"
+                        val lastOfGroup = next == null ||
+                            next.fromMe != message.fromMe ||
+                            next.epochMs - message.epochMs > GROUP_WINDOW_MS ||
+                            dayKey(next.epochMs) != dayKey(message.epochMs) ||
+                            next.kind != "text" || message.kind != "text"
                         MessageRow(
                             message = message,
                             loadMedia = loadMedia,
                             onOpenImage = { viewerImage = it },
                             onRecall = { onRecall(message.id) },
+                            grouped = grouped,
+                            lastOfGroup = lastOfGroup,
                         )
                     }
                 }
+                ScrollToLatestPill(
+                    visible = canScrollBack,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 14.dp),
+                    onClick = { scope.launch { listState.animateScrollToItem(messages.lastIndex) } },
+                )
             }
         }
 
@@ -348,7 +395,7 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                ComposerIcon(MimIcon.Image, enabled = recorder == null) {
+                ComposerIcon(MimIcon.Image, tooltip = "发送图片", enabled = recorder == null) {
                     localError = runCatching {
                         val picked = MediaTools.pickImage()
                         if (picked != null) {
@@ -359,6 +406,7 @@ fun ChatScreen(
                 }
                 ComposerIcon(
                     MimIcon.Mic,
+                    tooltip = if (recorder == null) "录一段语音" else "停止录音并发送",
                     enabled = true,
                     active = recorder != null,
                 ) {
@@ -402,12 +450,12 @@ fun ChatScreen(
                     value = draft,
                     onValueChange = { draft = it },
                     placeholder = {
-                        Text("输入消息…（Enter 发送，Shift+Enter 换行）", style = MaterialTheme.typography.bodySmall)
+                        Text("输入消息…", style = MaterialTheme.typography.bodySmall)
                     },
-                    shape = RoundedCornerShape(14.dp),
+                    shape = RoundedCornerShape(13.dp),
                     maxLines = 6,
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MimPalette.Teal,
+                        focusedBorderColor = MimPalette.Teal.copy(alpha = 0.65f),
                         unfocusedBorderColor = MimPalette.LineSoft,
                         focusedContainerColor = MimPalette.Paper,
                         unfocusedContainerColor = MimPalette.Paper,
@@ -440,29 +488,37 @@ fun ChatScreen(
                         }
                     },
                 )
+                MimTooltip("Enter 发送 · Shift+Enter 换行") {
                 Box(
                     modifier = Modifier
-                        .size(42.dp)
+                        .size(40.dp)
                         .clip(CircleShape)
                         .background(
-                            if (draft.text.isBlank()) MimPalette.Line else MimPalette.Teal,
+                            if (draft.text.isBlank()) MimPalette.LineSoft else MimPalette.Teal,
                         )
-                        .clickable(enabled = draft.text.isNotBlank()) {
-                            onSend(draft.text)
-                            draft = TextFieldValue("")
-                        },
+                        .mimHoverable(
+                            shape = CircleShape,
+                            hoverColor = if (draft.text.isBlank()) Color.Transparent else Color(0x1FFFFFFF),
+                            pressColor = if (draft.text.isBlank()) Color.Transparent else Color(0x38FFFFFF),
+                            enabled = draft.text.isNotBlank(),
+                            onClick = {
+                                onSend(draft.text)
+                                draft = TextFieldValue("")
+                            },
+                        ),
                     contentAlignment = Alignment.Center,
                 ) {
                     MimIcon(
                         MimIcon.Send,
-                        size = 18.dp,
+                        size = 17.dp,
                         tint = if (draft.text.isBlank()) MimPalette.InkSoft else Color(0xFFFDFDFB),
                     )
+                }
+                }
                 }
             }
             }
         }
-    }
 
     viewerImage?.let { bitmap ->
         AlertDialog(
@@ -637,78 +693,122 @@ private fun MessageRow(
     loadMedia: suspend (ChatMessage) -> ByteArray?,
     onOpenImage: (ImageBitmap) -> Unit,
     onRecall: () -> Unit,
+    grouped: Boolean = false,
+    lastOfGroup: Boolean = true,
 ) {
+    val mine = message.fromMe
+    // 一组消息只在两侧「组首/组尾」收圆，中间用 6dp，读起来是一段话而不是一叠卡片。
+    val small = 6.dp
+    val large = 15.dp
+    val shape = RoundedCornerShape(
+        topStart = if (mine) large else if (grouped) small else large,
+        topEnd = if (mine) (if (grouped) small else large) else large,
+        bottomStart = if (mine) large else (if (lastOfGroup) small else large),
+        bottomEnd = if (mine) (if (lastOfGroup) small else large) else large,
+    )
     Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = if (message.fromMe) Arrangement.End else Arrangement.Start,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = if (grouped) 3.dp else 12.dp),
+        horizontalArrangement = if (mine) Arrangement.End else Arrangement.Start,
     ) {
         Column(
-            modifier = Modifier
-                .widthIn(max = 520.dp)
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (message.fromMe) 16.dp else 4.dp,
-                        bottomEnd = if (message.fromMe) 4.dp else 16.dp,
-                    ),
-                )
-                .background(if (message.fromMe) MimPalette.BubbleMine else MimPalette.Card)
-                .border(
-                    width = if (message.fromMe) 0.dp else 1.dp,
-                    color = if (message.fromMe) Color.Transparent else MimPalette.LineSoft,
-                    shape = RoundedCornerShape(
-                        topStart = 16.dp,
-                        topEnd = 16.dp,
-                        bottomStart = if (message.fromMe) 16.dp else 4.dp,
-                        bottomEnd = if (message.fromMe) 4.dp else 16.dp,
-                    ),
-                )
-                .padding(horizontal = 13.dp, vertical = 9.dp),
+            horizontalAlignment = if (mine) Alignment.End else Alignment.Start,
+            modifier = Modifier.widthIn(max = 468.dp),
         ) {
-            when {
-                message.recalled -> Text(
-                    message.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (message.fromMe) Color(0xCCFDFDFB) else MimPalette.InkSoft,
-                )
-                message.kind == "image" -> MessageImage(message, loadMedia, onOpenImage)
-                message.kind == "voice" -> MessageVoice(message, loadMedia)
-                else -> Text(
-                    message.text,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Ink,
-                )
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (message.canRecall) {
-                    Text(
-                        "撤回",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (message.fromMe) Color(0xCCFDFDFB) else MimPalette.Teal,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(4.dp))
-                            .clickable { onRecall() }
-                            .padding(horizontal = 4.dp, vertical = 1.dp),
+            Box(
+                modifier = Modifier
+                    .clip(shape)
+                    .background(if (mine) MimPalette.BubbleMine else MimPalette.Card)
+                    .border(
+                        width = if (mine) 0.dp else 1.dp,
+                        color = if (mine) Color.Transparent else MimPalette.Line,
+                        shape = shape,
                     )
-                    Spacer(Modifier.width(6.dp))
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+            ) {
+                when {
+                    message.recalled -> Text(
+                        message.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (mine) Color(0xCCFDFDFB) else MimPalette.InkSoft,
+                    )
+                    message.kind == "image" -> MessageImage(message, loadMedia, onOpenImage)
+                    message.kind == "voice" -> MessageVoice(message, loadMedia)
+                    else -> Text(
+                        message.text,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (mine) Color(0xFFFDFDFB) else MimPalette.Ink,
+                    )
                 }
-                Text(
-                    buildString {
-                        append(message.time)
-                        if (message.pending) append(" · 发送中")
-                        if (message.read) append(" · 已读")
-                        if (message.recalled) append(" · 已撤回")
-                    },
-                    style = MaterialTheme.typography.labelSmall,
-                    color = if (message.fromMe) Color(0xB3FDFDFB) else MimPalette.InkSoft,
-                    textAlign = TextAlign.End,
-                )
             }
+            // 时间与状态退到气泡下方，只在本组最后一条显示，避免同一句话重复四遍。
+            if (lastOfGroup) {
+                Row(
+                    modifier = Modifier.padding(top = 4.dp, start = 2.dp, end = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (message.canRecall) {
+                        Text(
+                            "撤回",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MimPalette.InkSoft,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .mimHoverable(
+                                    shape = RoundedCornerShape(4.dp),
+                                    onClick = onRecall,
+                                )
+                                .padding(horizontal = 4.dp, vertical = 1.dp),
+                        )
+                    }
+                    Text(
+                        buildString {
+                            append(message.time)
+                            if (message.pending) append(" · 发送中")
+                            if (message.read) append(" · 已读")
+                            if (message.recalled) append(" · 已撤回")
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MimPalette.InkSoft.copy(alpha = 0.85f),
+                        textAlign = TextAlign.End,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** 距底部有一段距离时出现的浮动按钮；点一下回到最新一条。 */
+@Composable
+private fun ScrollToLatestPill(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = fadeIn(tween(160)) + slideInVertically(tween(160)) { it / 3 },
+        exit = fadeOut(tween(120)) + slideOutVertically(tween(120)) { it / 3 },
+    ) {
+        Row(
+            modifier = Modifier
+                .clip(CircleShape)
+                .background(MimPalette.Card)
+                .border(1.dp, MimPalette.Line, CircleShape)
+                .mimHoverable(shape = CircleShape, onClick = onClick)
+                .padding(start = 12.dp, end = 14.dp, top = 7.dp, bottom = 7.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            MimIcon(MimIcon.Down, size = 13.dp, tint = MimPalette.Teal)
+            Text(
+                "回到最新",
+                style = MaterialTheme.typography.labelSmall,
+                color = MimPalette.Teal,
+            )
         }
     }
 }
@@ -853,25 +953,28 @@ private fun ComposerIcon(
     icon: MimIcon,
     enabled: Boolean,
     active: Boolean = false,
+    tooltip: String? = null,
     onClick: () -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .size(38.dp)
-            .clip(CircleShape)
-            .background(if (active) MimPalette.DangerSoft else MimPalette.Paper)
-            .clickable(enabled = enabled) { onClick() },
-        contentAlignment = Alignment.Center,
-    ) {
-        MimIcon(
-            icon,
-            size = 17.dp,
-            tint = when {
-                !enabled -> MimPalette.Line
-                active -> MimPalette.Danger
-                else -> MimPalette.InkSoft
-            },
-        )
+    MimTooltip(tooltip) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(CircleShape)
+                .background(if (active) MimPalette.DangerSoft else MimPalette.Paper)
+                .mimHoverable(shape = CircleShape, enabled = enabled, onClick = onClick),
+            contentAlignment = Alignment.Center,
+        ) {
+            MimIcon(
+                icon,
+                size = 16.dp,
+                tint = when {
+                    !enabled -> MimPalette.Line
+                    active -> MimPalette.Danger
+                    else -> MimPalette.InkSoft
+                },
+            )
+        }
     }
 }
 
@@ -919,15 +1022,8 @@ private fun UnreadSeparator() {
     }
 }
 
-@Composable
-private fun HeaderIcon(icon: MimIcon, onClick: () -> Unit) {
-    Box(
-        modifier = Modifier.size(32.dp).clip(CircleShape).clickable { onClick() },
-        contentAlignment = Alignment.Center,
-    ) {
-        MimIcon(icon, size = 17.dp, tint = MimPalette.Ink)
-    }
-}
+/** 同一人相隔多久仍算一组。超过这个间隔就重新起组，时间也重新显示。 */
+private const val GROUP_WINDOW_MS = 3 * 60 * 1000L
 
 @Composable
 private fun MenuLabel(icon: MimIcon, text: String, danger: Boolean = false) {

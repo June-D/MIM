@@ -37,6 +37,16 @@ object MimPalette {
     val DangerSoft = Color(0xFFFBEAE8)
     val BubbleMine = Color(0xFF0F5B4F)
     val BubblePeer = Color(0xFFFFFFFF)
+
+    /** 悬停 / 按下底色：主色低透明度，跨界面统一，不引入第二套灰。 */
+    val Hover = Color(0x0D0F5B4F)
+    val Pressed = Color(0x1A0F5B4F)
+
+    /** 当前会话行的选中底色，比悬停稍重，也不与未读强调色混淆。 */
+    val Selected = Color(0x240F5B4F)
+
+    /** 卡片投影：暖灰，而不是纯黑，避免在暖白纸面上发脏。 */
+    val Shadow = Color(0xFF2A2620)
 }
 
 private val MimColorScheme = lightColorScheme(

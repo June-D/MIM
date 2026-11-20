@@ -23,8 +23,8 @@ PC 桌面客户端（Compose Multiplatform）。
 MIMCompose/
   run-desktop.sh          启动脚本：构建 JNI 动态库、检查服务端、启动界面
   composeApp/src/desktopMain/kotlin/com/junesoon/mim/app/
-    Main.kt               窗口入口（920×660）
-    MimApp.kt             路由分发，只读状态
+    Main.kt               窗口入口（1120×760，最小 880×620，居中）
+    MimApp.kt             路由分发 + 会话工作区（左列表 / 右聊天）
     domain/Model.kt       Contact / ChatMessage
     domain/DeviceInfo.kt  设备、对端身份公钥、安全码条目
     domain/SafetyNumber.kt 60 位安全码（与 Java 同算法）
@@ -39,6 +39,8 @@ MIMCompose/
     data/JsonCodec.kt     统一 JSON 配置
     state/AppStore.kt     唯一状态源：StateFlow + 动作 + 同步循环
     ui/Theme.kt           配色、字体、圆角（视觉系统唯一来源）
+    ui/Interaction.kt     悬停/按下底色、手型光标、tooltip、图标按钮、文字链接
+    ui/Fields.kt          40dp 紧凑搜索框（聚焦提亮、可清空、支持回车提交）
     ui/Icons.kt           本地 Canvas 图标，避免额外依赖
     ui/Avatar.kt          首字母头像，颜色由名字稳定推导
     ui/AuthScreen.kt      登录 / 注册 / 找回密码 / 用户协议
@@ -53,6 +55,24 @@ MIMCompose/
     resources/terms/2026-11.txt 用户协议原文（运行时读取）
   composeApp/src/desktopTest/kotlin/  状态流测试 + 真实后端联调
 ```
+
+## 桌面布局与交互
+
+宽窗口下是**两栏工作区**：左侧 312dp 会话列表固定可见，右侧是聊天详情，
+点左边就换右边，不用在列表与对话之间来回切换；没有选中会话时右栏是空态。
+窗口默认 1120×760，最小 880×620，打开时居中。
+
+交互细节（都是本机行为，不涉及协议）：
+
+- 所有可点区域有悬停底色、按下态和手型光标；图标按钮悬停 450ms 出现 tooltip，
+  图标不再靠猜。
+- 会话行悬停时右侧的时间/角标让位给「⋯」，置顶等操作不必记快捷键；
+  长按整行同样能打开该菜单。
+- 消息按「同一人 + 3 分钟内」分组：组内 3dp、组间 12dp，气泡只在一组的两端收圆，
+  时间和已读状态退到组尾显示一次，不再每条重复。
+- 往上翻历史时右下出现「回到最新」，点一下回到底部。
+- `⌘/Ctrl + K` 直接进消息搜索；密码框有显隐开关。
+- 搜索框统一为 40dp 紧凑样式（聚焦才提亮边框），登录表单仍用带 label 的大输入框。
 
 ## 运行
 
@@ -193,8 +213,8 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 
 ### 置顶与未读定位
 
-- **置顶**：聊天页「更多」→ 置顶会话；只改本机列表顺序（`pinned.bin`），
-  不通知服务端，也不影响对方。
+- **置顶**：聊天页「更多」→ 置顶会话，或长按联系人列表里的会话来切换；
+  只改本机列表顺序（`pinned.bin`），不通知服务端，也不影响对方。
 - **未读定位**：打开有未读的会话时，自动滚到本地已读水位之后的第一条对方消息，
   并在上方画「以下为新消息」的分界。已读水位在保险库里。
 
@@ -232,6 +252,12 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 两种都会同时丢弃本地缓存（`messages.bin` 中该联系人的记录），
 否则下次打开会看到服务端已过滤、本地还留着的旧消息。清除后仍可继续收发。
 
+「双方清除」对**不在线**的对方同样有效：对方在线时靠 100019 推送清本地，
+离线时登录 / 刷新列表 / 打开会话会拉一次 `GET /message/clear?peers=...`，
+按返回的清除点丢掉本机更早的缓存。缓存条目记录了服务端消息 id，
+旧版本写入的、没有 id 的条目按清除时间兜底；这一步只删缓存，不动棘轮状态，
+清除后照常收发。
+
 ### 本地保险库
 
 默认在 `~/.mim/<用户名>/<设备>/`（可用 `-Dmim.vault.dir` 覆盖）：
@@ -241,6 +267,11 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 - `sessions.bin` —— 会话存储（加密）
 - `messages.bin` —— 消息缓存（加密）
 - `outbox.bin` —— 离线发送队列（加密，密文已组装，重试只重发）
+- `blocked.bin` —— 本机屏蔽名单（不上报服务端）
+- `pinned.bin` —— 置顶的会话（本机偏好）
+- `read_marks.bin` —— 每个会话的已读水位（毫秒），只用于未读定位
+- `safety.bin` —— 见过的对端设备安全码，只用于变更提醒
+- `server_ids.bin` —— 本地消息 id 与服务端 id 的映射
 - 同级的 `device.txt` 保存稳定设备标识
 
 桌面端只能做到文件权限保护；Android/iOS 应改用 Keystore / Keychain。
