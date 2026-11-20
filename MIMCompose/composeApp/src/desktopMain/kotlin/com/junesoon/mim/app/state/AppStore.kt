@@ -653,6 +653,28 @@ class AppStore(
         }
     }
 
+    /**
+     * 置顶 / 取消置顶。
+     *
+     * 纯本机偏好：不通知服务端，也不改变任何收发行为，只是列表排序。
+     */
+    fun togglePin(peer: String) {
+        val pinning = peer !in _state.value.pinnedPeers
+        pinnedPeers = (if (pinning) pinnedPeers + peer else pinnedPeers - peer).toMutableSet()
+        runCatching { backend.setPinned(peer, pinning) }
+            .onFailure { error ->
+                _state.update { it.copy(error = error.message ?: "操作失败") }
+                return
+            }
+        _state.update { current ->
+            val next = current.copy(
+                pinnedPeers = pinnedPeers.toSet(),
+                notice = if (pinning) "已置顶该会话" else "已取消置顶",
+            )
+            next.copy(contacts = enrich(next.contacts, next))
+        }
+    }
+
     /** 移除好友：服务端双向解除关系，本机历史保留。 */
     fun removeContact(peer: String) {
         val currentToken = token ?: return
@@ -663,11 +685,17 @@ class AppStore(
                         blockedPeers = (blockedPeers - peer).toMutableSet()
                         runCatching { backend.setBlocked(peer, false) }
                     }
+                    if (peer in pinnedPeers) {
+                        pinnedPeers = (pinnedPeers - peer).toMutableSet()
+                        runCatching { backend.setPinned(peer, false) }
+                    }
                     _state.update { current ->
                         current.copy(
                             screen = Screen.Contacts,
                             contacts = current.contacts.filterNot { it.id == peer },
                             blockedPeers = blockedPeers.toSet(),
+                            pinnedPeers = pinnedPeers.toSet(),
+                            firstUnreadMessageId = null,
                             notice = "已移除 $peer，本机历史仍保留",
                         )
                     }
@@ -679,7 +707,14 @@ class AppStore(
     }
 
     fun backToContacts() {
-        _state.update { it.copy(screen = Screen.Contacts, notice = null) }
+        _state.update {
+            it.copy(
+                screen = Screen.Contacts,
+                notice = null,
+                firstUnreadMessageId = null,
+                safetyChanges = emptySet(),
+            )
+        }
         token?.let { currentToken ->
             scope.launch {
                 refreshContacts(currentToken, force = true)
@@ -829,6 +864,13 @@ class AppStore(
         }
     }
 
+    /**
+     * 计算安全码，并与上次见到的值比对。
+     *
+     * 首次见到的设备按 TOFU 直接记为基准（不打扰用户）；只有「见过但值变了」
+     * 才置为变更提醒——那可能是对方换了密钥，也可能是本机重装，
+     * 两种都需要重新线下核对，不能静默接受。
+     */
     private suspend fun loadSafetyNumbers(currentToken: String, contactId: String) {
         val own = backend.ownIdentityKeyBase64() ?: return
         runCatching { backend.peerIdentityKeys(currentToken, contactId) }
@@ -836,8 +878,39 @@ class AppStore(
                 val entries = keys.map { key ->
                     SafetyEntry(key.deviceId, SafetyNumber.of(own, key.publicKeyBase64))
                 }
-                _state.update { it.copy(safetyNumbers = entries) }
+                val known = runCatching { backend.safetyCodes(contactId) }.getOrDefault(emptyMap())
+                val fresh = entries.filter { it.deviceId !in known }
+                runCatching {
+                    backend.rememberSafetyCodes(contactId, fresh.associate { it.deviceId to it.code })
+                }
+                val changed = entries
+                    .filter { entry -> known[entry.deviceId]?.let { it != entry.code } == true }
+                    .map { it.deviceId }
+                    .toSet()
+                _state.update { it.copy(safetyNumbers = entries, safetyChanges = changed) }
             }
+    }
+
+    /** 用户已经线下核对过：把当前安全码记为基准，提醒消失，直到下一次变更。 */
+    fun acknowledgeSafetyChange() {
+        val contactId = (_state.value.screen as? Screen.Chat)?.contactId ?: return
+        val entries = _state.value.safetyNumbers
+        if (entries.isEmpty()) {
+            _state.update { it.copy(safetyChanges = emptySet()) }
+            return
+        }
+        runCatching {
+            backend.rememberSafetyCodes(contactId, entries.associate { it.deviceId to it.code })
+        }.onFailure { error ->
+            _state.update { it.copy(error = error.message ?: "记录安全码失败") }
+            return
+        }
+        _state.update {
+            it.copy(
+                safetyChanges = emptySet(),
+                notice = "已记录当前安全码，密钥再次变更时会重新提醒",
+            )
+        }
     }
 
     // ---------------- 同步 ----------------
@@ -1035,6 +1108,7 @@ class AppStore(
             val blocked = contact.id in current.blockedPeers
             contact.copy(
                 blocked = blocked,
+                pinned = contact.id in current.pinnedPeers,
                 preview = when {
                     blocked -> "已屏蔽，不再接收此人消息"
                     last != null -> if (last.fromMe) "我：${last.text}" else last.text
@@ -1046,6 +1120,7 @@ class AppStore(
         }
 
     private var blockedPeers: MutableSet<String> = mutableSetOf()
+    private var pinnedPeers: MutableSet<String> = mutableSetOf()
     private var polling = false
     private var pushJob: Job? = null
     private var loopJob: Job? = null

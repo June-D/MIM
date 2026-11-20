@@ -92,12 +92,19 @@ fun ChatScreen(
     loadMedia: suspend (ChatMessage) -> ByteArray? = { null },
     scrollToMessageId: String? = null,
     onScrolled: () -> Unit = {},
+    pinned: Boolean = false,
+    onTogglePin: () -> Unit = {},
     onRecall: (String) -> Unit,
     onClear: (Boolean) -> Unit,
     onRename: (String) -> Unit,
     onToggleBlock: () -> Unit,
     onRemove: () -> Unit,
     safetyNumbers: List<SafetyEntry>,
+    /** 本次打开会话的第一条未读：在它上面画「以下为新消息」。 */
+    firstUnreadId: String? = null,
+    /** 安全码与上次记录不一致的设备 id。 */
+    safetyChanged: Set<String> = emptySet(),
+    onAcknowledgeSafety: () -> Unit = {},
     error: String? = null,
     notice: String? = null,
 ) {
@@ -127,8 +134,9 @@ fun ChatScreen(
         }
     }
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
+    // 有新消息时滚到底部；但还有待定位目标（搜索命中 / 第一条未读）时不抢位置。
+    LaunchedEffect(messages.size, scrollToMessageId) {
+        if (scrollToMessageId == null && messages.isNotEmpty()) {
             listState.animateScrollToItem(messages.lastIndex)
         }
     }
@@ -138,6 +146,9 @@ fun ChatScreen(
         val index = messages.indexOfFirst { it.id == target }
         if (index >= 0) {
             listState.animateScrollToItem(index)
+            onScrolled()
+        } else if (messages.isNotEmpty()) {
+            // 目标已不在缓存里（例如被清除过）：消费掉锚点，恢复「新消息滚到底部」。
             onScrolled()
         }
     }
@@ -154,7 +165,13 @@ fun ChatScreen(
             HeaderIcon(MimIcon.Back, onClick = onBack)
             Avatar(name = contact.name, size = 38.dp, online = contact.online)
             Column(modifier = Modifier.weight(1f)) {
-                Text(contact.name, style = MaterialTheme.typography.titleMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(contact.name, style = MaterialTheme.typography.titleMedium)
+                    if (pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        MimIcon(MimIcon.Pin, size = 12.dp, tint = MimPalette.Teal)
+                    }
+                }
                 Text(
                     when {
                         contact.blocked -> "已屏蔽 · 对方消息不再显示"
@@ -173,6 +190,15 @@ fun ChatScreen(
                     onDismissRequest = { showMenu = false },
                     containerColor = MimPalette.Card,
                 ) {
+                    DropdownMenuItem(
+                        text = {
+                            MenuLabel(
+                                MimIcon.Pin,
+                                if (pinned) "取消置顶" else "置顶会话",
+                            )
+                        },
+                        onClick = { showMenu = false; onTogglePin() },
+                    )
                     DropdownMenuItem(
                         text = { MenuLabel(MimIcon.Edit, "设置备注") },
                         onClick = { showMenu = false; showRename = true },
@@ -216,6 +242,35 @@ fun ChatScreen(
             }
         }
 
+        if (safetyChanged.isNotEmpty()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MimPalette.DangerSoft)
+                    .padding(horizontal = 20.dp, vertical = 9.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                MimIcon(MimIcon.Shield, size = 14.dp, tint = MimPalette.Danger)
+                Text(
+                    "安全码与上次记录不一致（${safetyChanged.joinToString("、")}）。" +
+                        "可能是对方换了设备或密钥，也可能是本机重装；请重新线下核对。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MimPalette.Danger,
+                    modifier = Modifier.weight(1f),
+                )
+                Text(
+                    "我已核对",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MimPalette.Danger,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(6.dp))
+                        .clickable { onAcknowledgeSafety() }
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+        }
+
         Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
             if (messages.isEmpty()) {
                 Column(
@@ -251,6 +306,9 @@ fun ChatScreen(
                         val label = dayLabel(message.epochMs)
                         if (label.isNotBlank() && dayKey(previous?.epochMs) != dayKey(message.epochMs)) {
                             DaySeparator(label = label)
+                        }
+                        if (message.id == firstUnreadId) {
+                            UnreadSeparator()
                         }
                         MessageRow(
                             message = message,
@@ -453,11 +511,23 @@ fun ChatScreen(
                                 .padding(12.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
                         ) {
-                            Text(
-                                "设备 ${entry.deviceId}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            ) {
+                                Text(
+                                    "设备 ${entry.deviceId}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                if (entry.deviceId in safetyChanged) {
+                                    Text(
+                                        "已变更",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MimPalette.Danger,
+                                    )
+                                }
+                            }
                             Text(
                                 entry.code,
                                 style = MaterialTheme.typography.bodyMedium.copy(
@@ -828,6 +898,24 @@ private fun DaySeparator(label: String) {
                 color = MimPalette.InkSoft,
             )
         }
+    }
+}
+
+/** 未读分界：告诉用户从哪条开始是这次打开前没看过的消息。 */
+@Composable
+private fun UnreadSeparator() {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MimPalette.Teal.copy(alpha = 0.35f))
+        Text(
+            "以下为新消息",
+            style = MaterialTheme.typography.labelSmall,
+            color = MimPalette.Teal,
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MimPalette.Teal.copy(alpha = 0.35f))
     }
 }
 

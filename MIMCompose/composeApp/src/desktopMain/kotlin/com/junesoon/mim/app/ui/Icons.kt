@@ -40,6 +40,7 @@ enum class MimIcon {
     Image,
     Mic,
     Stop,
+    Pin,
 }
 
 @Composable
@@ -195,6 +196,11 @@ fun MimIcon(
                     cornerRadius = androidx.compose.ui.geometry.CornerRadius(side * 0.05f),
                     style = stroke,
                 )
+            }
+            MimIcon.Pin -> {
+                drawCircle(tint, side * 0.12f, points(0.5f, 0.3f), style = stroke)
+                drawLine(tint, points(0.5f, 0.42f), points(0.5f, 0.84f), stroke.width, StrokeCap.Round)
+                drawLine(tint, points(0.32f, 0.55f), points(0.68f, 0.55f), stroke.width, StrokeCap.Round)
             }
             MimIcon.Logout -> {
                 drawRoundRect(

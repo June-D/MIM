@@ -1,7 +1,9 @@
 package com.junesoon.mim.app.ui
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,12 +39,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.junesoon.mim.app.domain.Contact
+import com.junesoon.mim.app.domain.sortedForList
 
 /**
  * 联系人与会话列表。
  *
  * 顶部是身份区（本机头像、账号、设备），中间是本地过滤框，
- * 下面是按最近消息排序的会话。未读角标以服务端计数为准。
+ * 下面是会话列表：置顶优先，其次按最近消息时间倒序。
+ * 未读角标以服务端计数为准。
  */
 @Composable
 fun ContactsScreen(
@@ -56,6 +60,7 @@ fun ContactsScreen(
     onOpenSearch: () -> Unit,
     onOpenSecurity: () -> Unit,
     onLogout: () -> Unit,
+    onTogglePin: (String) -> Unit = {},
     notice: String? = null,
     error: String? = null,
 ) {
@@ -68,10 +73,7 @@ fun ContactsScreen(
             it.name.contains(query, ignoreCase = true) || it.id.contains(query, ignoreCase = true)
         }
     }
-    // 最近说过话的排前面，其余按名字；稳定排序避免每次刷新跳动。
-    val visible = matched.sortedWith(
-        compareByDescending<Contact> { it.lastEpochMs }.thenBy { it.name },
-    )
+    val visible = matched.sortedForList()
 
     Column(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
         Row(
@@ -166,70 +168,106 @@ fun ContactsScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
-            else -> LazyColumn(modifier = Modifier.fillMaxSize()) {
-                items(visible, key = { it.id }) { contact ->
-                    ContactRow(contact = contact, onClick = { onOpenChat(contact.id) })
-                    HorizontalDivider(
-                        color = MimPalette.LineSoft,
-                        modifier = Modifier.padding(start = 76.dp),
-                    )
+            else -> Column(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    items(visible, key = { it.id }) { contact ->
+                        ContactRow(
+                            contact = contact,
+                            onClick = { onOpenChat(contact.id) },
+                            onTogglePin = { onTogglePin(contact.id) },
+                        )
+                        HorizontalDivider(
+                            color = MimPalette.LineSoft,
+                            modifier = Modifier.padding(start = 76.dp),
+                        )
+                    }
                 }
+                Text(
+                    "长按会话可置顶或取消置顶",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 20.dp, bottom = 10.dp),
+                )
             }
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ContactRow(contact: Contact, onClick: () -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable { onClick() }
-            .background(if (contact.unread > 0) Color(0x66DDEBE6) else MimPalette.Card)
-            .padding(horizontal = 20.dp, vertical = 13.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        Avatar(name = contact.name, size = 44.dp, online = contact.online)
-        Column(modifier = Modifier.weight(1f)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+private fun ContactRow(contact: Contact, onClick: () -> Unit, onTogglePin: () -> Unit) {
+    var showRowMenu by remember { mutableStateOf(false) }
+    Box {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .combinedClickable(
+                    onClick = onClick,
+                    onLongClick = { showRowMenu = true },
+                )
+                .background(if (contact.unread > 0) Color(0x66DDEBE6) else MimPalette.Card)
+                .padding(horizontal = 20.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Avatar(name = contact.name, size = 44.dp, online = contact.online)
+            Column(modifier = Modifier.weight(1f)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        contact.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    if (contact.pinned) {
+                        Spacer(Modifier.width(6.dp))
+                        Tag("置顶", MimPalette.Teal, MimPalette.TealSoft)
+                    }
+                    if (contact.blocked) {
+                        Spacer(Modifier.width(6.dp))
+                        Tag("已屏蔽", MimPalette.InkSoft, MimPalette.Paper)
+                    }
+                }
+                Spacer(Modifier.height(2.dp))
                 Text(
-                    contact.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium,
+                    contact.preview,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (contact.blocked) {
+                        MimPalette.InkSoft.copy(alpha = 0.75f)
+                    } else {
+                        MaterialTheme.colorScheme.onSurfaceVariant
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
                 )
-                if (contact.blocked) {
-                    Spacer(Modifier.width(6.dp))
-                    Tag("已屏蔽", MimPalette.InkSoft, MimPalette.Paper)
+            }
+            Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (contact.time.isNotBlank()) {
+                    Text(
+                        contact.time,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (contact.unread > 0) {
+                    UnreadBadge(contact.unread)
                 }
             }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                contact.preview,
-                style = MaterialTheme.typography.bodySmall,
-                color = if (contact.blocked) {
-                    MimPalette.InkSoft.copy(alpha = 0.75f)
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
         }
-        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            if (contact.time.isNotBlank()) {
-                Text(
-                    contact.time,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (contact.unread > 0) {
-                UnreadBadge(contact.unread)
-            }
+        DropdownMenu(
+            expanded = showRowMenu,
+            onDismissRequest = { showRowMenu = false },
+            containerColor = MimPalette.Card,
+        ) {
+            DropdownMenuItem(
+                text = { Text(if (contact.pinned) "取消置顶" else "置顶会话") },
+                onClick = {
+                    showRowMenu = false
+                    onTogglePin()
+                },
+            )
         }
     }
 }

@@ -90,6 +90,7 @@ fun MimApp() {
                     onOpenSearch = store::openSearch,
                     onOpenSecurity = store::openSecurity,
                     onLogout = store::logout,
+                    onTogglePin = store::togglePin,
                     notice = state.notice,
                     error = state.error,
                 )
@@ -153,6 +154,7 @@ fun MimApp() {
                             onOpenSearch = store::openSearch,
                             onOpenSecurity = store::openSecurity,
                             onLogout = store::logout,
+                            onTogglePin = store::togglePin,
                         )
                     } else {
                         ChatScreen(
@@ -165,12 +167,17 @@ fun MimApp() {
                             loadMedia = { message -> store.loadMedia(message) },
                             scrollToMessageId = state.pendingScrollMessageId,
                             onScrolled = store::consumeScrollTarget,
+                            pinned = contact.pinned,
+                            onTogglePin = { store.togglePin(screen.contactId) },
                             onRecall = { messageId -> store.recall(screen.contactId, messageId) },
                             onClear = store::clearConversation,
                             onRename = { label -> store.renameContact(screen.contactId, label) },
                             onToggleBlock = { store.toggleBlock(screen.contactId) },
                             onRemove = { store.removeContact(screen.contactId) },
                             safetyNumbers = state.safetyNumbers,
+                            firstUnreadId = state.firstUnreadMessageId,
+                            safetyChanged = state.safetyChanges,
+                            onAcknowledgeSafety = store::acknowledgeSafetyChange,
                             error = state.error,
                             notice = state.notice,
                         )

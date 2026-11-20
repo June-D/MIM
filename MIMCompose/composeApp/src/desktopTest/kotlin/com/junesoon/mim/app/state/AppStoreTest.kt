@@ -5,7 +5,12 @@ import com.junesoon.mim.app.data.DemoBackend
 import com.junesoon.mim.app.data.LoginResult
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.TwoFactorRequiredException
+import com.junesoon.mim.app.domain.ChatMessage
+import com.junesoon.mim.app.domain.Contact
+import com.junesoon.mim.app.domain.PeerIdentityKey
+import com.junesoon.mim.app.domain.sortedForList
 import java.nio.file.Files
+import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -157,5 +162,119 @@ class AppStoreTest {
         val history = store.state.value.messages["bob"].orEmpty()
         assertTrue(history.any { it.fromMe && it.text == "测试一条" })
         assertEquals(0, store.state.value.contacts.first { it.id == "bob" }.unread)
+    }
+
+    @Test
+    fun pinned_contact_sorts_before_recent_ones() {
+        val store = store()
+        store.login("alice", "pass1234", "desktop")
+        // 先让 bob 有最新一条消息，未置顶时它排第一。
+        store.openChat("bob")
+        store.send("让 bob 成为最近会话")
+        assertEquals("bob", store.state.value.contacts.sortedForList().first().id)
+
+        store.togglePin("alice")
+
+        val state = store.state.value
+        assertTrue("alice" in state.pinnedPeers)
+        assertTrue(state.contacts.first { it.id == "alice" }.pinned)
+        assertEquals("alice", state.contacts.sortedForList().first().id)
+
+        store.togglePin("alice")
+        assertTrue("alice" !in store.state.value.pinnedPeers)
+        assertTrue(!store.state.value.contacts.first { it.id == "alice" }.pinned)
+        assertEquals("bob", store.state.value.contacts.sortedForList().first().id)
+    }
+
+    /**
+     * 打开有未读的会话：定位到本地已读水位之后的第一条对方消息，
+     * 并把它作为「以下为新消息」的分界。
+     */
+    @Test
+    fun opening_chat_anchors_at_first_unread() {
+        var mark = 1_000L
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "", unread = 2)))
+
+            override suspend fun unread(token: String, contactId: String): Int = 2
+
+            override suspend fun history(token: String, contactId: String): List<ChatMessage> = listOf(
+                ChatMessage("m1", false, "旧消息", "10:00", epochMs = 1_000),
+                ChatMessage("m2", true, "我的回复", "10:01", epochMs = 2_000),
+                ChatMessage("m3", false, "新消息一", "10:02", epochMs = 3_000),
+                ChatMessage("m4", false, "新消息二", "10:03", epochMs = 4_000),
+            )
+
+            override fun readMark(contactId: String): Long = mark
+
+            override fun setReadMark(contactId: String, epochMs: Long) {
+                mark = maxOf(mark, epochMs)
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+        assertEquals(2, store.state.value.contacts.first { it.id == "bob" }.unread)
+
+        store.openChat("bob")
+
+        assertEquals("m3", store.state.value.firstUnreadMessageId)
+        assertEquals("m3", store.state.value.pendingScrollMessageId)
+        assertEquals(4_000L, mark, "打开会话后水位应推进到最新一条")
+    }
+
+    /** 对端换密钥后安全码会变：必须提示，并等用户核对后才重新记基准。 */
+    @Test
+    fun safety_code_change_warns_until_acknowledged() {
+        val own = Base64.getEncoder().encodeToString(ByteArray(65) { index -> index.toByte() })
+        var peer = Base64.getEncoder().encodeToString(ByteArray(65) { index -> (index + 1).toByte() })
+        val known = mutableMapOf<String, String>()
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "")))
+
+            override fun ownIdentityKeyBase64(): String = own
+
+            override suspend fun peerIdentityKeys(token: String, contactId: String): List<PeerIdentityKey> =
+                listOf(PeerIdentityKey("desktop-peer", peer))
+
+            override fun safetyCodes(contactId: String): Map<String, String> = known.toMap()
+
+            override fun rememberSafetyCodes(contactId: String, codes: Map<String, String>) {
+                known.putAll(codes)
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+
+        store.openChat("bob")
+        assertTrue(store.state.value.safetyChanges.isEmpty(), "首次见到设备只记基准，不打扰用户")
+        assertEquals(1, store.state.value.safetyNumbers.size)
+
+        peer = Base64.getEncoder().encodeToString(ByteArray(65) { index -> (index + 9).toByte() })
+        store.openChat("bob")
+        assertEquals(setOf("desktop-peer"), store.state.value.safetyChanges)
+
+        store.acknowledgeSafetyChange()
+        assertTrue(store.state.value.safetyChanges.isEmpty(), "核对后提醒消失")
+
+        store.openChat("bob")
+        assertTrue(store.state.value.safetyChanges.isEmpty(), "同一把密钥不应重复提醒")
     }
 }
