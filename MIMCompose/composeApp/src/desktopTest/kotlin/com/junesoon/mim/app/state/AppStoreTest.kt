@@ -1,6 +1,10 @@
 package com.junesoon.mim.app.state
 
 import com.junesoon.mim.app.data.CredentialStore
+import com.junesoon.mim.app.data.DemoBackend
+import com.junesoon.mim.app.data.LoginResult
+import com.junesoon.mim.app.data.MessagingBackend
+import com.junesoon.mim.app.data.TwoFactorRequiredException
 import java.nio.file.Files
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -87,6 +91,39 @@ class AppStoreTest {
 
         store.toggleBlock("bob")
         assertTrue(!store.state.value.contacts.first { it.id == "bob" }.blocked, "应能解除屏蔽")
+    }
+
+    /** 验证码输错后，登录页必须继续显示验证码输入框。 */
+    @Test
+    fun two_factor_field_stays_after_wrong_code() {
+        var attempts = 0
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult {
+                attempts++
+                if (attempts == 1) {
+                    throw TwoFactorRequiredException("请输入二次验证码或恢复码")
+                }
+                throw IllegalStateException("二次验证码错误或已被使用")
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+
+        store.login("alice", "pass1234", "desktop")
+        assertTrue(store.state.value.needsTwoFactor, "首次登录应提示需要验证码")
+
+        store.login("alice", "pass1234", "desktop", code = "000000")
+        assertTrue(store.state.value.needsTwoFactor, "验证码错误后输入框不能消失")
+        assertEquals("二次验证码错误或已被使用", store.state.value.error)
+        assertEquals(Screen.Login, store.state.value.screen)
     }
 
     @Test

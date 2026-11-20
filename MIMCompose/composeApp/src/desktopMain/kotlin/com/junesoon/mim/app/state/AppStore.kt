@@ -190,12 +190,14 @@ class AppStore(
                 }
                 .onFailure { error ->
                     val needsCode = error is TwoFactorRequiredException
-                    _state.update {
-                        it.copy(
+                    _state.update { current ->
+                        current.copy(
                             busy = false,
                             error = error.message ?: "登录失败",
-                            needsTwoFactor = needsCode,
-                            authMode = if (silent) AuthMode.Login else it.authMode,
+                            // 验证码输错时服务端会返回普通业务错误：此时必须保持输入框，
+                            // 否则用户刚看到的「验证码」字段会在报错后消失。
+                            needsTwoFactor = current.needsTwoFactor || needsCode,
+                            authMode = if (silent) AuthMode.Login else current.authMode,
                         )
                     }
                 }
