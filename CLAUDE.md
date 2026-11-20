@@ -34,6 +34,16 @@ MIMClient/     JavaFX 客户端：互通参考与回归验证，不再加新功�
 7. 改动过 `./verify.sh --e2e`，并同步三层文档（L1 本文件 / L2 模块 README / L3 头注释）。
 8. 不删除、不弱化既有安全测试。
 
+## 文档
+
+- `README.md`：产品基调、快速开始、架构、验证基线、文档索引
+- `docs/security.md`：加密方案与安全性质
+- `docs/sealed-sender-design.md`：发送者证书与匿名提交设计
+- `docs/operations.md`：运行、建库、TLS、多实例、限流、密钥轮换
+- `docs/server-api.md`：HTTP 与 WebSocket 契约索引
+- `docs/architecture.md`：目录结构
+- `docs/handoff.md` / `docs/changelog.md`：阶段结论与变更记录
+
 ## 当前边界
 
 已完成：注册/登录/记住账号、好友申请与备注、屏蔽、双向移除、一对一收发、
