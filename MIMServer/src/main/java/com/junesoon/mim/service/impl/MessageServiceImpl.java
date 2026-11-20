@@ -12,6 +12,7 @@ import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.PreKeyMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
+import com.junesoon.mim.responses.ClearPoint;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.service.MessageService;
 import com.junesoon.mim.service.PushService;
@@ -636,6 +637,29 @@ public class MessageServiceImpl implements MessageService {
         }
         log.info("用户 {} 清除与 {} 的会话 forBoth={} beforeId={}", username, peer, forBoth, cursor);
         return new ClearResult(peer, cursor, forBoth);
+    }
+
+    /**
+     * 本人对各对端的清除点。无法识别的对端直接跳过，不让一个坏参数拖垮整批查询；
+     * 也只查本人视角的记录，拿不到对方或第三方的任何数据。
+     */
+    @Override
+    public Map<String, ClearPoint> clearPoints(String username, List<String> peers) {
+        if (peers == null || peers.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        Map<String, ClearPoint> points = new LinkedHashMap<>();
+        for (String peer : peers) {
+            if (!StringUtils.hasText(peer) || peer.equals(username)
+                || !ValidationUtil.isUsername(peer)) {
+                continue;
+            }
+            ClearPoint point = conversationClearMapper.selectPoint(username, peer);
+            if (point != null && point.getClearedBeforeId() > 0) {
+                points.put(peer, point);
+            }
+        }
+        return points;
     }
 
     private long clearCursor(String username, String peer) {

@@ -9,6 +9,15 @@
           and peer = #{peer,jdbcType=VARCHAR}
     </select>
 
+    <!-- 清除点 + 清除时间：客户端据此丢弃本机在该点之前的加密缓存。 -->
+    <select id="selectPoint" resultType="com.junesoon.mim.responses.ClearPoint">
+        select cleared_before_id as clearedBeforeId,
+               updated_at as updatedAt
+        from t_conversation_clear
+        where username = #{username,jdbcType=VARCHAR}
+          and peer = #{peer,jdbcType=VARCHAR}
+    </select>
+
     <insert id="insert">
         insert into t_conversation_clear (username, peer, cleared_before_id, updated_at)
         values (#{username,jdbcType=VARCHAR}, #{peer,jdbcType=VARCHAR},

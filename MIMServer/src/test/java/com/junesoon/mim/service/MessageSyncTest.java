@@ -42,6 +42,11 @@ class MessageSyncTest {
             }
 
             @Override
+            public com.junesoon.mim.responses.ClearPoint selectPoint(String username, String peer) {
+                return null;
+            }
+
+            @Override
             public int insert(String username, String peer, long clearedBeforeId, long updatedAt) {
                 return 0;
             }

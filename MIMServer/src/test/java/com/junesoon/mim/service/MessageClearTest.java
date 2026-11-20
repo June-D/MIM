@@ -11,6 +11,7 @@ import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
+import com.junesoon.mim.responses.ClearPoint;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.service.impl.MessageServiceImpl;
 import java.util.ArrayList;
@@ -191,6 +192,29 @@ class MessageClearTest {
     }
 
     @Test
+    @DisplayName("清除点可批量读取：双方都能读到，客户端据此丢弃本机缓存")
+    void clearPointsAreReadableByBothSides() {
+        service.clearConversation("alice", "bob", true,
+                java.util.Collections.singletonList(TAG));
+
+        Map<String, ClearPoint> mine = service.clearPoints("alice", List.of("bob"));
+        assertEquals(12L, mine.get("bob").getClearedBeforeId());
+        assertTrue(mine.get("bob").getUpdatedAt() > 0);
+
+        // bob 换设备 / 重装后靠这条记录把旧缓存丢掉，而不是只靠推送。
+        Map<String, ClearPoint> theirs = service.clearPoints("bob", List.of("alice"));
+        assertEquals(12L, theirs.get("alice").getClearedBeforeId());
+    }
+
+    @Test
+    @DisplayName("清除点查询跳过自己与非法用户名，不整批失败")
+    void clearPointsSkipsSelfAndInvalidPeers() {
+        String[] peers = {"alice", "", "a", "bad@name"};
+        assertTrue(service.clearPoints("alice", List.of(peers)).isEmpty());
+        assertTrue(service.clearPoints("alice", List.of()).isEmpty());
+    }
+
+    @Test
     @DisplayName("不能清除与自己的会话")
     void cannotClearSelf() {
         assertThrows(UserInvalidException.class,
@@ -206,6 +230,7 @@ class MessageClearTest {
 
     private static final class MemoryClear implements ConversationClearMapper {
         private final Map<String, Long> cursors = new HashMap<>();
+        private final Map<String, Long> times = new HashMap<>();
 
         Long cursor(String username, String peer) {
             return cursors.get(username + "|" + peer);
@@ -213,6 +238,7 @@ class MessageClearTest {
 
         void put(String username, String peer, long id) {
             cursors.put(username + "|" + peer, id);
+            times.putIfAbsent(username + "|" + peer, 1_700_000_000_000L);
         }
 
         @Override
@@ -221,8 +247,16 @@ class MessageClearTest {
         }
 
         @Override
+        public ClearPoint selectPoint(String username, String peer) {
+            Long existing = cursor(username, peer);
+            return existing == null ? null
+                : new ClearPoint(existing, times.getOrDefault(username + "|" + peer, 0L));
+        }
+
+        @Override
         public int insert(String username, String peer, long clearedBeforeId, long updatedAt) {
             put(username, peer, clearedBeforeId);
+            times.put(username + "|" + peer, updatedAt);
             return 1;
         }
 
@@ -231,6 +265,7 @@ class MessageClearTest {
             Long existing = cursor(username, peer);
             long next = existing == null ? clearedBeforeId : Math.max(existing, clearedBeforeId);
             put(username, peer, next);
+            times.put(username + "|" + peer, updatedAt);
             return 1;
         }
     }

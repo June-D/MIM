@@ -32,9 +32,14 @@ public final class ValidationUtil {
     }
 
     public static void validateUsername(String username) {
-        if (username == null || !USERNAME_PATTERN.matcher(username).matches()) {
+        if (!isUsername(username)) {
             throw new UserInvalidException("用户名需为 2~32 位字母、数字、中文、下划线、点或短横线");
         }
+    }
+
+    /** 不抛异常的版本：批量接口里跳过非法项，而不是整批失败。 */
+    public static boolean isUsername(String username) {
+        return username != null && USERNAME_PATTERN.matcher(username).matches();
     }
 
     public static void validatePassword(String password) {

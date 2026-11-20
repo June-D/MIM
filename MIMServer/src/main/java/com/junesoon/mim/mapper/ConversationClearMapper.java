@@ -1,5 +1,6 @@
 package com.junesoon.mim.mapper;
 
+import com.junesoon.mim.responses.ClearPoint;
 import org.apache.ibatis.annotations.Param;
 
 /**
@@ -8,6 +9,13 @@ import org.apache.ibatis.annotations.Param;
 public interface ConversationClearMapper {
 
     Long selectCursor(@Param("username") String username, @Param("peer") String peer);
+
+    /**
+     * 清除点与清除时间。没有清除记录时返回 null。
+     *
+     * <p>客户端用它（而不是只拿 id）判断本机缓存里哪条消息属于被清掉的范围。
+     */
+    ClearPoint selectPoint(@Param("username") String username, @Param("peer") String peer);
 
     int insert(@Param("username") String username, @Param("peer") String peer,
         @Param("clearedBeforeId") long clearedBeforeId, @Param("updatedAt") long updatedAt);

@@ -1,8 +1,10 @@
 package com.junesoon.mim.service;
 
 import com.junesoon.mim.entity.CipherMessage;
+import com.junesoon.mim.responses.ClearPoint;
 import com.junesoon.mim.responses.ClearResult;
 import java.util.List;
+import java.util.Map;
 
 public interface MessageService {
 
@@ -99,4 +101,13 @@ public interface MessageService {
     default ClearResult clearConversation(String username, String peer, boolean forBoth) {
         return clearConversation(username, peer, forBoth, null);
     }
+
+    /**
+     * 本人对各对端的清除点（批量）。
+     *
+     * <p>客户端登录、刷新列表、打开会话时用它对齐本地加密缓存：对方执行
+     * 「双方清除」时如果这台设备不在线，推送会丢，只靠推送会让对方一直
+     * 看到本该被抹掉的内容。只返回本人视角的清除点，且不含明文。
+     */
+    Map<String, ClearPoint> clearPoints(String username, List<String> peers);
 }

@@ -67,6 +67,14 @@ class ClearPersistenceTest {
                 java.util.Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1")).isEmpty());
             assertTrue(service.history("probeb", "probea", null, 20, null,
                 java.util.Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1")).isEmpty());
+            // 对方（可能已经离线、重装）也要能读到这个清除点，否则本机缓存永远清不掉。
+            com.junesoon.mim.responses.ClearPoint point =
+                service.clearPoints("probeb", java.util.Collections.singletonList("probea"))
+                    .get("probea");
+            org.junit.jupiter.api.Assertions.assertNotNull(point,
+                "清除点必须能从真实 SQL 读回来");
+            assertEquals(id, point.getClearedBeforeId());
+            assertTrue(point.getUpdatedAt() > 0);
         }
         assertNull(ciphertext());
     }

@@ -39,7 +39,14 @@
 | POST | `/message/read` | 标记已读并发回执 |
 | GET | `/message/unread/{peer}` | 未读数（按逻辑消息计数） |
 | POST | `/message/recall/{clientMsgId}` | 撤回（作用于所有设备副本，限 120s） |
+| POST | `/message/clear` | 清除与某人的会话（`forBoth` 时对方也看不到，并抹除密文） |
+| GET | `/message/clear?peers=a,b` | 本人对各对端的清除点（供客户端丢弃本机过期缓存） |
 | WS | `/websocket/*` | 下行推送（握手需 `Authorization` 头） |
+
+清除点是「本人视角」的记录：`{clearedBeforeId, updatedAt}`，不含明文，也拿不到
+对方或第三方的任何数据。客户端登录、刷新列表、打开会话时拉一次，
+把本机在该点之前的加密缓存丢掉——否则对方在线时只靠 100019 推送清本地，
+离线设备重新登录仍会显示服务端已经抹掉的内容。
 
 所有需要身份的接口都从 `Authorization: Bearer <JWT>` 取用户；
 涉及密钥与消息的接口还需 `X-Device-Id` 头指定设备（缺省降级为 `default`）。

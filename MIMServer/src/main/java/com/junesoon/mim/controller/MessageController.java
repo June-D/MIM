@@ -8,11 +8,14 @@ import com.junesoon.mim.ratelimit.RateLimit;
 import com.junesoon.mim.requests.ClearRequest;
 import com.junesoon.mim.requests.ReadRequest;
 import com.junesoon.mim.requests.RecallRequest;
+import com.junesoon.mim.responses.ClearPoint;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.responses.ObjectRestResponse;
 import com.junesoon.mim.service.MessageService;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -35,6 +38,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("message")
 public class MessageController {
+
+    /** 单次查询清除点的对端上限：正常个人使用远小于这个数。 */
+    private static final int MAX_CLEAR_QUERY_PEERS = 200;
 
     private final MessageService messageService;
 
@@ -176,6 +182,30 @@ public class MessageController {
         return new ObjectRestResponse<ClearResult>()
             .data(messageService.clearConversation(username, request.getPeer(),
                 request.isForBoth(), request.getTags()))
+            .rel(true);
+    }
+
+    /**
+     * 本人对各对端的清除点（批量）。客户端登录 / 刷新列表 / 打开会话时调用，
+     * 用来丢弃本机在该清除点之前的加密缓存 —— 否则对方在线时靠推送清本地，
+     * 不在线就永远看不到清理，重新登录还会把旧内容显示出来。
+     *
+     * <p>{@code peers} 是逗号分隔的用户名，单次最多 {@value #MAX_CLEAR_QUERY_PEERS} 个。
+     */
+    @GetMapping("/clear")
+    @RateLimit(limit = 120, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<Map<String, ClearPoint>> clearPoints(@CurrentUser String username,
+        @RequestParam(value = "peers", required = false) String peers) {
+        List<String> parsed = splitTags(peers);
+        if (parsed == null) {
+            return new ObjectRestResponse<Map<String, ClearPoint>>()
+                .data(Collections.emptyMap())
+                .rel(true);
+        }
+        List<String> limited = parsed.size() > MAX_CLEAR_QUERY_PEERS
+            ? parsed.subList(0, MAX_CLEAR_QUERY_PEERS) : parsed;
+        return new ObjectRestResponse<Map<String, ClearPoint>>()
+            .data(messageService.clearPoints(username, limited))
             .rel(true);
     }
 
