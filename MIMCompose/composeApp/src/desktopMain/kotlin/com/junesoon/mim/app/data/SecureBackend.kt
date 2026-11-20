@@ -25,8 +25,14 @@ import com.junesoon.mim.app.data.messaging.OpenSealedRequestJson
 import com.junesoon.mim.app.data.messaging.OpenSealedResponseJson
 import com.junesoon.mim.app.data.messaging.PreKeyBundleDto
 import com.junesoon.mim.app.data.messaging.RecoverEmailRequest
+import com.junesoon.mim.app.data.messaging.RecoveryCodesDto
 import com.junesoon.mim.app.data.messaging.RecoverResetRequest
 import com.junesoon.mim.app.data.messaging.RegisterRequest
+import com.junesoon.mim.app.data.messaging.TokenOnlyDto
+import com.junesoon.mim.app.data.messaging.TwoFactorCodeRequest
+import com.junesoon.mim.app.data.messaging.TwoFactorEnableDto
+import com.junesoon.mim.app.data.messaging.TwoFactorSetupDto
+import com.junesoon.mim.app.data.messaging.TwoFactorStatusDto
 import com.junesoon.mim.app.data.messaging.ReadRequest
 import com.junesoon.mim.app.data.messaging.RecallRequest
 import com.junesoon.mim.app.data.messaging.SessionMeta
@@ -40,6 +46,7 @@ import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.UserSummary
 import com.junesoon.mim.app.domain.PeerIdentityKey
+import com.junesoon.mim.app.domain.TwoFactorSetup
 import com.junesoon.mim.core.MimCoreNative
 import io.ktor.client.HttpClient
 import io.ktor.client.call.body
@@ -205,6 +212,60 @@ class SecureBackend(
     }
 
     override fun blockedContacts(): Set<String> = blockedPeers.toSet()
+
+    override suspend fun twoFactorEnabled(token: String): Boolean {
+        val status: TwoFactorStatusDto = getEnvelope("$server/user/2fa/status", token)
+        return status.enabled
+    }
+
+    override suspend fun setupTwoFactor(token: String): TwoFactorSetup {
+        val setup: TwoFactorSetupDto = postEnvelope("$server/user/2fa/setup", token)
+        return TwoFactorSetup(
+            secret = setup.secret.orEmpty(),
+            otpauthUri = setup.otpauthUri.orEmpty(),
+        )
+    }
+
+    override suspend fun enableTwoFactor(token: String, code: String): TwoFactorResult {
+        val result: TwoFactorEnableDto = client.post("$server/user/2fa/enable") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(TwoFactorCodeRequest(code))
+        }.body<ApiEnvelope<TwoFactorEnableDto>>().data
+            ?: throw IllegalStateException("启用二次验证失败")
+        // 服务端会作废其它设备并给本设备换发令牌，必须立刻换用新令牌。
+        result.token?.takeIf { it.isNotBlank() }?.let { cachedToken = it }
+        return TwoFactorResult(result.token.orEmpty(), result.recoveryCodes)
+    }
+
+    override suspend fun disableTwoFactor(
+        token: String,
+        password: String,
+        code: String,
+    ): String {
+        val result: TokenOnlyDto = client.post("$server/user/2fa/disable") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(TwoFactorCodeRequest(code, password))
+        }.body<ApiEnvelope<TokenOnlyDto>>().data
+            ?: throw IllegalStateException("关闭二次验证失败")
+        result.token?.takeIf { it.isNotBlank() }?.let { cachedToken = it }
+        return result.token.orEmpty()
+    }
+
+    override suspend fun regenerateRecoveryCodes(
+        token: String,
+        password: String,
+        code: String,
+    ): List<String> {
+        val result: RecoveryCodesDto = client.post("$server/user/2fa/recovery-codes") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(TwoFactorCodeRequest(code, password))
+        }.body<ApiEnvelope<RecoveryCodesDto>>().data
+            ?: throw IllegalStateException("生成恢复码失败")
+        return result.recoveryCodes
+    }
 
     override suspend fun searchUsers(token: String, keyword: String): List<UserSummary> {
         val users: List<UserSummaryDto> =

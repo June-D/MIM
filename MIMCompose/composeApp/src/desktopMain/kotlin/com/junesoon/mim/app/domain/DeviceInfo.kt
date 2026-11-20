@@ -36,3 +36,9 @@ data class FriendRequest(
 ) {
     val pending: Boolean get() = status == "pending"
 }
+
+/** 二次验证初始化信息；密钥只在开启前展示一次。 */
+data class TwoFactorSetup(
+    val secret: String,
+    val otpauthUri: String,
+)

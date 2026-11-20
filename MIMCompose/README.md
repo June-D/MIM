@@ -44,6 +44,7 @@ MIMCompose/
     ui/AuthScreen.kt      登录 / 注册 / 找回密码 / 用户协议
     ui/ContactsScreen.kt  联系人（含未读角标、添加与设备入口，空态提示）
     ui/AddContactScreen.kt 搜索用户、好友申请、同意或拒绝
+    ui/SecurityScreen.kt  二次验证开关与一次性恢复码
     ui/ChatScreen.kt      聊天（撤回、安全码、清除）
     ui/DeviceScreen.kt    设备列表与注销
     data/CredentialStore.kt 记住账号密码（AES-GCM + 0600）
@@ -86,6 +87,7 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 | 离线队列 | 无 | 投递失败入队，只重发同一份密文，不重复推进棘轮 |
 | 实时推送 | 无 | WebSocket `/websocket/*`，收到 100010/100012/100014 即触发同步 |
 | 设备管理 | 无 | `GET /device` 列表 + `DELETE /device/{id}` 注销 |
+| 二次验证 | 无 | `POST /user/2fa/setup|enable|disable|recovery-codes`，开启后强制其它设备重新登录 |
 | 安全码 | 无 | 60 位安全码（与 Java 同算法），按对端设备逐个展示 |
 | 未读数 | 内存计数 | `GET /message/unread/{peer}`，联系人页角标以服务端为准 |
 | 清除会话 | 无 | `POST /message/clear`，可只清自己的或双方清除；本地缓存一并丢弃 |
@@ -114,6 +116,16 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 「待我处理」里同意或拒绝。申请必须对方同意才建立关系，不存在静默加好友。
 收到申请 / 同意 / 拒绝的推送（100016~100018）会即时刷新申请列表；
 对方同意后联系人列表立刻出现对方，不需要重新登录。
+
+### 二次验证
+
+联系人页「更多」→「安全设置」：
+
+- 未开启：生成共享密钥与 `otpauth://` 链接（可复制），输入验证器当前 6 位码启用；
+  服务端会作废其它设备并给本机换发令牌，客户端立即换用新令牌。
+- 已开启：可用「当前密码 + 6 位验证码或一条恢复码」重新生成恢复码或关闭；
+  恢复码只在生成时展示一次，服务端只存哈希。
+- 登录页在账号已开启时要求额外输入验证码或恢复码（服务端 40102）。
 
 ### 设备与安全码
 

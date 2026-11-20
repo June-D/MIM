@@ -13,6 +13,7 @@ import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.SafetyEntry
 import com.junesoon.mim.app.domain.SafetyNumber
+import com.junesoon.mim.app.domain.TwoFactorSetup
 import com.junesoon.mim.app.domain.UserSummary
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,6 +34,7 @@ sealed interface Screen {
     data object Contacts : Screen
     data object Devices : Screen
     data object AddContact : Screen
+    data object Security : Screen
     data class Chat(val contactId: String) : Screen
 }
 
@@ -59,6 +61,12 @@ data class AppState(
     val rememberMe: Boolean = false,
     /** 账号开启了二次验证，登录页需要补验证码输入框。 */
     val needsTwoFactor: Boolean = false,
+    val twoFactorEnabled: Boolean = false,
+    /** 尚未启用的共享密钥；只在开启流程里展示一次。 */
+    val twoFactorSetup: TwoFactorSetup? = null,
+    /** 一次性恢复码；展示后由用户自行保存。 */
+    val recoveryCodes: List<String> = emptyList(),
+    val securityBusy: Boolean = false,
     val error: String? = null,
     /** 非错误提示，例如「验证码已发送」。 */
     val notice: String? = null,
@@ -551,6 +559,122 @@ class AppStore(
     }
 
     // ---------------- 设备 ----------------
+
+    // ---------------- 安全设置 ----------------
+
+    fun openSecurity() {
+        val currentToken = token ?: return
+        _state.update {
+            it.copy(
+                screen = Screen.Security,
+                twoFactorSetup = null,
+                recoveryCodes = emptyList(),
+                error = null,
+                notice = null,
+            )
+        }
+        scope.launch {
+            runCatching { backend.twoFactorEnabled(currentToken) }
+                .onSuccess { enabled -> _state.update { it.copy(twoFactorEnabled = enabled) } }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "查询二次验证失败") }
+                }
+        }
+    }
+
+    fun startTwoFactorSetup() {
+        val currentToken = token ?: return
+        _state.update { it.copy(securityBusy = true, error = null, notice = null) }
+        scope.launch {
+            runCatching { backend.setupTwoFactor(currentToken) }
+                .onSuccess { setup ->
+                    _state.update { it.copy(securityBusy = false, twoFactorSetup = setup) }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(securityBusy = false, error = error.message ?: "生成密钥失败") }
+                }
+        }
+    }
+
+    fun confirmTwoFactor(code: String) {
+        val currentToken = token ?: return
+        _state.update { it.copy(securityBusy = true, error = null) }
+        scope.launch {
+            runCatching { backend.enableTwoFactor(currentToken, code.trim()) }
+                .onSuccess { result ->
+                    adoptToken(result.token)
+                    _state.update {
+                        it.copy(
+                            securityBusy = false,
+                            twoFactorEnabled = true,
+                            twoFactorSetup = null,
+                            recoveryCodes = result.recoveryCodes,
+                            notice = "二次验证已开启，其它设备需要重新登录",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(securityBusy = false, error = error.message ?: "开启失败") }
+                }
+        }
+    }
+
+    fun disableTwoFactor(password: String, code: String) {
+        val currentToken = token ?: return
+        _state.update { it.copy(securityBusy = true, error = null) }
+        scope.launch {
+            runCatching { backend.disableTwoFactor(currentToken, password, code.trim()) }
+                .onSuccess { newToken ->
+                    adoptToken(newToken)
+                    _state.update {
+                        it.copy(
+                            securityBusy = false,
+                            twoFactorEnabled = false,
+                            recoveryCodes = emptyList(),
+                            notice = "二次验证已关闭",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(securityBusy = false, error = error.message ?: "关闭失败") }
+                }
+        }
+    }
+
+    fun regenerateRecoveryCodes(password: String, code: String) {
+        val currentToken = token ?: return
+        _state.update { it.copy(securityBusy = true, error = null) }
+        scope.launch {
+            runCatching { backend.regenerateRecoveryCodes(currentToken, password, code.trim()) }
+                .onSuccess { codes ->
+                    _state.update {
+                        it.copy(
+                            securityBusy = false,
+                            recoveryCodes = codes,
+                            notice = "已生成新的恢复码，旧恢复码全部失效",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(securityBusy = false, error = error.message ?: "生成恢复码失败") }
+                }
+        }
+    }
+
+    fun dismissRecoveryCodes() {
+        _state.update { it.copy(recoveryCodes = emptyList()) }
+    }
+
+    fun cancelTwoFactorSetup() {
+        _state.update { it.copy(twoFactorSetup = null) }
+    }
+
+    /** 启用/关闭二次验证会换发令牌，本机必须立刻用新令牌。 */
+    private fun adoptToken(newToken: String) {
+        if (newToken.isNotBlank()) {
+            token = newToken
+        }
+    }
 
     fun openDevices() {
         val currentToken = token ?: return

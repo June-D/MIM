@@ -18,6 +18,7 @@ import com.junesoon.mim.app.ui.AuthScreen
 import com.junesoon.mim.app.ui.ChatScreen
 import com.junesoon.mim.app.ui.ContactsScreen
 import com.junesoon.mim.app.ui.DeviceScreen
+import com.junesoon.mim.app.ui.SecurityScreen
 import com.junesoon.mim.app.ui.MimTheme
 import kotlinx.coroutines.delay
 
@@ -85,9 +86,26 @@ fun MimApp() {
                     onOpenChat = store::openChat,
                     onShowDevices = store::openDevices,
                     onAddContact = store::openAddContact,
+                    onOpenSecurity = store::openSecurity,
                     onLogout = store::logout,
                     notice = state.notice,
                     error = state.error,
+                )
+
+                Screen.Security -> SecurityScreen(
+                    enabled = state.twoFactorEnabled,
+                    setup = state.twoFactorSetup,
+                    recoveryCodes = state.recoveryCodes,
+                    busy = state.securityBusy,
+                    error = state.error,
+                    notice = state.notice,
+                    onBack = store::backToContacts,
+                    onStartSetup = store::startTwoFactorSetup,
+                    onConfirmSetup = store::confirmTwoFactor,
+                    onCancelSetup = store::cancelTwoFactorSetup,
+                    onDisable = store::disableTwoFactor,
+                    onRegenerate = store::regenerateRecoveryCodes,
+                    onDismissCodes = store::dismissRecoveryCodes,
                 )
 
                 Screen.AddContact -> AddContactScreen(
@@ -121,6 +139,7 @@ fun MimApp() {
                             onOpenChat = store::openChat,
                             onShowDevices = store::openDevices,
                             onAddContact = store::openAddContact,
+                            onOpenSecurity = store::openSecurity,
                             onLogout = store::logout,
                         )
                     } else {

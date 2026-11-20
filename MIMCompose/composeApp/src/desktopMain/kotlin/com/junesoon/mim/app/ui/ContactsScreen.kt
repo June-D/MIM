@@ -53,6 +53,7 @@ fun ContactsScreen(
     onOpenChat: (String) -> Unit,
     onShowDevices: () -> Unit,
     onAddContact: () -> Unit,
+    onOpenSecurity: () -> Unit,
     onLogout: () -> Unit,
     notice: String? = null,
     error: String? = null,
@@ -102,6 +103,13 @@ fun ContactsScreen(
                     onDismissRequest = { showMenu = false },
                     containerColor = MimPalette.Card,
                 ) {
+                    DropdownMenuItem(
+                        text = { Text("安全设置") },
+                        onClick = {
+                            showMenu = false
+                            onOpenSecurity()
+                        },
+                    )
                     DropdownMenuItem(
                         text = { Text("退出登录") },
                         onClick = {

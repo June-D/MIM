@@ -1,31 +1,26 @@
 package com.junesoon.mim.app.data
 
-import java.net.HttpURLConnection
-import java.net.URL
 import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.time.Instant
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
- * 二次验证登录：删掉 JavaFX 客户端前，确认 Compose 能走通 2FA。
+ * 二次验证的完整链路：开启 → 登录需要验证码 → 恢复码登录 → 关闭。
  *
- * 用一次性恢复码登录（启用时返回），避免等 30 秒的 TOTP 时间窗；
- * TOTP 码本身在启用时已经校验过一次。
+ * 全部走客户端公开 API（SecureBackend），这样界面用到的每个方法都有覆盖；
+ * 只有 TOTP 码本身在测试里用标准 HMAC-SHA1 现算。
  */
 class TwoFactorLoginTest {
 
     @Test
-    fun login_requires_code_when_two_factor_enabled() {
+    fun enable_login_with_recovery_code_disable() {
         val server = System.getenv("MIM_SERVER_URL") ?: return
         if (System.getenv("MIM_NATIVE_LIB").isNullOrBlank()) return
 
@@ -44,62 +39,50 @@ class TwoFactorLoginTest {
             val login = TestAccounts.withLoginBudget {
                 backend.login(username, password, "UI 2FA")
             }
+            assertFalse(backend.twoFactorEnabled(login.token), "新账号不应已开启二次验证")
 
-            val setup = postJson("$server/user/2fa/setup", login.token, null).data
-            val secret = setup?.get("secret")?.jsonPrimitive?.content
-            assertTrue(!secret.isNullOrBlank(), "2FA setup 应返回共享密钥：$setup")
+            val setup = backend.setupTwoFactor(login.token)
+            assertTrue(setup.secret.isNotBlank(), "应返回共享密钥")
+            assertTrue(setup.otpauthUri.startsWith("otpauth://"), "应返回可导入的 otpauth 链接")
 
-            val enable = postJson(
-                "$server/user/2fa/enable",
-                login.token,
-                """{"code":"${totp(secret!!)}"}""",
-            )
-            val codes = Regex("\"([A-Z0-9-]{14})\"").findAll(enable.raw)
-                .map { it.groupValues[1] }
-                .toList()
-            assertTrue(codes.isNotEmpty(), "启用 2FA 应返回恢复码：${enable.raw}")
+            val enabled = backend.enableTwoFactor(login.token, totp(setup.secret))
+            assertTrue(enabled.token.isNotBlank(), "启用后应换发新令牌")
+            assertTrue(enabled.recoveryCodes.size >= 5, "应返回一组恢复码：${enabled.recoveryCodes}")
+            assertTrue(backend.twoFactorEnabled(enabled.token), "启用后状态应为已开启")
 
-            // 不验证证码：服务端会要求补码，客户端应识别成「需要验证码」而不是密码错误。
-            val needsCode = runCatching {
+            // 不带验证码：应被识别为「需要验证码」，而不是密码错误。
+            val missingCode = runCatching {
                 TestAccounts.withLoginBudget {
                     backend.login(username, password, "UI 2FA")
                 }
             }.exceptionOrNull()
             assertTrue(
-                needsCode is TwoFactorRequiredException,
-                "应识别为需要二次验证：$needsCode",
+                missingCode is TwoFactorRequiredException,
+                "应识别为需要二次验证：$missingCode",
             )
 
-            // 用一次性恢复码登录。
-            val withCode = TestAccounts.withLoginBudget {
-                backend.login(username, password, "UI 2FA", codes.first())
+            // 用一条恢复码登录。
+            val withRecovery = TestAccounts.withLoginBudget {
+                backend.login(username, password, "UI 2FA", enabled.recoveryCodes[0])
             }
-            assertEquals(username, withCode.displayName, "恢复码应能登录")
+            assertEquals(username, withRecovery.displayName, "恢复码应能登录")
+
+            // 关闭二次验证：需要密码 + 另一条恢复码。
+            val newToken = backend.disableTwoFactor(
+                withRecovery.token,
+                password,
+                enabled.recoveryCodes[1],
+            )
+            assertTrue(newToken.isNotBlank(), "关闭后应换发新令牌")
+            assertFalse(backend.twoFactorEnabled(newToken), "关闭后状态应为未开启")
+
+            // 之后不带验证码也能登录。
+            val plain = TestAccounts.withLoginBudget {
+                backend.login(username, password, "UI 2FA")
+            }
+            assertEquals(username, plain.displayName)
         }
     }
-
-    // ---------------- 最小 HTTP / TOTP 工具 ----------------
-
-    private fun postJson(url: String, token: String, body: String?): Envelope {
-        val connection = URL(url).openConnection() as HttpURLConnection
-        connection.requestMethod = "POST"
-        connection.setRequestProperty("Authorization", "Bearer $token")
-        connection.setRequestProperty("Content-Type", "application/json")
-        connection.doOutput = body != null
-        if (body != null) {
-            connection.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
-        }
-        val raw = connection.inputStream.bufferedReader(Charsets.UTF_8).use { it.readText() }
-        val element = json.parseToJsonElement(raw).jsonObject
-        return Envelope(
-            raw = raw,
-            data = runCatching { element["data"]!!.jsonObject }.getOrNull(),
-        )
-    }
-
-    private val json = Json { ignoreUnknownKeys = true }
-
-    private data class Envelope(val raw: String, val data: JsonObject?)
 
     /** 标准 TOTP：HMAC-SHA1 + 30 秒步长 + 6 位。 */
     private fun totp(secret: String): String {

@@ -5,6 +5,7 @@ import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.PeerIdentityKey
+import com.junesoon.mim.app.domain.TwoFactorSetup
 import com.junesoon.mim.app.domain.UserSummary
 
 /**
@@ -97,6 +98,31 @@ interface MessagingBackend {
     /** 本机已屏蔽的联系人。 */
     fun blockedContacts(): Set<String> = emptySet()
 
+    /** 账号是否开启了二次验证。 */
+    suspend fun twoFactorEnabled(token: String): Boolean = false
+
+    /** 生成二次验证共享密钥（尚未启用）。 */
+    suspend fun setupTwoFactor(token: String): TwoFactorSetup = unsupported("二次验证")
+
+    /**
+     * 启用二次验证；返回新令牌与一次性恢复码。
+     *
+     * 服务端会强制其它设备重新登录，当前设备的旧令牌同时失效。
+     */
+    suspend fun enableTwoFactor(token: String, code: String): TwoFactorResult =
+        unsupported("二次验证")
+
+    /** 关闭二次验证；返回当前设备的新令牌。 */
+    suspend fun disableTwoFactor(token: String, password: String, code: String): String =
+        unsupported("二次验证")
+
+    /** 重新生成一次性恢复码。 */
+    suspend fun regenerateRecoveryCodes(
+        token: String,
+        password: String,
+        code: String,
+    ): List<String> = unsupported("二次验证")
+
     private fun unsupported(action: String): Nothing =
         throw IllegalStateException("当前后端不支持$action")
 
@@ -125,6 +151,12 @@ sealed interface PushEvent {
     /** 对方清除了与我们的会话。 */
     data class Cleared(val peer: String) : PushEvent
 }
+
+/** 启用二次验证的结果。 */
+data class TwoFactorResult(
+    val token: String,
+    val recoveryCodes: List<String>,
+)
 
 /** 一条逻辑消息的外部状态。 */
 data class MessageState(

@@ -165,6 +165,33 @@ data class FriendRequestDto(
 data class AddContactRequest(val username: String, val labelName: String? = null)
 
 @Serializable
+data class TwoFactorStatusDto(val enabled: Boolean = false)
+
+@Serializable
+data class TwoFactorSetupDto(
+    val secret: String? = null,
+    val otpauthUri: String? = null,
+)
+
+@Serializable
+data class TwoFactorEnableDto(
+    val token: String? = null,
+    val recoveryCodes: List<String> = emptyList(),
+)
+
+@Serializable
+data class RecoveryCodesDto(val recoveryCodes: List<String> = emptyList())
+
+@Serializable
+data class TokenOnlyDto(val token: String? = null)
+
+@Serializable
+data class TwoFactorCodeRequest(
+    val code: String,
+    val password: String? = null,
+)
+
+@Serializable
 data class LoginRequest(
     val username: String,
     val password: String,
