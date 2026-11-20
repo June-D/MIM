@@ -34,4 +34,25 @@ data class ChatMessage(
     val canRecall: Boolean = false,
     /** 发送时间（毫秒），用于日期分隔线。 */
     val epochMs: Long = 0,
+    /** text / image / voice。 */
+    val kind: String = "text",
+    /** 图片或语音的媒体引用；密钥来自端到端密文，服务端拿不到。 */
+    val media: MediaAttachment? = null,
+)
+
+/**
+ * 一条端到端加密的媒体引用。
+ *
+ * 文件本身用 [keyBase64] 派生的 AES-256-GCM 加密后上传，服务端只存密文；
+ * 文件名、类型、尺寸这些元数据都在这条消息的密文里。
+ */
+data class MediaAttachment(
+    val id: String,
+    val keyBase64: String,
+    val mime: String,
+    val size: Int,
+    val name: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val durationMs: Long? = null,
 )

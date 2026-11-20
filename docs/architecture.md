@@ -11,7 +11,8 @@ MIMServer/
                           t_one_time_prekey / t_message（均按设备维度）
   auth/                   @CurrentUser / @CurrentDevice 参数解析器
   ratelimit/              @RateLimit + RateLimiter（规则）+ RateLimitCounter（计数）
-  controller/             Device / Key / PreKey / Message / Chat / User / Login / Register
+  controller/             Device / Key / PreKey / Message / Chat / User / Login / Register / Media
+  data/media/             加密媒体落盘目录（默认，可配置；只存密文）
   service/                KeyService、PreKeyService、MessageService、DeviceService、
                           PresenceService、PushService
   websocket/              SessionRegistry（本机会话）、WebSocketServer（生命周期+心跳）
@@ -43,7 +44,7 @@ MIMCompose/             PC 主客户端（Compose Multiplatform，JVM 17）
   .../state/AppStore   单一状态源：登录态、联系人、消息、屏蔽、推送触发同步
   .../data/SecureBackend 真实协议：设备密钥 → 首条消息 → sealed 收发 → 本地加密缓存
   .../data/LocalVault  保险库：密钥包 / 会话 / 消息 / 队列 / 屏蔽名单
-  .../ui               Theme（视觉系统）、Icons、Avatar、各页面
+  .../ui               Theme（视觉系统）、Icons、Avatar、MediaTools、各页面
   README.md             运行方式与接入说明
 
 ```

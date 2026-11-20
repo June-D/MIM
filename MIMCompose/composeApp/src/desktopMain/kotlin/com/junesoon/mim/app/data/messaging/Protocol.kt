@@ -218,6 +218,38 @@ data class RecoverResetRequest(
     val newPassword: String,
 )
 
+/**
+ * 媒体消息的明文载荷。
+ *
+ * 它以 JSON 字符串的形式进入双棘轮，字段顺序固定：
+ * `v, kind, text, media`，用前缀识别旧版纯文本消息。
+ */
+@Serializable
+data class MediaPayload(
+    val v: Int = 1,
+    val kind: String,
+    val text: String = "",
+    val media: MediaRefJson,
+)
+
+@Serializable
+data class MediaUploadDto(
+    val id: String? = null,
+    val size: Long = 0,
+)
+
+@Serializable
+data class MediaRefJson(
+    val id: String,
+    val key: String,
+    val size: Int,
+    val mime: String,
+    val name: String? = null,
+    val width: Int? = null,
+    val height: Int? = null,
+    val durationMs: Long? = null,
+)
+
 @Serializable
 data class ClearRequest(
     val peer: String,

@@ -1,5 +1,6 @@
 package com.junesoon.mim.app.ui
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
@@ -40,15 +42,28 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isAltPressed
+import androidx.compose.ui.input.key.isCtrlPressed
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.sp
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
@@ -57,6 +72,8 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 聊天页。
@@ -70,6 +87,9 @@ fun ChatScreen(
     messages: List<ChatMessage>,
     onBack: () -> Unit,
     onSend: (String) -> Unit,
+    onSendImage: (ByteArray, String, String?) -> Unit = { _, _, _ -> },
+    onSendVoice: (ByteArray, Long) -> Unit = { _, _ -> },
+    loadMedia: suspend (ChatMessage) -> ByteArray? = { null },
     onRecall: (String) -> Unit,
     onClear: (Boolean) -> Unit,
     onRename: (String) -> Unit,
@@ -79,13 +99,31 @@ fun ChatScreen(
     error: String? = null,
     notice: String? = null,
 ) {
-    var draft by remember { mutableStateOf("") }
+    // 用 TextFieldValue 而不是 String：中文输入法拼写过程中 composition 非空，
+    // 此时回车是「选词」，绝不能当成发送。
+    var draft by remember { mutableStateOf(TextFieldValue("")) }
+    var localError by remember { mutableStateOf<String?>(null) }
+    var recorder by remember { mutableStateOf<VoiceRecorder?>(null) }
+    var recordSeconds by remember { mutableStateOf(0) }
+    var viewerImage by remember { mutableStateOf<ImageBitmap?>(null) }
+    val scope = rememberCoroutineScope()
     var showSafety by remember { mutableStateOf(false) }
     var showClear by remember { mutableStateOf(false) }
     var showMenu by remember { mutableStateOf(false) }
     var showRename by remember { mutableStateOf(false) }
     var showRemove by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+
+    LaunchedEffect(recorder) {
+        if (recorder == null) {
+            recordSeconds = 0
+        } else {
+            while (recorder != null) {
+                delay(1_000)
+                recordSeconds += 1
+            }
+        }
+    }
 
     LaunchedEffect(messages.size) {
         if (messages.isNotEmpty()) {
@@ -150,17 +188,19 @@ fun ChatScreen(
             }
         }
 
-        if (notice != null || error != null) {
+        val banner = localError ?: error ?: notice
+        if (banner != null) {
+            val danger = localError != null || error != null
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .background(if (error != null) MimPalette.DangerSoft else MimPalette.TealSoft)
+                    .background(if (danger) MimPalette.DangerSoft else MimPalette.TealSoft)
                     .padding(horizontal = 20.dp, vertical = 9.dp),
             ) {
                 Text(
-                    error ?: notice.orEmpty(),
+                    banner,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (error != null) MimPalette.Danger else MimPalette.TealDeep,
+                    color = if (danger) MimPalette.Danger else MimPalette.TealDeep,
                 )
             }
         }
@@ -201,7 +241,12 @@ fun ChatScreen(
                         if (label.isNotBlank() && dayKey(previous?.epochMs) != dayKey(message.epochMs)) {
                             DaySeparator(label = label)
                         }
-                        MessageRow(message = message, onRecall = { onRecall(message.id) })
+                        MessageRow(
+                            message = message,
+                            loadMedia = loadMedia,
+                            onOpenImage = { viewerImage = it },
+                            onRecall = { onRecall(message.id) },
+                        )
                     }
                 }
             }
@@ -234,14 +279,64 @@ fun ChatScreen(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                ComposerIcon(MimIcon.Image, enabled = recorder == null) {
+                    localError = runCatching {
+                        val picked = MediaTools.pickImage()
+                        if (picked != null) {
+                            onSendImage(picked.bytes, picked.mime, picked.name)
+                        }
+                        null
+                    }.getOrElse { it.message ?: "图片读取失败" }
+                }
+                ComposerIcon(
+                    MimIcon.Mic,
+                    enabled = true,
+                    active = recorder != null,
+                ) {
+                    if (recorder == null) {
+                        val fresh = VoiceRecorder()
+                        if (fresh.start()) {
+                            recorder = fresh
+                            localError = null
+                        } else {
+                            localError = "麦克风不可用或系统未授权"
+                        }
+                    } else {
+                        val recorded = recorder?.stop()
+                        recorder = null
+                        if (recorded == null) {
+                            localError = "没有录到有效音频"
+                        } else {
+                            onSendVoice(recorded.wav, recorded.durationMs)
+                        }
+                    }
+                }
+            if (recorder != null) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(MimPalette.DangerSoft)
+                        .padding(horizontal = 14.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    Box(Modifier.size(8.dp).clip(CircleShape).background(MimPalette.Danger))
+                    Text(
+                        "正在录音 ${formatDuration(recordSeconds * 1_000L)} · 点麦克风停止",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MimPalette.Danger,
+                    )
+                }
+            } else {
                 OutlinedTextField(
                     value = draft,
                     onValueChange = { draft = it },
                     placeholder = {
-                        Text("输入消息…", style = MaterialTheme.typography.bodySmall)
+                        Text("输入消息…（Enter 发送，Shift+Enter 换行）", style = MaterialTheme.typography.bodySmall)
                     },
                     shape = RoundedCornerShape(14.dp),
-                    maxLines = 4,
+                    maxLines = 6,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = MimPalette.Teal,
                         unfocusedBorderColor = MimPalette.LineSoft,
@@ -252,35 +347,69 @@ fun ChatScreen(
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                     keyboardActions = KeyboardActions(
                         onSend = {
-                            if (draft.isNotBlank()) {
-                                onSend(draft)
-                                draft = ""
+                            if (draft.text.isNotBlank()) {
+                                onSend(draft.text)
+                                draft = TextFieldValue("")
                             }
                         },
                     ),
-                    modifier = Modifier.weight(1f),
+                    modifier = Modifier.weight(1f).onPreviewKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown || event.key != Key.Enter) {
+                            return@onPreviewKeyEvent false
+                        }
+                        val modifierPressed = event.isShiftPressed || event.isCtrlPressed ||
+                            event.isAltPressed || event.isMetaPressed
+                        if (modifierPressed || draft.composition != null) {
+                            // 组合键换行交给输入框；输入法选词也不拦截。
+                            false
+                        } else {
+                            if (draft.text.isNotBlank()) {
+                                onSend(draft.text)
+                                draft = TextFieldValue("")
+                            }
+                            true
+                        }
+                    },
                 )
                 Box(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
                         .background(
-                            if (draft.isBlank()) MimPalette.Line else MimPalette.Teal,
+                            if (draft.text.isBlank()) MimPalette.Line else MimPalette.Teal,
                         )
-                        .clickable(enabled = draft.isNotBlank()) {
-                            onSend(draft)
-                            draft = ""
+                        .clickable(enabled = draft.text.isNotBlank()) {
+                            onSend(draft.text)
+                            draft = TextFieldValue("")
                         },
                     contentAlignment = Alignment.Center,
                 ) {
                     MimIcon(
                         MimIcon.Send,
                         size = 18.dp,
-                        tint = if (draft.isBlank()) MimPalette.InkSoft else Color(0xFFFDFDFB),
+                        tint = if (draft.text.isBlank()) MimPalette.InkSoft else Color(0xFFFDFDFB),
                     )
                 }
             }
+            }
         }
+    }
+
+    viewerImage?.let { bitmap ->
+        AlertDialog(
+            onDismissRequest = { viewerImage = null },
+            title = { Text("图片") },
+            text = {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = "图片预览",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier.sizeIn(maxWidth = 560.dp, maxHeight = 440.dp),
+                )
+            },
+            confirmButton = { TextButton(onClick = { viewerImage = null }) { Text("关闭") } },
+            containerColor = MimPalette.Card,
+        )
     }
 
     if (showSafety) {
@@ -422,7 +551,12 @@ private fun RenameDialog(current: String, onDismiss: () -> Unit, onConfirm: (Str
 }
 
 @Composable
-private fun MessageRow(message: ChatMessage, onRecall: () -> Unit) {
+private fun MessageRow(
+    message: ChatMessage,
+    loadMedia: suspend (ChatMessage) -> ByteArray?,
+    onOpenImage: (ImageBitmap) -> Unit,
+    onRecall: () -> Unit,
+) {
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = if (message.fromMe) Arrangement.End else Arrangement.Start,
@@ -451,20 +585,20 @@ private fun MessageRow(message: ChatMessage, onRecall: () -> Unit) {
                 )
                 .padding(horizontal = 13.dp, vertical = 9.dp),
         ) {
-            Text(
-                message.text,
-                style = MaterialTheme.typography.bodyMedium,
-                color = when {
-                    message.recalled -> if (message.fromMe) {
-                        Color(0xCCFDFDFB)
-                    } else {
-                        MimPalette.InkSoft
-                    }
-                    message.fromMe -> Color(0xFFFDFDFB)
-                    else -> MimPalette.Ink
-                },
-                fontWeight = if (message.recalled) FontWeight.Normal else FontWeight.Normal,
-            )
+            when {
+                message.recalled -> Text(
+                    message.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (message.fromMe) Color(0xCCFDFDFB) else MimPalette.InkSoft,
+                )
+                message.kind == "image" -> MessageImage(message, loadMedia, onOpenImage)
+                message.kind == "voice" -> MessageVoice(message, loadMedia)
+                else -> Text(
+                    message.text,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Ink,
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 3.dp),
                 horizontalArrangement = Arrangement.End,
@@ -496,6 +630,166 @@ private fun MessageRow(message: ChatMessage, onRecall: () -> Unit) {
             }
         }
     }
+}
+
+private sealed interface ImageState {
+    data object Loading : ImageState
+    data object Missing : ImageState
+    data class Ready(val bitmap: ImageBitmap) : ImageState
+}
+
+@Composable
+private fun MessageImage(
+    message: ChatMessage,
+    loadMedia: suspend (ChatMessage) -> ByteArray?,
+    onOpenImage: (ImageBitmap) -> Unit,
+) {
+    var state by remember(message.id) { mutableStateOf<ImageState>(ImageState.Loading) }
+    LaunchedEffect(message.id) {
+        val bytes = runCatching { loadMedia(message) }.getOrNull()
+        val bitmap = bytes?.let(MediaTools::decodeImage)
+        state = if (bitmap == null) ImageState.Missing else ImageState.Ready(bitmap)
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        when (val current = state) {
+            ImageState.Loading -> MediaPlaceholder("图片加载中…", message.fromMe)
+            ImageState.Missing -> MediaPlaceholder("图片不可用（本地缓存已清除）", message.fromMe)
+            is ImageState.Ready -> Image(
+                bitmap = current.bitmap,
+                contentDescription = "图片消息",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier
+                    .sizeIn(maxWidth = 260.dp, maxHeight = 260.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .clickable { onOpenImage(current.bitmap) },
+            )
+        }
+        val caption = captionOf(message, "[图片]")
+        if (caption.isNotBlank()) {
+            Text(
+                caption,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Ink,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageVoice(
+    message: ChatMessage,
+    loadMedia: suspend (ChatMessage) -> ByteArray?,
+) {
+    var bytes by remember(message.id) { mutableStateOf<ByteArray?>(null) }
+    var loading by remember(message.id) { mutableStateOf(false) }
+    var playing by remember(message.id) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val tint = if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Teal
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.clickable {
+            if (playing) {
+                MediaTools.stopVoice()
+                playing = false
+                return@clickable
+            }
+            scope.launch {
+                loading = true
+                val loaded = bytes ?: runCatching { loadMedia(message) }.getOrNull()
+                loading = false
+                if (loaded == null) {
+                    return@launch
+                }
+                bytes = loaded
+                MediaTools.playVoice(loaded)
+                playing = true
+                delay((message.media?.durationMs ?: 3_000L) + 300)
+                playing = false
+            }
+        },
+    ) {
+        Box(
+            modifier = Modifier.size(34.dp).clip(CircleShape).background(
+                if (message.fromMe) Color(0x33FDFDFB) else MimPalette.TealSoft,
+            ),
+            contentAlignment = Alignment.Center,
+        ) {
+            when {
+                loading -> Text("…", color = tint, style = MaterialTheme.typography.bodyMedium)
+                playing -> MimIcon(MimIcon.Stop, size = 14.dp, tint = tint)
+                else -> Text("▶", color = tint, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+        Column {
+            Text(
+                "语音 " + formatDuration(message.media?.durationMs ?: 0),
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (message.fromMe) Color(0xFFFDFDFB) else MimPalette.Ink,
+            )
+            val caption = captionOf(message, "[语音]")
+            if (caption.isNotBlank()) {
+                Text(
+                    caption,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (message.fromMe) Color(0xCCFDFDFB) else MimPalette.InkSoft,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun MediaPlaceholder(text: String, fromMe: Boolean) {
+    Box(
+        modifier = Modifier
+            .sizeIn(minWidth = 160.dp, minHeight = 72.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(if (fromMe) Color(0x22FFFFFF) else MimPalette.Paper),
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text,
+            style = MaterialTheme.typography.labelSmall,
+            color = if (fromMe) Color(0xCCFDFDFB) else MimPalette.InkSoft,
+        )
+    }
+}
+
+private fun captionOf(message: ChatMessage, placeholder: String): String =
+    message.text.takeIf { it.isNotBlank() && it != placeholder }.orEmpty()
+
+@Composable
+private fun ComposerIcon(
+    icon: MimIcon,
+    enabled: Boolean,
+    active: Boolean = false,
+    onClick: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(38.dp)
+            .clip(CircleShape)
+            .background(if (active) MimPalette.DangerSoft else MimPalette.Paper)
+            .clickable(enabled = enabled) { onClick() },
+        contentAlignment = Alignment.Center,
+    ) {
+        MimIcon(
+            icon,
+            size = 17.dp,
+            tint = when {
+                !enabled -> MimPalette.Line
+                active -> MimPalette.Danger
+                else -> MimPalette.InkSoft
+            },
+        )
+    }
+}
+
+private fun formatDuration(millis: Long): String {
+    val total = (millis / 1000).coerceAtLeast(0)
+    return "%d:%02d".format(total / 60, total % 60)
 }
 
 @Composable

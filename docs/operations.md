@@ -209,6 +209,19 @@ ALTER TABLE t_conversation_clear CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb
 ALTER TABLE t_friend_request CONVERT TO CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 ```
 
+### 加密媒体存储
+
+媒体密文默认落在 `MIMServer/data/media`（相对启动目录），可用环境变量调整：
+
+```bash
+export MIM_MEDIA_DIR=/var/lib/mim/media     # 生产环境挂到独立卷
+export MIM_MEDIA_MAX_BYTES=18000000         # 单个密文文件上限
+```
+
+上传先写 `.part` 再原子改名；记录落库失败会删掉文件。服务端只知道
+「谁上传、多大、什么时候」，不知道文件名、类型或内容。
+清理策略尚未实现：删除消息不会自动删除服务端密文，需要后续加保留期任务。
+
 ### 启动服务端
 
 ```bash

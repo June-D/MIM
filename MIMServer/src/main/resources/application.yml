@@ -24,6 +24,11 @@ message:
   recall-window-seconds: 120
 
 mim:
+  media:
+    # 加密媒体落盘目录；生产环境应挂载独立卷。
+    dir: ${MIM_MEDIA_DIR:data/media}
+    # 单个密文文件上限（8MB 明文的密文约 15MB）。
+    max-bytes: ${MIM_MEDIA_MAX_BYTES:18000000}
   # 实例标识，多实例部署时建议显式配置（否则启动时随机生成）。
   # 只用于在 Redis 在线集合里区分不同 Pod，不影响业务语义。
   instance-id: ${HOSTNAME:local}

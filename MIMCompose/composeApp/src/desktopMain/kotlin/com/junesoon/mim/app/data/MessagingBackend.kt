@@ -30,6 +30,28 @@ interface MessagingBackend {
 
     suspend fun send(token: String, contactId: String, text: String): ChatMessage
 
+    /** 发送图片：文件先加密再上传，消息里只带媒体引用与密钥。 */
+    suspend fun sendImage(
+        token: String,
+        contactId: String,
+        bytes: ByteArray,
+        mime: String,
+        name: String?,
+        caption: String,
+    ): ChatMessage = unsupported("图片")
+
+    /** 发送语音：bytes 是 WAV，时长只用于展示。 */
+    suspend fun sendVoice(
+        token: String,
+        contactId: String,
+        bytes: ByteArray,
+        durationMs: Long,
+        caption: String,
+    ): ChatMessage = unsupported("语音")
+
+    /** 读取并解密本地缓存的媒体明文；拿不到时返回 null。 */
+    fun mediaBytes(message: ChatMessage): ByteArray? = null
+
     /**
      * 拉取尚未消费的消息。
      *

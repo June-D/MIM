@@ -166,6 +166,34 @@ class SecureBackendTest {
         val resumed = aliceNew.poll(newLogin.token).firstOrNull { it.contactId == bob }
         assertTrue(resumed != null, "解除屏蔽后应能收到消息")
         assertEquals("after unblock", resumed.message.text)
+
+        // 图片：文件先加密上传，接收端下载后按消息里的密钥解密。
+        val imageBytes = ByteArray(2048) { (it * 7 % 251).toByte() }
+        bobBackend.sendImage(
+            bobLogin.token, alice, imageBytes, "image/png", "tiny.png", "看图",
+        )
+        val image = aliceNew.poll(newLogin.token).firstOrNull { it.contactId == bob }
+        assertTrue(image != null, "应收到图片消息")
+        assertEquals("image", image.message.kind, "消息类型应为图片")
+        assertEquals("看图", image.message.text, "图片说明应保留")
+        val imagePlain = aliceNew.mediaBytes(image.message)
+        assertTrue(
+            imagePlain != null && imagePlain.contentEquals(imageBytes),
+            "图片解密后应与原文件完全一致",
+        )
+
+        // 语音：同一条媒体链路，只是多带一个时长。
+        val voiceBytes = ByteArray(1600) { (it * 3 % 251).toByte() }
+        bobBackend.sendVoice(bobLogin.token, alice, voiceBytes, 1_500L, "语音说明")
+        val voice = aliceNew.poll(newLogin.token).firstOrNull { it.contactId == bob }
+        assertTrue(voice != null, "应收到语音消息")
+        assertEquals("voice", voice.message.kind)
+        assertEquals(1_500L, voice.message.media?.durationMs, "时长应随消息保存")
+        val voicePlain = aliceNew.mediaBytes(voice.message)
+        assertTrue(
+            voicePlain != null && voicePlain.contentEquals(voiceBytes),
+            "语音解密后应与原文件完全一致",
+        )
     }
 
     private suspend fun safetyCode(

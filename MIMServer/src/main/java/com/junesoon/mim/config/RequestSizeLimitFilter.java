@@ -67,6 +67,10 @@ public class RequestSizeLimitFilter extends OncePerRequestFilter {
         if (uri.equals("/message")) {
             return 8 * MB;
         }
+        // 加密媒体：8MB 明文经 AES-GCM + Base64 后约 15MB，留出余量
+        if (uri.startsWith("/media")) {
+            return 24 * MB;
+        }
         // 200 个一次性预密钥公钥
         if (uri.startsWith("/prekey/one-time")) {
             return 512 * KB;

@@ -20,6 +20,7 @@ class LocalVault(
 ) {
 
     private val dir: Path = root.resolve(username).resolve(deviceId)
+    private val mediaDir: Path = dir.resolve("media")
 
     init {
         Files.createDirectories(dir)
@@ -58,6 +59,38 @@ class LocalVault(
 
     fun saveOutbox(entries: List<OutboxEntry>) {
         write("outbox.bin", JsonCodec.encode(entries))
+    }
+
+    /**
+     * 媒体密文缓存。
+     *
+     * 存的是上传到服务端的那一份密文（已用消息密钥加密），不是明文；
+     * 展示时按消息里的密钥临时解密。文件名只允许随机 id，避免路径穿越。
+     */
+    fun saveMedia(id: String, encrypted: ByteArray) {
+        if (!MediaIds.isValid(id)) {
+            return
+        }
+        Files.createDirectories(mediaDir)
+        val file = mediaDir.resolve(id)
+        Files.write(file, encrypted)
+        restrict(file)
+    }
+
+    fun loadMedia(id: String): ByteArray? {
+        if (!MediaIds.isValid(id)) {
+            return null
+        }
+        val file = mediaDir.resolve(id)
+        return if (Files.isRegularFile(file)) Files.readAllBytes(file) else null
+    }
+
+    fun deleteMedia(ids: Collection<String>) {
+        for (id in ids) {
+            if (MediaIds.isValid(id)) {
+                runCatching { Files.deleteIfExists(mediaDir.resolve(id)) }
+            }
+        }
     }
 
     /** 本机屏蔽的联系人。屏蔽是本地行为：不通知服务端，也不影响对方。 */
@@ -156,6 +189,8 @@ data class CachedMessage(
     val recallToken: String? = null,
     /** 离线队列中的消息：正文已组装，等待投递。 */
     val pending: Boolean = false,
+    /** 媒体消息的原始载荷 JSON；纯文本消息为 null。 */
+    val payload: String? = null,
 )
 
 /** 离线发送队列条目：密文已组装，重试只重发，不重新推进棘轮。 */
@@ -168,3 +203,10 @@ data class OutboxEntry(
     val epochMs: Long,
     val replicas: List<com.junesoon.mim.app.data.messaging.CipherMessageOut>,
 )
+
+/** 服务端媒体 id 的允许形状：32 字节随机数的 Base64URL。 */
+object MediaIds {
+    private val Pattern = Regex("^[A-Za-z0-9_-]{16,64}$")
+
+    fun isValid(id: String?): Boolean = id != null && Pattern.matches(id)
+}

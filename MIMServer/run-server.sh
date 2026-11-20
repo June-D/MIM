@@ -56,7 +56,7 @@ export MIM_ANONYMOUS_SEND_ENABLED="${MIM_ANONYMOUS_SEND_ENABLED:-false}"
 
 nohup java -jar "$RUN_JAR" > "$LOG" 2>&1 &
 PID=$!
-echo "服务端启动中（pid=$PID，日志 $LOG）…"
+echo "服务端启动中（pid=${PID}，日志 ${LOG}）…"
 
 for _ in $(seq 1 40); do
     if [[ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:8080/user/info || true)" == "401" ]]; then

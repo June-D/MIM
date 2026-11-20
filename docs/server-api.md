@@ -61,3 +61,14 @@
 `targetDeviceId` 校验作为双保险。
 
 上行只接受心跳。发消息一律走 HTTP，以便获得明确的失败回执与幂等保证。
+
+## 加密媒体
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/media` | 上传密文；`Content-Type: application/octet-stream`，返回 `{id, size}` |
+| GET | `/media/{id}` | 下载密文；需要登录，id 为 32 字节随机数 |
+| DELETE | `/media/{id}` | 仅上传者可删；删除后下载返回「媒体不存在」 |
+
+服务端不保存文件名、媒体类型或缩略图——这些都在端到端密文里。
+单文件上限由 `mim.media.max-bytes` 控制（默认 18MB 密文，对应约 8MB 明文）。

@@ -19,6 +19,9 @@ import com.junesoon.mim.app.data.messaging.UserSummaryDto
 import com.junesoon.mim.app.data.messaging.DeviceListDto
 import com.junesoon.mim.app.data.messaging.InsertRequestJson
 import com.junesoon.mim.app.data.messaging.LoginRequest
+import com.junesoon.mim.app.data.messaging.MediaPayload
+import com.junesoon.mim.app.data.messaging.MediaRefJson
+import com.junesoon.mim.app.data.messaging.MediaUploadDto
 import com.junesoon.mim.app.data.messaging.OpenFirstRequestJson
 import com.junesoon.mim.app.data.messaging.OpenFirstResponseJson
 import com.junesoon.mim.app.data.messaging.OpenSealedRequestJson
@@ -44,6 +47,7 @@ import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.FriendRequest
+import com.junesoon.mim.app.domain.MediaAttachment
 import com.junesoon.mim.app.domain.UserSummary
 import com.junesoon.mim.app.domain.PeerIdentityKey
 import com.junesoon.mim.app.domain.TwoFactorSetup
@@ -103,6 +107,8 @@ class SecureBackend(
     private var messages: MutableList<CachedMessage> = mutableListOf()
     private var serverIds: MutableMap<String, Long> = mutableMapOf()
     private var blockedPeers: MutableSet<String> = mutableSetOf()
+    private val mediaCache = object : LinkedHashMap<String, ByteArray>(8, 0.75f, true) {}
+    private var mediaCacheSize = 0L
     private var outbox: MutableList<OutboxEntry> = mutableListOf()
     private var cachedCert: CertJson? = null
     private var cachedToken: String = ""
@@ -334,7 +340,11 @@ class SecureBackend(
     }
 
     override fun forgetLocalConversation(contactId: String) {
+        val mediaIds = messages
+            .filter { it.contactId == contactId }
+            .mapNotNull { it.payload?.let(::parsePayload)?.media?.id }
         messages.removeAll { it.contactId == contactId }
+        vault.deleteMedia(mediaIds)
         serverIds.remove(contactId)
         vault.saveMessages(messages)
         vault.saveServerIds(serverIds)
@@ -405,6 +415,8 @@ class SecureBackend(
         messages.filter { it.contactId == contactId }
             .sortedBy { it.epochMs }
             .map {
+                val parsed = it.payload?.let(::parsePayload)
+                val attachment = parsed?.let(::attachmentOf)
                 ChatMessage(
                     id = it.id,
                     fromMe = it.fromMe,
@@ -415,6 +427,8 @@ class SecureBackend(
                     recalled = it.recalled,
                     canRecall = it.fromMe && it.recallToken != null && !it.recalled,
                     epochMs = it.epochMs,
+                    kind = if (it.recalled) "text" else parsed?.kind ?: "text",
+                    media = if (it.recalled) null else attachment,
                 )
             }
 
@@ -432,7 +446,7 @@ class SecureBackend(
         }.body()
         require(response.status == 200) { response.message ?: "撤回失败" }
 
-        val updated = cached.copy(recalled = true, text = "已撤回")
+        val updated = cached.copy(recalled = true, text = "已撤回", payload = null)
         messages[index] = updated
         vault.saveMessages(messages)
         return ChatMessage(
@@ -480,7 +494,18 @@ class SecureBackend(
         return states
     }
 
-    override suspend fun send(token: String, contactId: String, text: String): ChatMessage {
+    override suspend fun send(token: String, contactId: String, text: String): ChatMessage =
+        sendEncoded(token, contactId, text, text, kind = "text", media = null, payloadJson = null)
+
+    private suspend fun sendEncoded(
+        token: String,
+        contactId: String,
+        wireText: String,
+        displayText: String,
+        kind: String,
+        media: MediaAttachment?,
+        payloadJson: String?,
+    ): ChatMessage {
         val devices = peerDevices(contactId, token)
         require(devices.isNotEmpty()) { "对方还没有可用设备" }
 
@@ -498,7 +523,7 @@ class SecureBackend(
                 val composed = call(MimCoreNative::composeSealed) { json ->
                     json.encodeToString(
                         ComposeSealedRequestJson.serializer(),
-                        ComposeSealedRequestJson(jsonOf(workingStore), existing.sessionId, text, null),
+                        ComposeSealedRequestJson(jsonOf(workingStore), existing.sessionId, wireText, null),
                     )
                 }.let { JsonCodec.decode<ComposeSealedResponseJson>(it) }
                 workingStore = composed.store.toString()
@@ -531,7 +556,7 @@ class SecureBackend(
                             peer_signed_pre_key_public = Codec.base64ToHex(preKey.signedPreKeyPublic),
                             peer_one_time_pre_key_id = preKey.oneTimePreKeyId,
                             peer_one_time_pre_key_public = preKey.oneTimePreKeyPublic?.let(Codec::base64ToHex),
-                            plaintext = text,
+                            plaintext = wireText,
                             conversation_tag = peerTag,
                             session_id = UUID.randomUUID().toString(),
                             certificate = cert,
@@ -588,7 +613,7 @@ class SecureBackend(
             clientMsgId = clientMsgId,
             recallToken = recallToken,
             contactId = contactId,
-            text = text,
+            text = displayText,
             epochMs = System.currentTimeMillis(),
             replicas = replicas,
         )
@@ -601,10 +626,162 @@ class SecureBackend(
             vault.saveOutbox(outbox)
         }
 
-        val message = ChatMessage(clientMsgId, true, text, nowTime(), pending = !delivered, canRecall = true)
-        cache(contactId, message, entry.epochMs, recallToken = recallToken)
+        val message = ChatMessage(
+            clientMsgId,
+            true,
+            displayText,
+            nowTime(),
+            pending = !delivered,
+            canRecall = true,
+            epochMs = entry.epochMs,
+            kind = kind,
+            media = media,
+        )
+        cache(contactId, message, entry.epochMs, recallToken = recallToken, payload = payloadJson)
         vault.saveMessages(messages)
         return message
+    }
+
+    // ---------------- 媒体 ----------------
+
+    override suspend fun sendImage(
+        token: String,
+        contactId: String,
+        bytes: ByteArray,
+        mime: String,
+        name: String?,
+        caption: String,
+    ): ChatMessage = sendMedia(
+        token = token,
+        contactId = contactId,
+        bytes = bytes,
+        kind = "image",
+        mime = mime,
+        name = name,
+        caption = caption,
+        width = null,
+        height = null,
+        durationMs = null,
+    )
+
+    override suspend fun sendVoice(
+        token: String,
+        contactId: String,
+        bytes: ByteArray,
+        durationMs: Long,
+        caption: String,
+    ): ChatMessage = sendMedia(
+        token = token,
+        contactId = contactId,
+        bytes = bytes,
+        kind = "voice",
+        mime = "audio/wav",
+        name = null,
+        caption = caption,
+        width = null,
+        height = null,
+        durationMs = durationMs,
+    )
+
+    private suspend fun sendMedia(
+        token: String,
+        contactId: String,
+        bytes: ByteArray,
+        kind: String,
+        mime: String,
+        name: String?,
+        caption: String,
+        width: Int?,
+        height: Int?,
+        durationMs: Long?,
+    ): ChatMessage {
+        require(bytes.isNotEmpty()) { "媒体内容为空" }
+        require(bytes.size <= MEDIA_MAX_BYTES) {
+            "媒体文件过大，上限 ${MEDIA_MAX_BYTES / 1024 / 1024}MB"
+        }
+
+        val key = MimCoreNative.randomBytes(32)
+        val nonce = MimCoreNative.randomBytes(12)
+        val encrypted = MimCoreNative.encryptState(bytes, key, nonce)
+            .toString(Charsets.UTF_8)
+        val mediaId = uploadMedia(token, encrypted.toByteArray(Charsets.UTF_8))
+        vault.saveMedia(mediaId, encrypted.toByteArray(Charsets.UTF_8))
+
+        val attachment = MediaAttachment(
+            id = mediaId,
+            keyBase64 = java.util.Base64.getEncoder().encodeToString(key),
+            mime = mime,
+            size = bytes.size,
+            name = name,
+            width = width,
+            height = height,
+            durationMs = durationMs,
+        )
+        val payload = MediaPayload(
+            kind = kind,
+            text = caption,
+            media = MediaRefJson(
+                id = attachment.id,
+                key = attachment.keyBase64,
+                size = attachment.size,
+                mime = attachment.mime,
+                name = attachment.name,
+                width = attachment.width,
+                height = attachment.height,
+                durationMs = attachment.durationMs,
+            ),
+        )
+        val display = caption.ifBlank { if (kind == "image") "[图片]" else "[语音]" }
+        return sendEncoded(
+            token = token,
+            contactId = contactId,
+            wireText = JsonCodec.encode(payload),
+            displayText = display,
+            kind = kind,
+            media = attachment,
+            payloadJson = JsonCodec.encode(payload),
+        )
+    }
+
+    private suspend fun uploadMedia(token: String, encrypted: ByteArray): String {
+        val response: ApiEnvelope<MediaUploadDto> = client.post("$server/media") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.OctetStream)
+            setBody(encrypted)
+        }.body()
+        require(response.status == 200) { response.message ?: "媒体上传失败" }
+        return response.data?.id?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("媒体上传未返回标识")
+    }
+
+    override fun mediaBytes(message: ChatMessage): ByteArray? {
+        val media = message.media ?: return null
+        val cached = mediaCache[media.id] ?: run {
+            val blob = vault.loadMedia(media.id) ?: return null
+            val key = runCatching {
+                java.util.Base64.getDecoder().decode(media.keyBase64)
+            }.getOrNull() ?: return null
+            val plain = runCatching {
+                MimCoreNative.decryptState(
+                    blob.toString(Charsets.UTF_8).toByteArray(Charsets.UTF_8),
+                    key,
+                )
+            }.getOrNull() ?: return null
+            rememberMedia(media.id, plain)
+            plain
+        }
+        return cached
+    }
+
+    /** 小容量 LRU：避免滚动时反复解密同一张图。 */
+    private fun rememberMedia(id: String, bytes: ByteArray) {
+        mediaCache.remove(id)?.let { mediaCacheSize -= it.size }
+        mediaCache[id] = bytes
+        mediaCacheSize += bytes.size
+        while (mediaCacheSize > MEDIA_CACHE_BYTES && mediaCache.isNotEmpty()) {
+            val oldest = mediaCache.keys.firstOrNull() ?: break
+            mediaCacheSize -= mediaCache.remove(oldest)?.size ?: 0
+        }
     }
 
     override suspend fun poll(token: String): List<IncomingMessage> {
@@ -646,7 +823,14 @@ class SecureBackend(
                         )
                     }.let { JsonCodec.decode<StoreResponseJson>(it) }
                     workingStore = inserted.store.toString()
-                    remember(opened.certificate.username, sessionId, opened.plaintext, raw, delivered)
+                    remember(
+                        opened.certificate.username,
+                        sessionId,
+                        opened.plaintext,
+                        raw,
+                        token,
+                        delivered,
+                    )
                 } else {
                     val opened = call(MimCoreNative::openSealed) { json ->
                         json.encodeToString(
@@ -656,7 +840,7 @@ class SecureBackend(
                     }.let { JsonCodec.decode<OpenSealedResponseJson>(it) }
                     workingStore = opened.store.toString()
                     val peer = sessionPeer(workingStore, sessionId) ?: return@runCatching
-                    remember(peer, sessionId, opened.plaintext, raw, delivered)
+                    remember(peer, sessionId, opened.plaintext, raw, token, delivered)
                 }
             }
         }
@@ -711,6 +895,7 @@ class SecureBackend(
         sessionId: String,
         plaintext: String,
         raw: CipherMessageDto,
+        token: String,
         into: MutableList<IncomingMessage>,
     ) {
         val id = raw.clientMsgId ?: UUID.randomUUID().toString()
@@ -719,9 +904,66 @@ class SecureBackend(
         if (peer in blockedPeers) {
             return
         }
-        val message = ChatMessage(id, false, plaintext, nowTime())
-        cache(peer, message, raw.clientTime ?: System.currentTimeMillis())
+        val parsed = parsePayload(plaintext)
+        val attachment = parsed?.let(::attachmentOf)
+        val display = when {
+            parsed == null -> plaintext
+            else -> parsed.text.ifBlank {
+                if (parsed.kind == "image") "[图片]" else "[语音]"
+            }
+        }
+        if (parsed != null && attachment != null && vault.loadMedia(attachment.id) == null) {
+            // 媒体下载失败不影响消息本身；界面会显示「媒体不可用」。
+            runCatching {
+                val blob = downloadMedia(token, attachment.id)
+                vault.saveMedia(attachment.id, blob)
+            }
+        }
+        val message = ChatMessage(
+            id = id,
+            fromMe = false,
+            text = display,
+            time = nowTime(),
+            epochMs = raw.clientTime ?: System.currentTimeMillis(),
+            kind = parsed?.kind ?: "text",
+            media = attachment,
+        )
+        cache(
+            contactId = peer,
+            message = message,
+            epochMs = raw.clientTime ?: System.currentTimeMillis(),
+            payload = if (parsed != null) plaintext else null,
+        )
         into += IncomingMessage(peer, message)
+    }
+
+    private fun parsePayload(raw: String): MediaPayload? =
+        if (!raw.startsWith(MEDIA_PREFIX)) {
+            null
+        } else {
+            runCatching { JsonCodec.decode<MediaPayload>(raw) }.getOrNull()
+        }
+
+    private fun attachmentOf(payload: MediaPayload): MediaAttachment = MediaAttachment(
+        id = payload.media.id,
+        keyBase64 = payload.media.key,
+        mime = payload.media.mime,
+        size = payload.media.size,
+        name = payload.media.name,
+        width = payload.media.width,
+        height = payload.media.height,
+        durationMs = payload.media.durationMs,
+    )
+
+    private suspend fun downloadMedia(token: String, id: String): ByteArray {
+        if (!MediaIds.isValid(id)) {
+            throw IllegalStateException("媒体标识不合法")
+        }
+        val response = client.get("$server/media/$id") {
+            header("Authorization", "Bearer $token")
+        }
+        require(response.status.value in 200..299) { "媒体下载失败：HTTP ${response.status.value}" }
+        return response.body()
     }
 
     private fun cache(
@@ -730,6 +972,7 @@ class SecureBackend(
         epochMs: Long,
         recalled: Boolean = message.recalled,
         recallToken: String? = null,
+        payload: String? = null,
     ) {
         if (messages.any { it.id == message.id }) {
             return
@@ -745,6 +988,7 @@ class SecureBackend(
             recalled = recalled,
             recallToken = recallToken,
             pending = message.pending,
+            payload = payload,
         )
     }
 
@@ -942,6 +1186,11 @@ class SecureBackend(
         private const val TYPE_FRIEND_REQUEST = 100016
         private const val TYPE_FRIEND_ACCEPTED = 100017
         private const val TYPE_FRIEND_REJECTED = 100018
+
+        private const val MEDIA_MAX_BYTES = 8 * 1024 * 1024
+        private const val MEDIA_CACHE_BYTES = 32L * 1024 * 1024
+        /** 媒体载荷的固定前缀，用来与旧版纯文本消息区分。 */
+        private const val MEDIA_PREFIX = "{\"v\":1,\"kind\":"
     }
 }
 

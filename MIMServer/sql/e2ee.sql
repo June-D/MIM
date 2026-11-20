@@ -248,3 +248,13 @@ CREATE TABLE IF NOT EXISTS `t_conversation_clear` (
 --     DROP COLUMN `from_ref`,
 --     DROP COLUMN `from_device_ref`;
 -- DELETE FROM `t_conversation_clear` WHERE `peer` NOT LIKE 'tag:%';
+
+-- 加密媒体（服务端只存密文文件 + 元数据；文件名/类型都在端到端密文里）
+CREATE TABLE IF NOT EXISTS t_media (
+  id varchar(64) NOT NULL,
+  owner varchar(64) NOT NULL,
+  size bigint NOT NULL,
+  crt_time bigint NOT NULL,
+  PRIMARY KEY (id),
+  KEY idx_media_owner (owner)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

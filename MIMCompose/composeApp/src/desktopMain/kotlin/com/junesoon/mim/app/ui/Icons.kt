@@ -37,6 +37,9 @@ enum class MimIcon {
     Edit,
     Block,
     Logout,
+    Image,
+    Mic,
+    Stop,
 }
 
 @Composable
@@ -146,6 +149,52 @@ fun MimIcon(
             MimIcon.Block -> {
                 drawCircle(tint, side * 0.3f, points(0.5f, 0.5f), style = stroke)
                 drawLine(tint, points(0.29f, 0.29f), points(0.71f, 0.71f), stroke.width, StrokeCap.Round)
+            }
+            MimIcon.Image -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = points(0.16f, 0.2f),
+                    size = Size(side * 0.68f, side * 0.6f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(side * 0.07f),
+                    style = stroke,
+                )
+                drawCircle(tint, side * 0.07f, points(0.36f, 0.39f), style = stroke)
+                val path = Path().apply {
+                    moveTo(side * 0.2f, side * 0.72f)
+                    lineTo(side * 0.42f, side * 0.52f)
+                    lineTo(side * 0.56f, side * 0.64f)
+                    lineTo(side * 0.68f, side * 0.54f)
+                    lineTo(side * 0.8f, side * 0.66f)
+                }
+                drawPath(path, tint, style = stroke)
+            }
+            MimIcon.Mic -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = points(0.4f, 0.16f),
+                    size = Size(side * 0.2f, side * 0.42f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(side * 0.1f),
+                    style = stroke,
+                )
+                drawArc(
+                    color = tint,
+                    startAngle = 0f,
+                    sweepAngle = 180f,
+                    useCenter = false,
+                    topLeft = points(0.3f, 0.36f),
+                    size = Size(side * 0.4f, side * 0.4f),
+                    style = stroke,
+                )
+                drawLine(tint, points(0.5f, 0.76f), points(0.5f, 0.86f), stroke.width, StrokeCap.Round)
+            }
+            MimIcon.Stop -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = points(0.3f, 0.3f),
+                    size = Size(side * 0.4f, side * 0.4f),
+                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(side * 0.05f),
+                    style = stroke,
+                )
             }
             MimIcon.Logout -> {
                 drawRoundRect(

@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 
@@ -375,6 +376,54 @@ class AppStore(
                     _state.update { it.copy(error = error.message ?: "发送失败") }
                 }
         }
+    }
+
+    /** 发送图片；媒体文件先加密再上传，消息里只带引用与密钥。 */
+    fun sendImage(bytes: ByteArray, mime: String, name: String?) {
+        val currentToken = token ?: return
+        val chat = _state.value.screen as? Screen.Chat ?: return
+        if (chat.contactId in _state.value.blockedPeers) {
+            _state.update { it.copy(error = "已屏蔽该联系人，解除屏蔽后才能发送") }
+            return
+        }
+        scope.launch {
+            runCatching { backend.sendImage(currentToken, chat.contactId, bytes, mime, name, "") }
+                .onSuccess { refreshHistory(currentToken, chat.contactId) }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "图片发送失败") }
+                }
+        }
+    }
+
+    fun sendVoice(bytes: ByteArray, durationMs: Long) {
+        val currentToken = token ?: return
+        val chat = _state.value.screen as? Screen.Chat ?: return
+        if (chat.contactId in _state.value.blockedPeers) {
+            _state.update { it.copy(error = "已屏蔽该联系人，解除屏蔽后才能发送") }
+            return
+        }
+        scope.launch {
+            runCatching { backend.sendVoice(currentToken, chat.contactId, bytes, durationMs, "") }
+                .onSuccess { refreshHistory(currentToken, chat.contactId) }
+                .onFailure { error ->
+                    _state.update { it.copy(error = error.message ?: "语音发送失败") }
+                }
+        }
+    }
+
+    /** 读取并解密媒体明文；在 IO 线程做，避免解密大文件卡住界面。 */
+    suspend fun loadMedia(message: ChatMessage): ByteArray? = withContext(Dispatchers.IO) {
+        runCatching { backend.mediaBytes(message) }.getOrNull()
+    }
+
+    private suspend fun refreshHistory(currentToken: String, contactId: String) {
+        runCatching { backend.history(currentToken, contactId) }
+            .onSuccess { history ->
+                _state.update { current ->
+                    val next = current.copy(messages = current.messages + (contactId to history))
+                    next.copy(contacts = enrich(next.contacts, next))
+                }
+            }
     }
 
     fun recall(contactId: String, messageId: String) {

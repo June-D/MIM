@@ -45,6 +45,7 @@ MIMCompose/
     ui/ContactsScreen.kt  联系人（含未读角标、添加与设备入口，空态提示）
     ui/AddContactScreen.kt 搜索用户、好友申请、同意或拒绝
     ui/SecurityScreen.kt  二次验证开关与一次性恢复码
+    ui/MediaTools.kt      选图与解码、录音（WAV）与播放
     ui/ChatScreen.kt      聊天（撤回、安全码、清除）
     ui/DeviceScreen.kt    设备列表与注销
     data/CredentialStore.kt 记住账号密码（AES-GCM + 0600）
@@ -91,6 +92,7 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 | 安全码 | 无 | 60 位安全码（与 Java 同算法），按对端设备逐个展示 |
 | 未读数 | 内存计数 | `GET /message/unread/{peer}`，联系人页角标以服务端为准 |
 | 清除会话 | 无 | `POST /message/clear`，可只清自己的或双方清除；本地缓存一并丢弃 |
+| 图片 / 语音 | 无 | 文件用一次性密钥 AES-GCM 加密后上传 `/media`；消息里只带引用与密钥 |
 | 添加联系人 | 无 | `GET /chat/search` 搜索 → `POST /chat/requests` 申请 → 对方同意 |
 
 协议计算全部在 Rust 核心；Kotlin 只做传输、入库与 UI 语义。
@@ -167,6 +169,24 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
   联系人标记「已屏蔽」，未读数固定为 0，输入区替换为说明条。对方不会收到通知。
 - **移除好友是双向的**：服务端同时解除双方关系，本机历史仍保留在保险库里。
 - **备注**只影响自己看到的显示名，清空备注即恢复对方昵称。
+
+### 图片与语音
+
+发送：图片经系统文件选择器读取（≤8MB），语音用 16kHz 单声道录音并封装为 WAV。
+两者都用**一次性随机密钥**做 AES-256-GCM 加密，先把密文上传到 `/media`，
+再把「媒体 id + 密钥 + 类型 + 尺寸/时长」放进双棘轮密文一起发出。
+服务端只见到密文文件与大小，拿不到密钥、文件名或媒体类型。
+
+接收：下载密文后按消息里的密钥解密；密文缓存在保险库 `media/` 下，
+展示时临时解密（内存 LRU 上限 32MB）。清除会话会一并删除本地媒体密文。
+
+限制：单文件上限 8MB；语音是原始 WAV（未压缩、无波形）；图片只在桌面端解码展示。
+服务端密文目前不会随会话删除而自动清理，需要后续加保留策略。
+
+### 输入
+
+- **Enter 发送**，**Shift+Enter 换行**（Ctrl/Alt/⌘+Enter 同样换行）。
+- 中文输入法拼写过程中回车是选词，不会误发（检查 `TextFieldValue.composition`）。
 
 ### 未读数与清除会话
 
