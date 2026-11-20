@@ -39,7 +39,7 @@ public class CommonConstants {
     /**
      * 当前用户协议版本。客户端注册时必须勾选同意并携带同一版本。
      */
-    public static final String TERMS_VERSION = "2026-11";
+    public static final String TERMS_VERSION = "2026-12";
 
     public static final String WEB_SOCKET_USER_LIST = "web_socket_user_list";
     public static final String WEB_SOCKET_USER_ID = "web_socket_user_id";

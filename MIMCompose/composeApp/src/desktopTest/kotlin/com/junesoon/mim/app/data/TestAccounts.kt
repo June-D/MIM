@@ -51,7 +51,7 @@ object TestAccounts {
                         username = username,
                         password = PASSWORD,
                         agreedTerms = true,
-                        termsVersion = "2026-11",
+                        termsVersion = "2026-12",
                     )
                 )
             }.body()

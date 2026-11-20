@@ -208,7 +208,7 @@ public final class AcceptanceE2eTest {
     private static void register(String username) throws Exception {
         String body = "{\"username\":\"" + username + "\",\"password\":\""
             + b64(PASSWORD.getBytes(StandardCharsets.UTF_8))
-            + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-11\"}";
+            + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-12\"}";
         requireOk(httpPost(BASE + "/register/token", null, null, body), "注册");
     }
 

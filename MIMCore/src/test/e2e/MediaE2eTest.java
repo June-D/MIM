@@ -86,7 +86,7 @@ public final class MediaE2eTest {
 
     private static void register(String username) throws Exception {
         String body = "{\"username\":\"" + username + "\",\"password\":\"" + PASSWORD
-            + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-11\"}";
+            + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-12\"}";
         String response = request("POST", BASE + "/register/token", null,
             body.getBytes(StandardCharsets.UTF_8), "application/json");
         if (!response.contains("\"status\":200")) {

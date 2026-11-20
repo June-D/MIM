@@ -1214,6 +1214,10 @@ class SecureBackend(
         if (response.status == TWO_FACTOR_REQUIRED_CODE) {
             throw TwoFactorRequiredException(response.message ?: "请输入二次验证码或恢复码")
         }
+        if (response.status == CREDENTIALS_INVALID_CODE) {
+            // 只有「账号/密码错误」走这个类型：本机登录保护按它计数。
+            throw InvalidCredentialsException(response.message ?: "账号或密码错误")
+        }
         require(response.status == 200) { response.message ?: "登录失败" }
         return response.data ?: error("登录未返回令牌")
     }
@@ -1381,9 +1385,12 @@ class SecureBackend(
 
     companion object {
         const val ALGORITHM = "X3DH-P256-DOUBLE-RATCHET-AES-256-GCM"
-        const val TERMS_VERSION = "2026-11"
+        const val TERMS_VERSION = "2026-12"
         /** 服务端业务状态码：账号开启了二次验证。 */
         private const val TWO_FACTOR_REQUIRED_CODE = 40102
+
+        /** 服务端 `EX_USER_PASS_INVALID_CODE`：账号或密码错误的业务状态码。 */
+        private const val CREDENTIALS_INVALID_CODE = 40001
 
         private const val TYPE_NEW_MESSAGE = 100010
         private const val TYPE_READ_RECEIPT = 100012

@@ -1,7 +1,9 @@
 package com.junesoon.mim.app.state
 
 import com.junesoon.mim.app.data.CredentialStore
+import com.junesoon.mim.app.data.DeviceGuard
 import com.junesoon.mim.app.data.DemoBackend
+import com.junesoon.mim.app.data.InvalidCredentialsException
 import com.junesoon.mim.app.data.LoginResult
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.TwoFactorRequiredException
@@ -18,6 +20,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 /**
@@ -336,6 +339,131 @@ class AppStoreTest {
         store.clearConversation(forBoth = false)
 
         assertEquals(listOf("mine-media-id-0001"), released)
+    }
+
+    /** 连续 3 次密码错误：本机数据被清空，且界面如实说明。 */
+    @Test
+    fun three_wrong_passwords_wipe_local_vault() {
+        val root = Files.createTempDirectory("mim-guard")
+        val guard = DeviceGuard(root)
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = throw InvalidCredentialsException("用户不存在或账户密码错误!")
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+            guard = guard,
+        )
+        val vault = root.resolve("alice").resolve("desktop-1").resolve("messages.bin")
+        Files.createDirectories(vault.parent)
+        Files.write(vault, byteArrayOf(1, 2, 3))
+
+        repeat(2) { store.login("alice", "bad-pass", "desktop") }
+        assertTrue(Files.exists(vault), "前两次失败不应动本机数据")
+        assertEquals(2, guard.failures("alice"))
+
+        store.login("alice", "bad-pass", "desktop")
+
+        assertFalse(Files.exists(root.resolve("alice")), "第三次失败应清空本机数据")
+        assertTrue(
+            store.state.value.error.orEmpty().contains("清空"),
+            "必须如实告诉用户数据已被清空：${store.state.value.error}",
+        )
+        assertEquals(Screen.Login, store.state.value.screen)
+    }
+
+    /** 网络错误、限流、验证码错误都不能算进阈值，否则一次弱网就吃掉历史。 */
+    @Test
+    fun non_credential_failures_do_not_count() {
+        val root = Files.createTempDirectory("mim-guard")
+        val guard = DeviceGuard(root)
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = throw IllegalStateException("网络不可用")
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+            guard = guard,
+        )
+
+        repeat(5) { store.login("alice", "pass1234", "desktop") }
+
+        assertEquals(0, guard.failures("alice"))
+    }
+
+    /** 自动登录失败（记住的密码已失效）不计数，也不该悄悄删数据。 */
+    @Test
+    fun silent_login_failures_do_not_count() {
+        val root = Files.createTempDirectory("mim-guard")
+        val guard = DeviceGuard(root)
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = throw InvalidCredentialsException("用户不存在或账户密码错误!")
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+            guard = guard,
+        )
+        val vault = root.resolve("alice").resolve("desktop-1").resolve("messages.bin")
+        Files.createDirectories(vault.parent)
+        Files.write(vault, byteArrayOf(1, 2, 3))
+
+        repeat(3) { store.login("alice", "stale-pass", "desktop", silent = true) }
+
+        assertEquals(0, guard.failures("alice"))
+        assertTrue(Files.exists(vault), "自动登录失败不能触发自毁")
+    }
+
+    /** 中间成功登录过，计数清零；后续再错重新从 1 开始。 */
+    @Test
+    fun successful_login_resets_counter() {
+        val root = Files.createTempDirectory("mim-guard")
+        val guard = DeviceGuard(root)
+        var succeed = false
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = if (succeed) {
+                LoginResult("t", username, emptyList())
+            } else {
+                throw InvalidCredentialsException("用户不存在或账户密码错误!")
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+            guard = guard,
+        )
+
+        store.login("alice", "bad-pass", "desktop")
+        store.login("alice", "bad-pass", "desktop")
+        assertEquals(2, guard.failures("alice"))
+
+        succeed = true
+        store.login("alice", "pass1234", "desktop")
+        assertEquals(0, guard.failures("alice"))
     }
 
     @Test

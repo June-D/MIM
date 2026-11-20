@@ -92,6 +92,7 @@ fun AuthScreen(
     var agreed by remember(mode) { mutableStateOf(false) }
     var showTerms by remember { mutableStateOf(false) }
     var localError by remember { mutableStateOf<String?>(null) }
+    var showWipeNotice by remember { mutableStateOf(false) }
 
     Row(
         modifier = Modifier.fillMaxSize().background(MimPalette.Paper),
@@ -237,8 +238,10 @@ fun AuthScreen(
                                     !agreed -> "请先阅读并同意用户协议"
                                     else -> null
                                 }
+                                // 注册前单独确认「本机自毁」条款：这是不可撤销的操作，
+                                // 不能只藏在协议正文里让用户默认勾选。
                                 if (localError == null) {
-                                    onRegister(username, password, cleanEmail)
+                                    showWipeNotice = true
                                 }
                             },
                         )
@@ -291,6 +294,44 @@ fun AuthScreen(
                 Feedback(localError ?: error, notice)
             }
         }
+    }
+
+    if (showWipeNotice) {
+        AlertDialog(
+            onDismissRequest = { showWipeNotice = false },
+            title = { Text("创建账号前请确认") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        "同一台设备连续 3 次输入错误的登录密码时，这台设备上的全部聊天记录" +
+                            "（含密钥、会话与消息缓存）会被立即删除，且无法恢复。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MimPalette.Ink,
+                    )
+                    Text(
+                        "该保护只作用在本机：服务端密文与对方设备上的记录都不会被删除。" +
+                            "它的目的是防止设备落到别人手里后被翻看聊天。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MimPalette.InkSoft,
+                    )
+                    Text(
+                        "这一条已写入《用户协议》第三条第 4~5 款，之后可以随时回看。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MimPalette.InkSoft,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showWipeNotice = false
+                    onRegister(username, password, email.trim())
+                }) { Text("我已知晓并继续注册") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showWipeNotice = false }) { Text("取消") }
+            },
+            containerColor = MimPalette.Card,
+        )
     }
 
     if (showTerms) {
@@ -553,7 +594,7 @@ private fun isEmail(value: String): Boolean = EmailRules.isValid(value)
 
 private fun loadTerms(): String =
     runCatching {
-        val stream = object {}.javaClass.getResourceAsStream("/terms/2026-11.txt")
+        val stream = object {}.javaClass.getResourceAsStream("/terms/2026-12.txt")
             ?: return@runCatching "用户协议文本缺失，请更新客户端后重试。"
         stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
     }.getOrElse { "用户协议文本缺失，请更新客户端后重试。" }

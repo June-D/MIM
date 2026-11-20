@@ -541,7 +541,7 @@ public final class WsDevicePushE2eTest {
 
     private static void register(String username) throws Exception {
         String body = "{\"username\":\"" + username + "\",\"password\":\""
-            + base64(PASSWORD) + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-11\"}";
+            + base64(PASSWORD) + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-12\"}";
         // 注册接口按 IP 限流（5 次/分钟）。verify.sh 和 CI 会在每个脚本前清掉计数。
         String response = httpPost(BASE + "/register/token", null, null, body);
         requireOk(response, "注册");

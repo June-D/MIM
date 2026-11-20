@@ -1,8 +1,10 @@
 package com.junesoon.mim.app.state
 
 import com.junesoon.mim.app.data.CredentialStore
+import com.junesoon.mim.app.data.DeviceGuard
 import com.junesoon.mim.app.data.DemoBackend
 import com.junesoon.mim.app.data.IncomingMessage
+import com.junesoon.mim.app.data.InvalidCredentialsException
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.PushEvent
 import com.junesoon.mim.app.data.RememberedLogin
@@ -108,6 +110,8 @@ class AppStore(
     private val credentials: CredentialStore = CredentialStore(),
     /** 启动时用记住的账号自动登录；测试里默认关闭，避免依赖本机状态。 */
     private val autoRestore: Boolean = false,
+    /** 本机登录失败计数与自毁；测试注入临时目录。 */
+    private val guard: DeviceGuard = DeviceGuard(),
 ) {
 
     private val _state = MutableStateFlow(AppState())
@@ -157,10 +161,14 @@ class AppStore(
             return
         }
         val device = deviceName.trim().ifEmpty { "desktop" }
+        val account = username.trim()
         _state.update { it.copy(busy = true, error = null, notice = null) }
         scope.launch {
-            runCatching { backend.login(username.trim(), password, device, code) }
+            runCatching { backend.login(account, password, device, code) }
                 .onSuccess { result ->
+                    // 登录成功即清零：零散的旧失败不该把下次误输推过阈值。
+                    runCatching { guard.reset(account) }
+                    val wipedAt = runCatching { guard.consumeWipedAt(account) }.getOrNull()
                     token = result.token
                     blockedPeers = backend.blockedContacts().toMutableSet()
                     pinnedPeers = backend.pinnedContacts().toMutableSet()
@@ -173,7 +181,10 @@ class AppStore(
                             messages = current.messages,
                             busy = false,
                             error = null,
-                            notice = null,
+                            // 本机被自毁过的话，登录后如实说明一次，别让用户以为丢数据是 bug。
+                            notice = wipedAt?.let {
+                                "本机历史已于 ${formatStamp(it)} 清空（连续 ${guard.limit} 次密码错误）"
+                            } ?: current.notice,
                             blockedPeers = blockedPeers.toSet(),
                             pinnedPeers = pinnedPeers.toSet(),
                             rememberedUsername = if (remember) username.trim() else "",
@@ -210,6 +221,28 @@ class AppStore(
                     reconcileCleared(result.token, result.contacts.map { it.id })
                 }
                 .onFailure { error ->
+                    // 本机登录保护：只有「手动输入 + 账号密码错误」才计数。
+                    // 自动登录（记住的密码已失效）、限流、二次验证码错误都不算，
+                    // 否则一次弱网或一次手滑就能吃掉用户的历史。
+                    if (!silent && error is InvalidCredentialsException) {
+                        val failures = runCatching { guard.recordFailure(account) }.getOrDefault(0)
+                        if (failures >= DeviceGuard.THRESHOLD) {
+                            val wipedAt = runCatching { guard.wipe(account) }
+                                .getOrDefault(System.currentTimeMillis())
+                            runCatching { credentials.clear() }
+                            _state.update {
+                                AppState(
+                                    screen = Screen.Login,
+                                    authMode = AuthMode.Login,
+                                    rememberedUsername = account,
+                                    error = "连续 ${DeviceGuard.THRESHOLD} 次密码错误，" +
+                                        "本机加密历史已清空，且不可恢复。",
+                                    notice = "本机历史已于 ${formatStamp(wipedAt)} 清空",
+                                )
+                            }
+                            return@onFailure
+                        }
+                    }
                     val needsCode = error is TwoFactorRequiredException
                     _state.update { current ->
                         current.copy(
@@ -1029,6 +1062,11 @@ class AppStore(
             next.copy(contacts = enrich(next.contacts, next))
         }
     }
+
+    /** 自毁提示里的时间：只到分钟，不暴露更细的时间信息。 */
+    private fun formatStamp(epochMs: Long): String =
+        java.text.SimpleDateFormat("M 月 d 日 HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date(epochMs))
 
     /** 本机发出、且带媒体的消息 id：只有上传者能删服务端密文。 */
     private fun ownMediaIds(contactId: String): List<String> =

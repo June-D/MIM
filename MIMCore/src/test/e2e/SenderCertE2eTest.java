@@ -246,7 +246,7 @@ public final class SenderCertE2eTest {
 
     private static void register(String username) throws Exception {
         String body = "{\"username\":\"" + username + "\",\"password\":\""
-            + base64(PASSWORD) + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-11\"}";
+            + base64(PASSWORD) + "\",\"agreedTerms\":true,\"termsVersion\":\"2026-12\"}";
         requireOk(httpPost(BASE + "/register/token", null, null, body), "注册");
     }
 

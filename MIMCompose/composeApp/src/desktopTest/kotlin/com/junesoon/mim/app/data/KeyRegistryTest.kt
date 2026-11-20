@@ -74,7 +74,7 @@ class KeyRegistryTest {
     private suspend fun registerUser(server: String, username: String, password: String) {
         val response = client.post("$server/register/token") {
             contentType(ContentType.Application.Json)
-            setBody(RegisterRequest(username, password, agreedTerms = true, termsVersion = "2026-11"))
+            setBody(RegisterRequest(username, password, agreedTerms = true, termsVersion = "2026-12"))
         }
         val envelope: StatusEnvelope = response.body()
         assertEquals(200, envelope.status, envelope.message)
