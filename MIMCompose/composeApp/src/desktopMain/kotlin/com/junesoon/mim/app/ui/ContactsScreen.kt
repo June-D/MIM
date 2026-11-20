@@ -1,6 +1,7 @@
 package com.junesoon.mim.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -32,6 +33,8 @@ fun ContactsScreen(
     contacts: List<Contact>,
     onOpenChat: (String) -> Unit,
     onShowDevices: () -> Unit = {},
+    onAddContact: () -> Unit = {},
+    pendingRequestCount: Int = 0,
 ) {
     Scaffold(
         topBar = {
@@ -47,11 +50,28 @@ fun ContactsScreen(
                     }
                 },
                 actions = {
+                    TextButton(onClick = onAddContact) {
+                        Text(if (pendingRequestCount > 0) "添加 ($pendingRequestCount)" else "添加")
+                    }
                     TextButton(onClick = onShowDevices) { Text("设备") }
                 },
             )
         }
     ) { padding ->
+        if (contacts.isEmpty()) {
+            Column(
+                modifier = Modifier.fillMaxSize().padding(padding).padding(32.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text("还没有联系人", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    "点右上角「添加」，输入用户名搜索后发送申请；对方同意后即可加密聊天。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            return@Scaffold
+        }
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
             items(contacts, key = { it.id }) { contact ->
                 Row(

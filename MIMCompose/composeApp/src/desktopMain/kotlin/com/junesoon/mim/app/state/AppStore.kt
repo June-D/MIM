@@ -6,8 +6,10 @@ import com.junesoon.mim.app.data.IncomingMessage
 import com.junesoon.mim.app.data.PushEvent
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.DeviceInfo
+import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.SafetyEntry
 import com.junesoon.mim.app.domain.SafetyNumber
+import com.junesoon.mim.app.domain.UserSummary
 import com.junesoon.mim.app.domain.Contact
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
@@ -26,6 +28,7 @@ sealed interface Screen {
     data object Login : Screen
     data object Contacts : Screen
     data object Devices : Screen
+    data object AddContact : Screen
     data class Chat(val contactId: String) : Screen
 }
 
@@ -36,6 +39,9 @@ data class AppState(
     val contacts: List<Contact> = emptyList(),
     val devices: List<DeviceInfo> = emptyList(),
     val safetyNumbers: List<SafetyEntry> = emptyList(),
+    val friendRequests: List<FriendRequest> = emptyList(),
+    val searchResults: List<UserSummary> = emptyList(),
+    val searched: Boolean = false,
     val messages: Map<String, List<ChatMessage>> = emptyMap(),
     val error: String? = null,
     val busy: Boolean = false,
@@ -121,6 +127,58 @@ class AppStore(
                 .onSuccess { devices -> _state.update { it.copy(devices = devices) } }
                 .onFailure { error -> _state.update { it.copy(error = error.message ?: "查询设备失败") } }
         }
+    }
+
+    fun openAddContact() {
+        val currentToken = token ?: return
+        _state.update { it.copy(screen = Screen.AddContact, searched = false, searchResults = emptyList()) }
+        scope.launch { refreshFriendRequests(currentToken) }
+    }
+
+    fun searchUsers(keyword: String) {
+        val currentToken = token ?: return
+        val query = keyword.trim()
+        if (query.isEmpty()) {
+            return
+        }
+        scope.launch {
+            runCatching { backend.searchUsers(currentToken, query) }
+                .onSuccess { users ->
+                    _state.update { it.copy(searchResults = users, searched = true) }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(searched = true, error = error.message ?: "搜索失败") }
+                }
+        }
+    }
+
+    fun sendFriendRequest(username: String) {
+        val currentToken = token ?: return
+        scope.launch {
+            runCatching { backend.requestFriend(currentToken, username) }
+                .onSuccess { refreshFriendRequests(currentToken) }
+                .onFailure { error -> _state.update { it.copy(error = error.message ?: "发送申请失败") } }
+        }
+    }
+
+    fun respondFriendRequest(requestId: Long, accept: Boolean) {
+        val currentToken = token ?: return
+        scope.launch {
+            runCatching { backend.respondRequest(currentToken, requestId, accept) }
+                .onSuccess {
+                    refreshFriendRequests(currentToken)
+                    if (accept) {
+                        runCatching { backend.contacts(currentToken) }
+                            .onSuccess { contacts -> _state.update { it.copy(contacts = contacts) } }
+                    }
+                }
+                .onFailure { error -> _state.update { it.copy(error = error.message ?: "处理申请失败") } }
+        }
+    }
+
+    private suspend fun refreshFriendRequests(currentToken: String) {
+        runCatching { backend.friendRequests(currentToken) }
+            .onSuccess { requests -> _state.update { it.copy(friendRequests = requests) } }
     }
 
     fun revokeDevice(deviceId: String) {
@@ -330,6 +388,8 @@ class AppStore(
                         refreshStates(currentToken, open)
                     } else if (_state.value.screen is Screen.Contacts) {
                         refreshUnread(currentToken)
+                    } else if (_state.value.screen is Screen.AddContact) {
+                        refreshFriendRequests(currentToken)
                     }
                 }
         } finally {

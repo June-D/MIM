@@ -146,6 +146,25 @@ data class RecallRequest(
 )
 
 @Serializable
+data class UserSummaryDto(
+    val username: String? = null,
+    val nickname: String? = null,
+    val canReceive: Boolean = false,
+)
+
+@Serializable
+data class FriendRequestDto(
+    val id: Long = 0,
+    val username: String? = null,
+    /** in：待我处理；out：我发出的。 */
+    val direction: String? = null,
+    val status: String? = null,
+)
+
+@Serializable
+data class AddContactRequest(val username: String, val labelName: String? = null)
+
+@Serializable
 data class ClearRequest(
     val peer: String,
     val forBoth: Boolean = false,

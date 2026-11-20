@@ -3,6 +3,7 @@ package com.junesoon.mim.app.data
 import com.junesoon.mim.app.data.messaging.ApiEnvelope
 import com.junesoon.mim.app.data.messaging.CertDto
 import com.junesoon.mim.app.data.messaging.CertJson
+import com.junesoon.mim.app.data.messaging.AddContactRequest
 import com.junesoon.mim.app.data.messaging.ClearRequest
 import com.junesoon.mim.app.data.messaging.ClearResultDto
 import com.junesoon.mim.app.data.messaging.ChatContactGroup
@@ -13,6 +14,8 @@ import com.junesoon.mim.app.data.messaging.ComposeResponseJson
 import com.junesoon.mim.app.data.messaging.ComposeSealedRequestJson
 import com.junesoon.mim.app.data.messaging.ComposeSealedResponseJson
 import com.junesoon.mim.app.data.messaging.DeviceKeyDto
+import com.junesoon.mim.app.data.messaging.FriendRequestDto
+import com.junesoon.mim.app.data.messaging.UserSummaryDto
 import com.junesoon.mim.app.data.messaging.DeviceListDto
 import com.junesoon.mim.app.data.messaging.InsertRequestJson
 import com.junesoon.mim.app.data.messaging.OpenFirstRequestJson
@@ -30,6 +33,8 @@ import com.junesoon.mim.app.data.messaging.WireJson
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
+import com.junesoon.mim.app.domain.FriendRequest
+import com.junesoon.mim.app.domain.UserSummary
 import com.junesoon.mim.app.domain.PeerIdentityKey
 import com.junesoon.mim.core.MimCoreNative
 import io.ktor.client.HttpClient
@@ -134,7 +139,9 @@ class SecureBackend(
         val envelope = runCatching { JsonCodec.decode<PushEnvelope>(payload) }.getOrNull()
             ?: return null
         return when (envelope.type) {
-            TYPE_NEW_MESSAGE, TYPE_READ_RECEIPT, TYPE_RECALLED -> PushEvent.NewData
+            TYPE_NEW_MESSAGE, TYPE_READ_RECEIPT, TYPE_RECALLED,
+            TYPE_FRIEND_REQUEST, TYPE_FRIEND_ACCEPTED, TYPE_FRIEND_REJECTED,
+            -> PushEvent.NewData
             TYPE_CONVERSATION_CLEARED -> {
                 val peer = runCatching {
                     envelope.data?.jsonObject?.get("peer")?.jsonPrimitive?.content
@@ -143,6 +150,52 @@ class SecureBackend(
             }
             else -> null
         }
+    }
+
+    override suspend fun searchUsers(token: String, keyword: String): List<UserSummary> {
+        val users: List<UserSummaryDto> =
+            getEnvelope("$server/chat/search?keyword=${encodeQuery(keyword)}", token)
+        return users.mapNotNull { user ->
+            val username = user.username ?: return@mapNotNull null
+            UserSummary(username, user.nickname ?: username, user.canReceive)
+        }
+    }
+
+    override suspend fun friendRequests(token: String): List<FriendRequest> {
+        val requests: List<FriendRequestDto> = getEnvelope("$server/chat/requests", token)
+        return requests.map { request ->
+            FriendRequest(
+                id = request.id,
+                username = request.username.orEmpty(),
+                incoming = request.direction == "in",
+                status = request.status.orEmpty(),
+            )
+        }
+    }
+
+    override suspend fun requestFriend(token: String, username: String) {
+        val response: ApiEnvelope<FriendRequestDto> = client.post("$server/chat/requests") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(AddContactRequest(username))
+        }.body()
+        require(response.status == 200) { response.message ?: "发送申请失败" }
+    }
+
+    override suspend fun respondRequest(token: String, requestId: Long, accept: Boolean) {
+        val action = if (accept) "accept" else "reject"
+        val response: ApiEnvelope<FriendRequestDto> =
+            client.post("$server/chat/requests/$requestId/$action") {
+                header("Authorization", "Bearer $token")
+            }.body()
+        require(response.status == 200) { response.message ?: "处理申请失败" }
+    }
+
+    override suspend fun removeContact(token: String, peer: String) {
+        val response: StatusEnvelope = client.delete("$server/chat/contacts/$peer") {
+            header("Authorization", "Bearer $token")
+        }.body()
+        require(response.status == 200) { response.message ?: "删除联系人失败" }
     }
 
     override suspend fun unread(token: String, contactId: String): Int {
@@ -733,6 +786,10 @@ class SecureBackend(
 
     override fun ownIdentityKeyBase64(): String = Codec.hexToBase64(bundle.identity.publicKey)
 
+    /** 只做百分号转义，不引入整段 URL 编码依赖。 */
+    private fun encodeQuery(value: String): String =
+        java.net.URLEncoder.encode(value, "UTF-8")
+
     private fun nowTime(): String =
         SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
 
@@ -743,6 +800,9 @@ class SecureBackend(
         private const val TYPE_READ_RECEIPT = 100012
         private const val TYPE_RECALLED = 100014
         private const val TYPE_CONVERSATION_CLEARED = 100019
+        private const val TYPE_FRIEND_REQUEST = 100016
+        private const val TYPE_FRIEND_ACCEPTED = 100017
+        private const val TYPE_FRIEND_REJECTED = 100018
     }
 }
 

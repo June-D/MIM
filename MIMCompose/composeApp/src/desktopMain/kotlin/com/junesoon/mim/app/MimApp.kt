@@ -12,6 +12,7 @@ import com.junesoon.mim.app.data.SecureBackend
 import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.state.AppStore
 import com.junesoon.mim.app.state.Screen
+import com.junesoon.mim.app.ui.AddContactScreen
 import com.junesoon.mim.app.ui.ChatScreen
 import com.junesoon.mim.app.ui.DeviceScreen
 import com.junesoon.mim.app.ui.ContactsScreen
@@ -49,6 +50,19 @@ fun MimApp() {
                     contacts = state.contacts,
                     onOpenChat = store::openChat,
                     onShowDevices = store::openDevices,
+                    onAddContact = store::openAddContact,
+                    pendingRequestCount = state.friendRequests
+                        .count { it.incoming && it.pending },
+                )
+
+                Screen.AddContact -> AddContactScreen(
+                    results = state.searchResults,
+                    searched = state.searched,
+                    requests = state.friendRequests,
+                    onBack = store::backToContacts,
+                    onSearch = store::searchUsers,
+                    onRequest = store::sendFriendRequest,
+                    onRespond = store::respondFriendRequest,
                 )
 
                 Screen.Devices -> DeviceScreen(

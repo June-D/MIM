@@ -19,3 +19,20 @@ data class SafetyEntry(
     val deviceId: String,
     val code: String,
 )
+
+/** 搜索结果里的一个用户。 */
+data class UserSummary(
+    val username: String,
+    val nickname: String,
+    val canReceive: Boolean,
+)
+
+/** 一条好友申请。 */
+data class FriendRequest(
+    val id: Long,
+    val username: String,
+    val incoming: Boolean,
+    val status: String,
+) {
+    val pending: Boolean get() = status == "pending"
+}

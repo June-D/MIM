@@ -3,7 +3,9 @@ package com.junesoon.mim.app.data
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.DeviceInfo
+import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.PeerIdentityKey
+import com.junesoon.mim.app.domain.UserSummary
 
 /**
  * 传输层契约。
@@ -54,6 +56,21 @@ interface MessagingBackend {
 
     /** 只丢弃本地缓存，不动服务端（对方清除会话时用）。 */
     fun forgetLocalConversation(contactId: String) = Unit
+
+    /** 搜索可以添加的用户（服务端排除自己与已有好友）。 */
+    suspend fun searchUsers(token: String, keyword: String): List<UserSummary> = emptyList()
+
+    /** 待处理的好友申请：我收到与我发出的。 */
+    suspend fun friendRequests(token: String): List<FriendRequest> = emptyList()
+
+    /** 发起好友申请。 */
+    suspend fun requestFriend(token: String, username: String) = Unit
+
+    /** 同意或拒绝一条发给我的申请。 */
+    suspend fun respondRequest(token: String, requestId: Long, accept: Boolean) = Unit
+
+    /** 删除好友（双向）。 */
+    suspend fun removeContact(token: String, peer: String) = Unit
 
     /** 本账号的设备列表。 */
     suspend fun devices(token: String): List<DeviceInfo> = emptyList()

@@ -36,7 +36,8 @@ MIMCompose/
     state/AppStore.kt     唯一状态源：StateFlow + 动作 + 同步循环
     ui/Theme.kt           纸墨配色，换主题只改这一处
     ui/LoginScreen.kt     登录
-    ui/ContactsScreen.kt  联系人（含未读角标、设备入口）
+    ui/ContactsScreen.kt  联系人（含未读角标、添加与设备入口，空态提示）
+    ui/AddContactScreen.kt 搜索用户、好友申请、同意或拒绝
     ui/ChatScreen.kt      聊天（撤回、安全码、清除）
     ui/DeviceScreen.kt    设备列表与注销
   composeApp/src/desktopTest/kotlin/  状态流测试 + 真实后端联调
@@ -80,6 +81,7 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 | 安全码 | 无 | 60 位安全码（与 Java 同算法），按对端设备逐个展示 |
 | 未读数 | 内存计数 | `GET /message/unread/{peer}`，联系人页角标以服务端为准 |
 | 清除会话 | 无 | `POST /message/clear`，可只清自己的或双方清除；本地缓存一并丢弃 |
+| 添加联系人 | 无 | `GET /chat/search` 搜索 → `POST /chat/requests` 申请 → 对方同意 |
 
 协议计算全部在 Rust 核心；Kotlin 只做传输、入库与 UI 语义。
 
@@ -97,6 +99,12 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 
 `historyStates` 每轮对**当前打开的会话**查一次历史，更新已读与撤回状态；
 其它会话在下次打开时刷新（推送只会触发同步，不会直接改本地状态）。
+
+### 添加联系人
+
+联系人页「添加」进入添加页：输入用户名搜索 → 发送申请；对方的申请在
+「待我处理」里同意或拒绝。申请必须对方同意才建立关系，不存在静默加好友。
+收到申请 / 同意 / 拒绝的推送（100016~100018）会即时刷新该页。
 
 ### 设备与安全码
 
