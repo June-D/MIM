@@ -24,6 +24,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -90,6 +91,11 @@ fun SearchScreen(
             }
         }
 
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
         OutlinedTextField(
             value = keyword,
             onValueChange = { keyword = it },
@@ -107,10 +113,14 @@ fun SearchScreen(
                 cursorColor = MimPalette.Teal,
             ),
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 14.dp)
+                .weight(1f)
                 .focusRequester(focus),
         )
+            TextButton(
+                onClick = { onSearch(keyword) },
+                enabled = keyword.isNotBlank(),
+            ) { Text("搜索") }
+        }
 
         when {
             !searched -> Hint("输入关键词后回车。可搜索文字、图片说明与语音说明。")
