@@ -141,8 +141,10 @@ mysql -uroot mim_core < MIMServer/sql/e2ee.sql
 
 # 2. 启动服务端（打包 → 复制到 /tmp → 等就绪；--stop 可停）
 MIMServer/run-server.sh
-MIM_DB_URL="jdbc:mysql://127.0.0.1:13306/mim_core?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8" \
-  MIMServer/run-server.sh
+
+# 数据库/Redis 不在默认地址时用环境变量覆盖，例如：
+# MIM_DB_URL="jdbc:mysql://127.0.0.1:3306/mim_core?serverTimezone=Asia/Shanghai&useUnicode=true&characterEncoding=utf8" \
+#   MIM_DB_USERNAME=root MIMServer/run-server.sh
 
 # 3. 启动 PC 客户端（自动构建带 JNI 的 Rust 动态库）
 MIMCompose/run-desktop.sh
