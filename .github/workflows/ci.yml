@@ -84,6 +84,46 @@ jobs:
           if-no-files-found: ignore
 
   # ------------------------------------------------------------
+  # PC 客户端：状态流 / 本地保险库 / 媒体工具 / 登录保护
+  #
+  # 需要 Rust 动态库（JNI），所以先按 --features jni 构建再用 MIM_NATIVE_LIB 指过去。
+  # 需要真实服务端的那几项在 CI 里没有环境变量，会按设计跳过而不是伪装通过。
+  # ------------------------------------------------------------
+  desktop:
+    name: PC 客户端测试
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: 构建 JNI 动态库
+        working-directory: MIMCoreRust
+        run: cargo build --release --features jni
+
+      - name: 执行桌面端测试
+        working-directory: MIMCompose
+        env:
+          MIM_NATIVE_LIB: ${{ github.workspace }}/MIMCoreRust/target/release/libmim_core_rust.so
+        run: ./gradlew :composeApp:desktopTest --console=plain
+
+      - name: 测试报告
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-test-reports
+          path: MIMCompose/composeApp/build/test-results/desktopTest/
+          if-no-files-found: ignore
+
+  # ------------------------------------------------------------
   # Rust 核心：与 Java 基准向量逐字节对拍
   #
   # 这层是 Android/iOS 的 Rust + FFI 路线可行性验证。
