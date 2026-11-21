@@ -89,6 +89,29 @@ public final class MimCoreNative {
         byte[] signature);
 
     /**
+     * 用设备身份私钥对任意载荷签名（ECDSA P-256 / SHA-256，DER 后 Base64）。
+     *
+     * <p>设备间历史同步用它给「原消息归属 + 内容」签名：服务端不验签，
+     * 接收设备用已固定的身份公钥验，服务端伪造不了归属。
+     *
+     * @param identityPrivateHex 身份私钥（PKCS#8 DER 的十六进制）
+     * @param payload            待签名字节
+     * @return Base64 签名的 UTF-8 字节；失败抛异常
+     */
+    public static native byte[] signWithIdentity(byte[] identityPrivateHex, byte[] payload);
+
+    /**
+     * 用身份公钥验证 {@link #signWithIdentity} 的签名。
+     *
+     * @param identityPublic 身份公钥（SPKI DER）
+     * @param signature      Base64 签名的 UTF-8 字节
+     */
+    public static native boolean verifyWithIdentity(
+        byte[] identityPublic,
+        byte[] payload,
+        byte[] signature);
+
+    /**
      * 组装首条消息：X3DH + 发送者证书信封（含会话标签）+ 双棘轮加密。
      *
      * @param requestJson 见 `MIMCoreRust/src/messaging.rs` 的 `ComposeRequest`

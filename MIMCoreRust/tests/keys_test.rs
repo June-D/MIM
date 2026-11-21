@@ -1,8 +1,8 @@
 //! 设备密钥管理的生成、轮换、一次性语义与加密落盘。
 
 use mim_core_rust::keys::{
-    generate_identity, generate_one_time_pre_keys, sign_signed_pre_key, verify_signed_pre_key,
-    KeyBundle, SIGNED_PRE_KEY_KEEP,
+    generate_identity, generate_one_time_pre_keys, sign_payload, sign_signed_pre_key,
+    verify_payload, verify_signed_pre_key, KeyBundle, SIGNED_PRE_KEY_KEEP,
 };
 
 fn hex_to_vec(value: &str) -> Vec<u8> {
@@ -111,4 +111,22 @@ fn one_time_batch_matches_requested_count() {
         let der = hex_to_vec(&key.public_key);
         assert_eq!(&der[..1], &[0x30], "必须是 SPKI DER");
     }
+}
+
+/// 设备间历史同步靠它给「原消息归属 + 内容」签名：同一把密钥必须能验回来，
+/// 动一个字节就必须失败——服务端不参与验签，客户端不能被伪造归属骗过。
+#[test]
+fn identity_signature_round_trips_and_rejects_tampering() {
+    let identity = generate_identity(1).expect("identity");
+    let payload = b"msg-1|tagA|alice|bob|device-9";
+    let signature = sign_payload(&identity.private_key, payload).expect("sign");
+
+    let public = hex_to_vec(&identity.public_key);
+    assert!(verify_payload(&public, payload, &signature));
+    assert!(!verify_payload(&public, b"msg-1|tagA|alice|bob|device-8", &signature));
+    assert!(!verify_payload(&public, payload, "not-base64"));
+
+    // 换一把身份公钥就验不过：归属不能跨设备复用。
+    let other = generate_identity(1).expect("identity");
+    assert!(!verify_payload(&hex_to_vec(&other.public_key), payload, &signature));
 }

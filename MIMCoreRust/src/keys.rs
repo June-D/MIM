@@ -137,6 +137,37 @@ pub fn verify_signed_pre_key(
     key.verify(&payload, &signature).is_ok()
 }
 
+/// 用身份私钥对任意载荷签名（ECDSA P-256 / SHA-256，DER 后 Base64）。
+///
+/// 设备间历史同步用它给「原消息归属 + 内容摘要」签名：服务端不参与验签，
+/// 但接收设备会用已固定的身份公钥验，服务端伪造不了归属。
+pub fn sign_payload(identity_private_hex: &str, payload: &[u8]) -> Option<String> {
+    let key = signing_key(identity_private_hex)?;
+    let signature: Signature = key.sign(payload);
+    Some(b64(signature.to_der().as_bytes()))
+}
+
+/// 用身份公钥验证 [sign_payload] 的签名。任何解析失败都返回 false，不猜。
+pub fn verify_payload(
+    identity_public_der: &[u8],
+    payload: &[u8],
+    signature_base64: &str,
+) -> bool {
+    let signature = match b64_decode(signature_base64) {
+        Some(v) => v,
+        None => return false,
+    };
+    let signature = match Signature::from_der(&signature) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let key = match VerifyingKey::from_public_key_der(identity_public_der) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    key.verify(payload, &signature).is_ok()
+}
+
 /// 批量生成一次性预密钥，ID 从 `start_id` 递增。
 pub fn generate_one_time_pre_keys(start_id: u32, count: u32) -> Vec<OneTimePreKey> {
     let mut keys = Vec::with_capacity(count as usize);

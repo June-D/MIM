@@ -430,6 +430,58 @@ pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_verifySignedPreK
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_signWithIdentity<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    identity_private: JByteArray<'local>,
+    payload: JByteArray<'local>,
+) -> jbyteArray {
+    let private = bytes(&mut env, &identity_private)
+        .and_then(|value| String::from_utf8(value).ok());
+    let payload = bytes(&mut env, &payload);
+    match (private, payload) {
+        (Some(private), Some(payload)) => match crate::keys::sign_payload(&private, &payload) {
+            Some(signature) => array(&mut env, signature.into_bytes()),
+            None => {
+                throw(&mut env, "签名失败");
+                std::ptr::null_mut()
+            }
+        },
+        _ => {
+            throw(&mut env, "无法读取参数");
+            std::ptr::null_mut()
+        }
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_verifyWithIdentity<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    identity_public: JByteArray<'local>,
+    payload: JByteArray<'local>,
+    signature: JByteArray<'local>,
+) -> jboolean {
+    let public = bytes(&mut env, &identity_public);
+    let payload = bytes(&mut env, &payload);
+    let signature = bytes(&mut env, &signature)
+        .and_then(|value| String::from_utf8(value).ok());
+    match (public, payload, signature) {
+        (Some(public), Some(payload), Some(signature)) => {
+            if crate::keys::verify_payload(&public, &payload, &signature) {
+                1
+            } else {
+                0
+            }
+        }
+        _ => {
+            throw(&mut env, "无法读取参数");
+            0
+        }
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_junesoon_mim_core_MimCoreNative_composeFirstMessage<'local>(
     mut env: JNIEnv<'local>,
     _class: JClass<'local>,
