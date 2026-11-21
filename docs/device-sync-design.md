@@ -226,3 +226,28 @@ data class SyncEnvelopeDto(
    「以下 N 条来自另一台设备」？
 
 以上四点确认后即可进入 Phase A。
+
+## 12. 实现备注（2026-11 盘点时确认的硬约束）
+
+写这块代码前先看这条，能省一次返工：
+
+1. **DTO 缺字段**：客户端 `CipherMessageDto` / `CipherMessageOut` 目前没有
+   `syncFromDevice`、`syncOriginalFrom/To/Device`、`syncSignature`。
+   服务端 `POST /message/sync` 强制要求后四项，所以第一步是补 DTO（服务端不用改）。
+2. **会话要按「自己」建**：同步副本的目标是**本账号的另一台设备**，不是联系人。
+   因此 A→B 的棘轮会话应登记为 `peer = 自己的用户名`、`device = B 的设备 id`，
+   与联系人会话共用同一套 `session_store`，靠 `device_id` 区分。
+   不要试图复用与联系人的会话——那会把两套棘轮搅在一起。
+3. **接收端要能认出「这是同步副本」**：`poll()` 目前只按 `from` 归属。
+   同步副本的 `to_user` 是自己、发送方为空，只有 `sync_from_device`；
+   需要先读 `syncFromDevice` 判断，再解信封里的 `originalFrom/originalTo` 还原归属，
+   否则会显示成「我发给自己的消息」。
+4. **自己发出的消息需要明文副本**：棘轮解不开自己的密文，转发「我说过的话」
+   只能靠本机留存的明文（设计里的 `plaintext_store.bin`，30 天）。
+   目前 `CachedMessage` 只存展示文本与载荷，够用，无需新存储——但要在
+   `cache()` 里明确保留 `fromMe` 消息的 `text`（现在就是这么做的，注意别被清理逻辑删掉）。
+5. **验证顺序建议**：先写一个双设备 e2e（同一账号两个 `SecureBackend` 实例，
+   用临时保险库）把 `请求 → 组装 → 提交 → 拉取 → 验签 → 入库` 打通，
+   再动 UI。UI 只是这层的壳，先做壳会让问题难以定位。
+
+第 1 条（补 DTO）可以作为下一步的最小提交，独立可测。
