@@ -105,3 +105,7 @@ mim:
 server:
   # 限制请求头大小，避免超长头占用内存。JSON body 的上限由 RequestSizeLimitFilter 控制。
   max-http-header-size: 16KB
+  # 反向代理终结 TLS 时设为 framework：否则 request.getScheme() 恒为 http，
+  # PlaintextRejectionFilter 会把所有请求挡成 403。
+  # 代价是信任 X-Forwarded-*，务必保证应用端口（8080）只对代理开放。
+  forward-headers-strategy: ${MIM_FORWARD_HEADERS:NATIVE}

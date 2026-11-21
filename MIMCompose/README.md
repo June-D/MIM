@@ -31,6 +31,7 @@ MIMCompose/
     data/MessagingBackend.kt  传输层契约（登录/收发/推送/设备/清除）
     data/DemoBackend.kt   内存演示实现（含回声，仅用于跑通 UI）
     data/HttpBackend.kt   登录与令牌
+    data/ServerUrl.kt     服务端地址准入（拒绝非回环明文 http）
     data/KeyRegistry.kt   设备登记、密钥上传、旧设备清理
     data/SecureBackend.kt 真实收发：首条消息 / sealed / 撤回 / 已读 / 离线队列 / 推送
     data/LocalVault.kt    本地保险库（密钥包/会话/消息/队列，全部加密落盘）
@@ -158,6 +159,19 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
 - 已开启：可用「当前密码 + 6 位验证码或一条恢复码」重新生成恢复码或关闭；
   恢复码只在生成时展示一次，服务端只存哈希。
 - 登录页在账号已开启时要求额外输入验证码或恢复码（服务端 40102）。
+
+### 连接与传输安全
+
+地址由 `MIM_SERVER_URL` 指定，HTTP 与 WebSocket 同源推导（https → wss）：
+
+- 只接受 `https://`；`http://` 仅放行本机回环（`127.0.0.1` / `localhost` / `::1`），
+  其余明文地址直接拒绝并停在说明页——不静默降级成演示后端，避免「以为连上了」。
+- 内网调试确实需要明文时设 `MIM_ALLOW_INSECURE=1`，并自行确认链路可信。
+- 自签 CA：把证书导入 JVM truststore
+  （`JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=... -Djavax.net.ssl.trustStorePassword=..."`）。
+- 大写协议名会被规范成小写、尾部斜杠会去掉；解析失败给出可读原因而不是堆栈。
+
+理由：端到端加密只保护内容，口令、JWT 与「谁和谁在通信」都在 HTTP 头上。
 
 ### 外观与主题
 

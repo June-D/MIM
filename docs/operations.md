@@ -135,22 +135,37 @@ export MIM_TLS_KEYSTORE_PASSWORD=changeit
 确实需要内网明文调试时再显式关闭。协议固定 TLS 1.2/1.3，实测协商结果为
 `TLSv1.3 + AEAD-AES256-GCM-SHA384`。
 
-### 客户端
+### 客户端（Compose 桌面）
 
-`feign-client.properties` 里改：
+地址由 `MIM_SERVER_URL` 指定，HTTP 与 WebSocket 同源推导（https → wss）：
 
-```properties
-feign-client.ribbon.listOfServers = mim.example.com:8443
-feign-client.ribbon.IsSecure = true
-mim.tls.verifyCertificate = true
+```bash
+MIM_SERVER_URL=https://mim.example.com MIMCompose/run-desktop.sh
 ```
 
-WebSocket 同步改成 `-Dmim.ws.url=wss://mim.example.com/websocket/test`。
-自建 CA 时用 `-Dmim.tls.caFile=/path/to/ca.pem` 追加信任。
-WebSocket 只在握手时校验 JWT；服务端每分钟关闭一次已过期的连接，
-令牌过期后不会继续接收推送。
+客户端**拒绝非回环地址的明文 http**：E2EE 只保护内容，口令、JWT 与
+「谁和谁在通信」都在 HTTP 头上，明文链路等于把身份交给链路上的任何人。
+本机回环（`127.0.0.1` / `localhost` / `::1`）允许 http，方便本地开发；
+内网联调确实需要明文时，用 `MIM_ALLOW_INSECURE=1` 显式开启，并自行确认链路可信。
+地址不合法时客户端直接停在说明页，不会静默降级成演示后端。
 
-> `mim.tls.verifyCertificate=false` 只允许本地调试，会打印警告日志。
+自签 CA 时让 JVM 信任它（Ktor 走 JVM 默认 truststore）：
+
+```bash
+export JAVA_TOOL_OPTIONS="-Djavax.net.ssl.trustStore=/path/to/truststore.p12 \
+  -Djavax.net.ssl.trustStorePassword=changeit"
+```
+
+服务端若跑在反向代理后面（代理终结 TLS），注意两个已知坑：
+
+1. `PlaintextRejectionFilter` 看的是 `request.getScheme()`。代理转发进来是 http，
+   默认会 403 掉所有请求。此时设 `MIM_FORWARD_HEADERS=framework`
+   （对应 `server.forward-headers-strategy`），服务端才认 `X-Forwarded-Proto`。
+   **代价是信任转发头**：必须保证 8080 只对代理开放，否则客户端可自带
+   `X-Forwarded-Proto: https` 绕过明文拒绝。
+2. 代理要透传 `Upgrade` / `Connection` 头，否则 `/websocket/*` 握手会失败、
+   推送退化成长轮询（功能仍在，但延迟变高）。
+WebSocket 只在握手时校验 JWT；服务端每分钟清理过期连接，令牌过期后不会再收到推送。
 
 ## 运行
 
@@ -339,6 +354,26 @@ export MIM_EMAIL_KEY_PREVIOUS_COMMAND='vault kv get -field=key secret/mim/email-
 主密钥同样支持 `MIM_MASTER_KEY_COMMAND` / `MIM_MASTER_KEY_PREVIOUS_COMMAND`。
 
 ### 备份
+
+用仓库自带的脚本，一次拿走数据库与媒体密文，并附恢复说明：
+
+```bash
+# 默认连 127.0.0.1:3306/mim_core，媒体目录 MIMServer/data/media
+tools/backup.sh /path/to/backups
+
+# 非默认部署（例如本地开发的 13306）用环境变量覆盖
+MIM_DB_PORT=13306 MIM_DB_PASSWORD=secret MIM_MEDIA_DIR=/var/lib/mim/media \
+  tools/backup.sh /path/to/backups
+```
+
+产物：`db.sql`（单事务快照）、`media.tar.gz`、`SHA256SUMS`、`RESTORE.md`
+（含恢复步骤与密钥清单）。目录权限设为 0700；备份里虽然全是密文，
+但账号、设备公钥与收发时间是明文元数据，按敏感数据对待。
+
+恢复演练（建议每次备份后至少每月一次）：校验和 → 导入 `db.sql` →
+解开媒体 → **用同一把 `MIM_MASTER_KEY` / `MIM_EMAIL_KEY` 启动** →
+登录、发一条消息、打开一条旧消息的附件 → 销毁演练环境。
+2026-11 实测：14 张表、784 条消息可完整还原。
 
 - 必须同时备份数据库与 `MIM_MASTER_KEY` / `MIM_EMAIL_KEY`；密钥不在数据库里。
 - 丢失主密钥会导致服务端拒绝启动；丢失邮箱密钥会导致 TOTP/邮箱密文无法解密。

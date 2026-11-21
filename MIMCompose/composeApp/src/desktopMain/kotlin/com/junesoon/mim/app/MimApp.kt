@@ -63,13 +63,6 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun MimApp() {
-    val store = remember {
-        val server = System.getenv("MIM_SERVER_URL")
-        val backend: MessagingBackend =
-            if (server.isNullOrBlank()) DemoBackend() else SecureBackend(server.trim())
-        AppStore(backend, autoRestore = !server.isNullOrBlank())
-    }
-    val state by store.state.collectAsState()
     // 外观：默认跟随系统，也可以在「更多」里手动切换（仅本机、不持久化）。
     var themeMode by remember { mutableStateOf(ThemeMode.System) }
     val darkTheme = when (themeMode) {
@@ -77,6 +70,25 @@ fun MimApp() {
         ThemeMode.Light -> false
         ThemeMode.Dark -> true
     }
+
+    val started = remember {
+        runCatching {
+            val server = System.getenv("MIM_SERVER_URL")
+            val backend: MessagingBackend =
+                if (server.isNullOrBlank()) DemoBackend() else SecureBackend(server.trim())
+            AppStore(backend, autoRestore = !server.isNullOrBlank())
+        }
+    }
+    val store = started.getOrNull()
+    if (store == null) {
+        // 地址被拒（例如非回环的 http）时不要静默降级成演示后端，那样等于假装连上了。
+        val reason = started.exceptionOrNull()?.message ?: "启动失败"
+        MimTheme(dark = darkTheme) {
+            Surface(modifier = Modifier.fillMaxSize()) { StartupError(reason) }
+        }
+        return
+    }
+    val state by store.state.collectAsState()
 
     // 提示类消息 4 秒后自动消失，错误则留到用户下次操作。
     LaunchedEffect(state.notice) {
@@ -280,6 +292,19 @@ private fun EmptyConversation() {
             icon = MimIcon.Lock,
             title = "选择一个会话",
             hint = "左边的对话都是端到端加密的，只有双方设备能解开。",
+        )
+    }
+}
+
+/** 启动即被拒（地址不合法 / 拒绝明文）时的落地页：说明原因与出路，不假装能用。 */
+@Composable
+private fun StartupError(reason: String) {
+    Box(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
+        MimEmptyState(
+            icon = MimIcon.Lock,
+            title = "无法连接到服务端",
+            hint = "$reason\n\n地址由环境变量 MIM_SERVER_URL 指定；" +
+                "只接受 https://，本机回环地址可以用 http://。",
         )
     }
 }

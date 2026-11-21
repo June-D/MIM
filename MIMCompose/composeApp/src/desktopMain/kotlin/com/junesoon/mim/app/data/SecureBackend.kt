@@ -97,14 +97,19 @@ import java.util.UUID
  * <p>限制：历史消息只来自本地缓存；换设备或清空保险库后无法回放旧消息。
  */
 class SecureBackend(
-    private val server: String,
+    serverUrl: String,
     private val vaultRoot: Path = LocalVault.defaultRoot(),
     private val client: HttpClient = HttpClient(CIO) {
         // 服务端要求 sealed 等字段显式出现，默认值必须参与序列化。
         install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; encodeDefaults = true }) }
         install(WebSockets)
     },
+    /** 仅内网调试使用；远端明文连接会被拒绝，见 [ServerUrl]。 */
+    allowInsecure: Boolean = System.getenv("MIM_ALLOW_INSECURE") == "1",
 ) : MessagingBackend {
+
+    /** 规范化后的基地址：去尾斜杠、校验协议（非回环的 http 直接拒绝）。 */
+    private val server: String = ServerUrl.normalize(serverUrl, allowInsecure)
 
     private lateinit var vault: LocalVault
     private lateinit var bundle: RustKeyBundle
@@ -135,7 +140,7 @@ class SecureBackend(
      * （服务端按报文里是否含 `"ping"` 识别）。
      */
     override suspend fun listenPush(onSignal: (PushEvent) -> Unit) {
-        val wsBase = server.replaceFirst("https://", "wss://").replaceFirst("http://", "ws://")
+        val wsBase = ServerUrl.wsBase(server)
         while (currentCoroutineContext().isActive) {
             val connected = runCatching {
                 client.webSocket(
