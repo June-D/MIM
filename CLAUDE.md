@@ -37,6 +37,7 @@ MIMCompose/    Compose 桌面客户端（JVM 17）：传输、缓存、UI 语义
 - `README.md`：产品基调、快速开始、架构、验证基线、文档索引
 - `docs/security.md`：加密方案与安全性质
 - `docs/sealed-sender-design.md`：发送者证书与匿名提交设计
+- `docs/device-sync-design.md`：多设备历史同步设计（未实施，含设备信任模型与分期）
 - `docs/operations.md`：运行、建库、TLS、多实例、限流、密钥轮换
 - `docs/server-api.md`：HTTP 与 WebSocket 契约索引
 - `docs/architecture.md`：目录结构

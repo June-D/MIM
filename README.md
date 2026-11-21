@@ -208,6 +208,7 @@ tools/backup.sh ./backups
 |---|---|
 | [`docs/security.md`](docs/security.md) | 加密方案、棘轮、TOFU、安全性质与已知局限 |
 | [`docs/sealed-sender-design.md`](docs/sealed-sender-design.md) | 发送者证书与匿名提交的设计与实现差异 |
+| [`docs/device-sync-design.md`](docs/device-sync-design.md) | 多设备历史同步：设备信任模型、流程与分期（未实施） |
 | [`docs/operations.md`](docs/operations.md) | 运行、建库、TLS、多实例、限流、密钥轮换、自测 |
 | [`docs/server-api.md`](docs/server-api.md) | HTTP 接口与 WebSocket 通知类型 |
 | [`docs/architecture.md`](docs/architecture.md) | 目录结构与模块职责 |
