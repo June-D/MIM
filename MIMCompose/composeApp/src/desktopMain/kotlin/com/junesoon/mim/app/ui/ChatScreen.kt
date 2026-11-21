@@ -62,6 +62,7 @@ import androidx.compose.ui.input.key.type
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.layout.ContentScale
@@ -505,7 +506,7 @@ fun ChatScreen(
                         .size(40.dp)
                         .clip(CircleShape)
                         .background(
-                            if (draft.text.isBlank()) MimPalette.LineSoft else MimPalette.Teal,
+                            if (draft.text.isBlank()) MimPalette.LineSoft else MimPalette.TealFill,
                         )
                         .mimHoverable(
                             shape = CircleShape,
@@ -522,7 +523,7 @@ fun ChatScreen(
                     MimIcon(
                         MimIcon.Send,
                         size = 17.dp,
-                        tint = if (draft.text.isBlank()) MimPalette.InkSoft else Color(0xFFFDFDFB),
+                        tint = if (draft.text.isBlank()) MimPalette.InkSoft else MimPalette.OnTeal,
                     )
                 }
                 }
@@ -730,12 +731,23 @@ private fun MessageRow(
             Box(
                 modifier = Modifier
                     .clip(shape)
-                    .background(if (mine) MimPalette.BubbleMine else MimPalette.Card)
-                    .border(
-                        width = if (mine) 0.dp else 1.dp,
-                        color = if (mine) Color.Transparent else MimPalette.Line,
-                        shape = shape,
+                    // 对方气泡分层只取一种：浅色用极淡投影「浮」起来，
+                    // 深色投影看不见，改用 1px 边框。两者同时上就是「幽灵卡片」。
+                    .then(
+                        if (mine) {
+                            Modifier
+                        } else if (MimPalette.dark) {
+                            Modifier.border(1.dp, MimPalette.Line, shape)
+                        } else {
+                            Modifier.shadow(
+                                elevation = 1.dp,
+                                shape = shape,
+                                ambientColor = MimPalette.Shadow.copy(alpha = 0.08f),
+                                spotColor = MimPalette.Shadow.copy(alpha = 0.14f),
+                            )
+                        },
                     )
+                    .background(if (mine) MimPalette.BubbleMine else MimPalette.Card)
                     .padding(horizontal = 12.dp, vertical = 8.dp),
             ) {
                 when {

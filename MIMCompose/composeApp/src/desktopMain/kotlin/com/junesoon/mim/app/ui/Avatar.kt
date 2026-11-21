@@ -65,7 +65,7 @@ fun Avatar(
                     .size(size * 0.3f)
                     .clip(CircleShape)
                     .background(Color(0xFF2E9E5B))
-                    .border(2.dp, Color(0xFFFFFFFF), CircleShape),
+                    .border(2.dp, MimPalette.Card, CircleShape),
             )
         }
     }

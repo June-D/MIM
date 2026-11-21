@@ -488,8 +488,8 @@ private fun MimField(
         colors = OutlinedTextFieldDefaults.colors(
             focusedBorderColor = MimPalette.Teal,
             unfocusedBorderColor = MimPalette.Line,
-            focusedContainerColor = Color(0xFFFCFBF8),
-            unfocusedContainerColor = Color(0xFFFCFBF8),
+            focusedContainerColor = MimPalette.Card,
+            unfocusedContainerColor = MimPalette.Card,
             focusedLabelColor = MimPalette.Teal,
             cursorColor = MimPalette.Teal,
         ),
@@ -525,14 +525,14 @@ private fun PrimaryButton(text: String, busy: Boolean, onClick: () -> Unit) {
         onClick = onClick,
         enabled = !busy,
         shape = RoundedCornerShape(12.dp),
-        colors = ButtonDefaults.buttonColors(containerColor = MimPalette.Teal),
+        colors = ButtonDefaults.buttonColors(containerColor = MimPalette.TealFill),
         modifier = Modifier.fillMaxWidth().height(46.dp),
     ) {
         if (busy) {
             CircularProgressIndicator(
                 modifier = Modifier.size(18.dp),
                 strokeWidth = 2.dp,
-                color = Color(0xFFFDFDFB),
+                color = MimPalette.OnTeal,
             )
         } else {
             Text(text, style = MaterialTheme.typography.labelLarge)

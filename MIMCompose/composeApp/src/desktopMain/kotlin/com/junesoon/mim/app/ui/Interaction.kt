@@ -3,6 +3,8 @@ package com.junesoon.mim.app.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.TooltipArea
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -85,7 +87,7 @@ fun MimTooltip(text: String?, content: @Composable () -> Unit) {
             Surface(
                 shape = RoundedCornerShape(6.dp),
                 color = MimPalette.Ink.copy(alpha = 0.92f),
-                contentColor = Color(0xFFFDFDFB),
+                contentColor = MimPalette.Card,
                 shadowElevation = 4.dp,
             ) {
                 Text(
@@ -144,13 +146,17 @@ fun MimIconAction(
                 tint = if (active) MimPalette.Teal else MimPalette.InkSoft,
             )
             if (badge > 0) {
+                // 点状角标：在 31dp 的图标热区里塞数字会压住笔画，
+                // 具体条数在「添加联系人」页里看。
                 Box(
                     modifier = Modifier
                         .align(Alignment.TopEnd)
-                        .padding(top = 1.dp, end = 1.dp),
-                ) {
-                    UnreadBadge(badge)
-                }
+                        .padding(top = 2.dp, end = 2.dp)
+                        .size(7.dp)
+                        .clip(CircleShape)
+                        .background(MimPalette.TealFill)
+                        .border(1.5.dp, MimPalette.Card, CircleShape),
+                )
             }
         }
     }

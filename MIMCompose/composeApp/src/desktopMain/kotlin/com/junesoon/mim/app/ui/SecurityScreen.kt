@@ -145,7 +145,7 @@ fun SecurityScreen(
                             onClick = onStartSetup,
                             enabled = !busy,
                             shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = MimPalette.Teal),
+                            colors = ButtonDefaults.buttonColors(containerColor = MimPalette.TealFill),
                         ) {
                             Text("开启二次验证", style = MaterialTheme.typography.labelLarge)
                         }
@@ -174,7 +174,7 @@ fun SecurityScreen(
                 Text(
                     "开启或关闭二次验证后，其它设备会被强制重新登录；恢复码只显示一次，请离线保存。",
                     style = MaterialTheme.typography.bodySmall,
-                    color = Color(0xFF3E2B12),
+                    color = MimPalette.OnBrassSoft,
                 )
             }
 

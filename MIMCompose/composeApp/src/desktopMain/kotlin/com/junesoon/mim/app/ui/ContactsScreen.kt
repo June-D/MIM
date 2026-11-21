@@ -40,7 +40,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,6 +66,9 @@ fun ContactsScreen(
     onOpenSecurity: () -> Unit,
     onLogout: () -> Unit,
     onTogglePin: (String) -> Unit = {},
+    /** 当前外观（跟随系统 / 浅色 / 深色），点一下循环切换。 */
+    themeLabel: String = "",
+    onCycleTheme: () -> Unit = {},
     /** 分栏布局里当前打开的会话；用于高亮选中行。 */
     selectedId: String? = null,
     modifier: Modifier = Modifier,
@@ -125,6 +127,13 @@ fun ContactsScreen(
                     containerColor = MimPalette.Card,
                 ) {
                     DropdownMenuItem(
+                        text = { MenuRow(MimIcon.Eye, "外观：$themeLabel") },
+                        onClick = {
+                            showMenu = false
+                            onCycleTheme()
+                        },
+                    )
+                    DropdownMenuItem(
                         text = { MenuRow(MimIcon.Device, "我的设备") },
                         onClick = {
                             showMenu = false
@@ -172,7 +181,14 @@ fun ContactsScreen(
         }
 
         when {
-            contacts.isEmpty() -> EmptyContacts(onAddContact)
+            contacts.isEmpty() -> MimEmptyState(
+                icon = MimIcon.Shield,
+                title = "还没有联系人",
+                hint = "输入对方用户名并发送申请，\n同意后即可开始加密对话。",
+                actionLabel = "添加联系人",
+                actionIcon = MimIcon.Plus,
+                onAction = onAddContact,
+            )
             visible.isEmpty() -> Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center,
@@ -327,14 +343,14 @@ fun UnreadBadge(count: Int) {
             .height(18.dp)
             .widthIn(min = 18.dp)
             .clip(CircleShape)
-            .background(MimPalette.Teal)
+            .background(MimPalette.TealFill)
             .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             if (count > 99) "99+" else count.toString(),
             style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
-            color = Color(0xFFFDFDFB),
+            color = MimPalette.OnTeal,
         )
     }
 }
@@ -387,62 +403,3 @@ private fun Banner(text: String, danger: Boolean) {
     }
 }
 
-@Composable
-private fun EmptyContacts(onAddContact: () -> Unit) {
-    // 空态渲染在 312dp 的列表栏里：必须自己收住宽度，否则正文会顶到两边缘。
-    Box(
-        modifier = Modifier.fillMaxSize().padding(horizontal = 24.dp),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(9.dp),
-        ) {
-            Box(
-                modifier = Modifier
-                    .size(54.dp)
-                    .clip(CircleShape)
-                    .background(MimPalette.TealSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                MimIcon(MimIcon.Shield, size = 23.dp, tint = MimPalette.Teal)
-            }
-            Spacer(Modifier.height(2.dp))
-            Text(
-                "还没有联系人",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
-            Text(
-                // 在 228dp 宽里手动断行：让两行长度接近，避免把「开始」这类词拆开。
-                "输入对方用户名并发送申请，\n同意后即可开始加密对话。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.widthIn(max = 228.dp),
-            )
-            Spacer(Modifier.height(6.dp))
-            Row(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(MimPalette.Teal)
-                    .mimHoverable(
-                        shape = RoundedCornerShape(10.dp),
-                        hoverColor = Color(0x1FFFFFFF),
-                        pressColor = Color(0x33FFFFFF),
-                        onClick = onAddContact,
-                    )
-                    .padding(horizontal = 15.dp, vertical = 9.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                MimIcon(MimIcon.Plus, size = 14.dp, tint = Color(0xFFFDFDFB))
-                Text(
-                    "添加联系人",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = Color(0xFFFDFDFB),
-                )
-            }
-        }
-    }
-}

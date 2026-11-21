@@ -1,6 +1,7 @@
 package com.junesoon.mim.app
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +20,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -43,8 +47,10 @@ import com.junesoon.mim.app.ui.ChatScreen
 import com.junesoon.mim.app.ui.ContactsScreen
 import com.junesoon.mim.app.ui.DeviceScreen
 import com.junesoon.mim.app.ui.MimIcon
+import com.junesoon.mim.app.ui.MimEmptyState
 import com.junesoon.mim.app.ui.MimPalette
 import com.junesoon.mim.app.ui.MimTheme
+import com.junesoon.mim.app.ui.ThemeMode
 import com.junesoon.mim.app.ui.SearchScreen
 import com.junesoon.mim.app.ui.SecurityScreen
 import kotlinx.coroutines.delay
@@ -64,6 +70,13 @@ fun MimApp() {
         AppStore(backend, autoRestore = !server.isNullOrBlank())
     }
     val state by store.state.collectAsState()
+    // 外观：默认跟随系统，也可以在「更多」里手动切换（仅本机、不持久化）。
+    var themeMode by remember { mutableStateOf(ThemeMode.System) }
+    val darkTheme = when (themeMode) {
+        ThemeMode.System -> isSystemInDarkTheme()
+        ThemeMode.Light -> false
+        ThemeMode.Dark -> true
+    }
 
     // 提示类消息 4 秒后自动消失，错误则留到用户下次操作。
     LaunchedEffect(state.notice) {
@@ -73,7 +86,10 @@ fun MimApp() {
         }
     }
 
-    MimTheme {
+    MimTheme(dark = darkTheme) {
+        // 调色板是进程级单例（非 Compose 状态），换主题时用 key 重建界面子树，
+        // 保证每个读 MimPalette 的地方都拿到新值；后端与账号状态在外层，不受影响。
+        key(darkTheme) {
         Surface(
             modifier = Modifier
                 .fillMaxSize()
@@ -122,12 +138,20 @@ fun MimApp() {
                 )
 
                 // 列表与聊天并排：桌面上不用来回切换，点左边就换右边。
-                Screen.Contacts -> ConversationWorkspace(state, store, selectedId = null)
+                Screen.Contacts -> ConversationWorkspace(
+                    state = state,
+                    store = store,
+                    selectedId = null,
+                    themeMode = themeMode,
+                    onCycleTheme = { themeMode = themeMode.next() },
+                )
 
                 is Screen.Chat -> ConversationWorkspace(
                     state = state,
                     store = store,
                     selectedId = screen.contactId,
+                    themeMode = themeMode,
+                    onCycleTheme = { themeMode = themeMode.next() },
                 )
 
                 Screen.Search -> SearchScreen(
@@ -178,12 +202,19 @@ fun MimApp() {
                 )
             }
         }
+        }
     }
 }
 
 /** 会话列表 + 聊天详情。宽窗口下的主工作区。 */
 @Composable
-private fun ConversationWorkspace(state: AppState, store: AppStore, selectedId: String?) {
+private fun ConversationWorkspace(
+    state: AppState,
+    store: AppStore,
+    selectedId: String?,
+    themeMode: ThemeMode,
+    onCycleTheme: () -> Unit,
+) {
     Row(modifier = Modifier.fillMaxSize()) {
         ContactsScreen(
             selfName = state.selfName,
@@ -199,6 +230,8 @@ private fun ConversationWorkspace(state: AppState, store: AppStore, selectedId: 
             onTogglePin = store::togglePin,
             selectedId = selectedId,
             modifier = Modifier.width(312.dp),
+            themeLabel = themeMode.label,
+            onCycleTheme = onCycleTheme,
             notice = state.notice,
             error = state.error,
         )
@@ -242,27 +275,11 @@ private fun ConversationWorkspace(state: AppState, store: AppStore, selectedId: 
 /** 右侧空态：没选会话时也不留一块空白。 */
 @Composable
 private fun EmptyConversation() {
-    Box(
-        modifier = Modifier.fillMaxSize().background(MimPalette.Paper),
-        contentAlignment = Alignment.Center,
-    ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(32.dp),
-        ) {
-            Box(
-                modifier = Modifier.size(52.dp).clip(CircleShape).background(MimPalette.TealSoft),
-                contentAlignment = Alignment.Center,
-            ) {
-                MimIcon(MimIcon.Lock, size = 22.dp, tint = MimPalette.Teal)
-            }
-            Text("选择一个会话", style = MaterialTheme.typography.titleMedium)
-            Text(
-                "左边的对话都是端到端加密的，只有双方设备能解开。",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
+    Box(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
+        MimEmptyState(
+            icon = MimIcon.Lock,
+            title = "选择一个会话",
+            hint = "左边的对话都是端到端加密的，只有双方设备能解开。",
+        )
     }
 }
