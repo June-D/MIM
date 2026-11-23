@@ -88,11 +88,37 @@ MIMKIT_SMOKE_OK
 - 返回 0 成功，非 0 是 `MIM_ERR_*`；**参数错与密码学失败分开**（1 vs 2/4/5），不要都当「失败」处理；
 - 消息与状态都是 UTF-8 JSON，加字段不破坏 ABI。
 
+### 与真服务端联调已验证（M1 的 HTTP 路径）
+
+```bash
+cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composealice <密码>
+# · 登录成功（composealice / swift-smoke-…）
+# · 密钥包已发布（身份 + 签名预密钥 + 5 个一次性预密钥）
+# · 设备列表包含本机（共 N 台）
+# · 已注销本次冒烟注册的设备
+# LIVE_SMOKE_OK
+```
+
+这条命令不依赖 Xcode/模拟器，是 iOS 侧与后端的第一条真实链路验证。
+
+**踩过的两个坑（Swift 侧必看）**：
+
+1. **命名风格不是统一的**：Rust DTO 是 `snake_case`，服务端 DTO 是 `camelCase`。
+   `MIMClient` 不能对请求套 `.convertToSnakeCase`，否则 `deviceId` 变成 `device_id`，
+   服务端回「设备标识不能为空」。MimCore（Rust 层）才用 snake_case。
+2. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
+   `POST /prekey/one-time` 返回数字、某些接口是 null。只关心 `status` 的请求
+   用 `MIMEnvelope<IgnoredPayload>` 吞掉 `data`，别为类型匹配反复改结构体。
+
 ## 5. HTTP 接口（按 M1→M3 的调用顺序）
 
 | 阶段 | 接口 | 说明 |
 |---|---|---|
 | M1 登录 | `POST /login/token` | 账号密码 + 设备名 + 可选二次验证码；返回 JWT |
+| M1 发钥 | `POST /device` | 登记设备（`{deviceId, deviceName}`），响应 data 是对象 |
+| | `POST /key` | 身份公钥（**Base64 SPKI**）+ `password` + 能力位 |
+| | `POST /prekey/signed` | `{preKeyId, publicKey, signature}` |
+| | `POST /prekey/one-time` | `[{preKeyId, publicKey}]` |
 | | `GET /user/info` | 校验令牌是否还活着 |
 | | `POST /key/bundle` / `GET /key/{username}` | 上传/拉取预密钥包 |
 | | `GET /user/devices` / `DELETE /user/device/{id}` | 设备列表与注销 |

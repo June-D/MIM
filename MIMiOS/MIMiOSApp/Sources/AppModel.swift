@@ -1,6 +1,7 @@
 import Foundation
 import SwiftUI
 import CryptoKit
+import UIKit
 import MIMKit
 
 /// 界面状态与用例编排。
@@ -29,6 +30,8 @@ final class AppModel: ObservableObject {
 
     private static let identityAccount = "identity-bundle"
     private static let deviceIdAccount = "device-id"
+    /// 「密钥已发布到服务端」的标记：换设备/换钥时才需要重新发布。
+    private static let publishedAccount = "keys-published"
 
     /// 设备标识：iOS 没有 IMEI/序列号可用，这里生成一次并长期保存。
     /// 存 Keychain 而不是 UserDefaults：后者随备份迁移，会让两台设备撞 id。
@@ -60,7 +63,8 @@ final class AppModel: ObservableObject {
             )
             self.client = client
             self.token = token
-            try ensureIdentityBundle()
+            let bundle = try ensureIdentityBundle()
+            try await publishIfNeeded(client: client, bundle: bundle)
             await loadDevices()
         } catch MIMApiError.twoFactorRequired(let message) {
             // 服务端要求二次验证：留在登录页，把输入框露出来。
@@ -91,10 +95,28 @@ final class AppModel: ObservableObject {
         needsTwoFactor = false
     }
 
+    /// 首次登录时把公钥发布到服务端，之后不再重复。
+    ///
+    /// 不发布的话，别人查不到这台设备的预密钥，就永远无法给它发起会话——
+    /// 登录成功但「没人能给你发消息」是 iOS 侧最容易漏掉的一步。
+    /// 注意 `/key` 要求当前密码：只有被盗 JWT 不足以替换身份公钥。
+    private func publishIfNeeded(client: MIMClient, bundle: KeyBundle) async throws {
+        guard keychain.get(account: Self.publishedAccount) == nil else {
+            return
+        }
+        try await client.publishKeys(
+            password: password,
+            deviceName: UIDevice.current.name,
+            bundle: bundle
+        )
+        try? keychain.set(Data("1".utf8), account: Self.publishedAccount)
+    }
+
     /// 本机身份密钥包：首次登录生成并存 Keychain，之后只读取。
     ///
     /// 私钥只在这里出现，且只写 Keychain——不上传、不落 UserDefaults、不进日志。
-    private func ensureIdentityBundle() throws {
+    @discardableResult
+    private func ensureIdentityBundle() throws -> KeyBundle {
         var bundle: KeyBundle
         if let data = keychain.get(account: Self.identityAccount),
            let stored = try? JSONDecoder().decode(KeyBundle.self, from: data) {
@@ -105,6 +127,7 @@ final class AppModel: ObservableObject {
             try keychain.set(data, account: Self.identityAccount)
         }
         identityFingerprint = Self.fingerprint(ofHex: bundle.identity.publicKey)
+        return bundle
     }
 
     /// SPKI DER 的 SHA-256 前 128 位，4 位分组——与桌面端 DeviceFingerprint 同一算法。

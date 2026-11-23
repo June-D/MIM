@@ -521,6 +521,13 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS M1 的 HTTP 链路打通并经真服务端验证：`MIMKitSmoke --login` 跑通
+  「登录 → 登记设备 → 上传身份公钥 + 签名预密钥 + 一次性预密钥 → 设备列表 →
+  注销」。过程中修掉两个真问题：`MIMClient` 误用 snake_case 编码（服务端是
+  camelCase，`deviceId` 被编成 `device_id` 导致 400）；`data` 形状不统一时
+  为类型匹配反复改结构体（改用「忽略 data」的类型）。App 侧首次登录会发布密钥，
+  否则别人查不到预密钥、永远无法给它发起会话。
+
 - iOS M0 完成：`build-ios.sh` 产出 xcframework（设备 + 模拟器 arm64），
   `xcodegen` 生成工程，`MIMiOSApp/build.sh` 编译链接成功（arm64、未签名）。
   过程中解决三个真实障碍：`xcodebuild -runFirstLaunch` 缺失导致插件加载失败、

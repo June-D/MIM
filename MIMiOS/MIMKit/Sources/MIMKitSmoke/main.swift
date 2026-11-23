@@ -27,6 +27,45 @@ func hex(_ value: String) -> Data {
 
 let tag = "gTq0Y2v5Qm9m8Zt0k3Wc2Xr7Lp4Nb1Hs6Jd9Ff2Ka5E"
 
+/// `--login <url> <user> <password>`：对真服务端跑一遍 M1 的 HTTP 路径。
+/// 这是 iOS 侧与后端的第一条真实链路，比看文档可靠。
+func liveSmoke(_ arguments: [String]) async {
+    // arguments[0] 是可执行文件，[1] 是 --login，所以参数从 [2] 开始。
+    guard arguments.count >= 5, let url = URL(string: arguments[2]) else {
+        FileHandle.standardError.write(Data("用法：MIMKitSmoke --login <url> <user> <password>\n".utf8))
+        exit(2)
+    }
+    let user = arguments[3]
+    let password = arguments[4]
+    let deviceId = "swift-smoke-\(Int(Date().timeIntervalSince1970))"
+
+    do {
+        let client = MIMClient(baseURL: url, deviceId: deviceId)
+        _ = try await client.login(username: user, password: password)
+        check(true, "登录成功（\(user) / \(deviceId)）")
+
+        let bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        try await client.publishKeys(password: password, deviceName: "Swift Smoke", bundle: bundle)
+        check(true, "密钥包已发布（身份 + 签名预密钥 + 5 个一次性预密钥）")
+
+        let devices = try await client.devices()
+        check(devices.contains { $0.deviceId == deviceId }, "设备列表包含本机（共 \(devices.count) 台）")
+
+        // 冒烟自己注册的设备要撤掉，否则每跑一次就多一台「幽灵设备」。
+        try await client.revokeDevice(deviceId)
+        check(true, "已注销本次冒烟注册的设备")
+        print("LIVE_SMOKE_OK")
+    } catch {
+        FileHandle.standardError.write(Data("✗ 真实链路失败：\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--login" {
+    await liveSmoke(CommandLine.arguments)
+    exit(0)
+}
+
 do {
     print("MIMKit 冒烟（core \(MimCore.version)）")
 

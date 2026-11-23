@@ -95,12 +95,22 @@ public final class MIMClient: @unchecked Sendable {
         return envelope.data?.devices ?? []
     }
 
-    /// 注销某台设备：`DELETE /user/device/{id}`。
+    /// 注销某台设备：`DELETE /device/{id}`（服务端 DeviceController 的映射）。
     public func revokeDevice(_ id: String) async throws {
-        let envelope: MIMEnvelope<Bool> = try await send(method: "DELETE", path: "/user/device/\(id)")
+        let envelope: MIMEnvelope<Bool> = try await send(method: "DELETE", path: "/device/\(id)")
         guard envelope.status == 200 else {
             throw MIMApiError.failed(envelope.status, envelope.message ?? "注销设备失败")
         }
+    }
+
+    /// 拼请求 URL。
+    ///
+    /// 不用 `appendingPathComponent`：它对 `/` 开头的路径会做转义，拼出
+    /// `%2Flogin%2Ftoken` 这种「unsupported URL」，而且遇到尾斜杠的行为不直观。
+    func url(for path: String) -> URL {
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.path = path.hasPrefix("/") ? path : "/" + path
+        return components?.url ?? baseURL
     }
 
     // MARK: - 传输
@@ -124,8 +134,10 @@ public final class MIMClient: @unchecked Sendable {
         body: B,
         authenticated: Bool = true
     ) async throws -> MIMEnvelope<T> {
+        // 服务端 DTO 是 camelCase（deviceId / publicKey / preKeyId），
+        // 不能套 .convertToSnakeCase——那会把 deviceId 编成 device_id，
+        // 服务端回「设备标识不能为空」。snake_case 只属于 Rust 那层。
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy = .convertToSnakeCase
         return try await perform(
             method: method, path: path,
             body: try encoder.encode(body),
@@ -139,7 +151,7 @@ public final class MIMClient: @unchecked Sendable {
         body: Data?,
         authenticated: Bool
     ) async throws -> MIMEnvelope<T> {
-        var request = URLRequest(url: baseURL.appendingPathComponent(path))
+        var request = URLRequest(url: url(for: path))
         request.httpMethod = method
         request.setValue(deviceId, forHTTPHeaderField: "X-Device-Id")
         if authenticated, let token {
@@ -158,9 +170,12 @@ public final class MIMClient: @unchecked Sendable {
             throw MIMApiError.transport(error.localizedDescription)
         }
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw MIMApiError.transport("HTTP 状态异常")
+            let code = (response as? HTTPURLResponse)?.statusCode ?? -1
+            throw MIMApiError.transport("HTTP \(code)（\(method) \(path)）")
         }
         let decoder = JSONDecoder()
+        // 响应是 camelCase；convertFromSnakeCase 对无下划线的键是恒等变换，
+        // 保留它可以兼容将来出现的 snake_case 字段。
         decoder.keyDecodingStrategy = .convertFromSnakeCase
         do {
             return try decoder.decode(MIMEnvelope<T>.self, from: data)
