@@ -31,6 +31,8 @@ if [[ "$MODE" == "simulator" ]]; then
         exit 1
     fi
     DEST="platform=iOS Simulator,name=${MIM_SIM_NAME:-iPhone 17}"
+    # 模拟器**不能**关签名：CodeSign 缺失时 Keychain 会返回
+    # errSecMissingEntitlement(-34018)，表现是「登录成功但身份指纹一直空」。
     EXTRA=()
 else
     DEST="generic/platform=iOS"

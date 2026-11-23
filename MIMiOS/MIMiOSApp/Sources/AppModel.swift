@@ -25,6 +25,13 @@ final class AppModel: ObservableObject {
     /// 本机身份公钥的短指纹，用于和历史同步确认弹窗里的值比对。
     @Published private(set) var identityFingerprint: String = ""
 
+    /// 仅 DEBUG：用环境变量预填并自动登录，方便在模拟器里截图/联调。
+    /// 用法：`SIMCTL_CHILD_MIM_DEMO_USER=... SIMCTL_CHILD_MIM_DEMO_PASSWORD=... `
+    /// 发布版不会编译这段，也就不会出现「凭据能通过环境变量注入」的路径。
+    #if DEBUG
+    var shouldAutoLogin: Bool = false
+    #endif
+
     private let keychain = Keychain()
     private var client: MIMClient?
 
@@ -44,6 +51,23 @@ final class AppModel: ObservableObject {
         try? keychain.set(Data(generated.utf8), account: Self.deviceIdAccount)
         return generated
     }
+
+    #if DEBUG
+    /// 读环境变量做演示预填；真实使用永远走用户输入。
+    func applyDemoPrefill() {
+        let env = ProcessInfo.processInfo.environment
+        if let server = env["MIM_DEMO_SERVER"], !server.isEmpty {
+            serverURL = server
+        }
+        if let user = env["MIM_DEMO_USER"], !user.isEmpty {
+            username = user
+        }
+        if let pass = env["MIM_DEMO_PASSWORD"], !pass.isEmpty {
+            password = pass
+        }
+        shouldAutoLogin = !username.isEmpty && !password.isEmpty
+    }
+    #endif
 
     func login() async {
         error = nil

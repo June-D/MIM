@@ -91,6 +91,26 @@ swift test
 MIM_KEYCHAIN_TESTS=1 swift test
 ```
 
+## 模拟器实测（2026-11-23）
+
+iPhone 17 / iOS 27.2 模拟器上跑通：登录 → 发布密钥 → 设备列表。
+
+```
+我的设备
+  设备标识  20ca6077-5da0-4857-b05d-35822e6a00ae
+  身份指纹  D928 526F 3219 A038
+  设备（10）MiM Test 本机 / desktop-8d6c009a / …
+```
+
+过程中踩到两个只在 iOS 上才出现的问题：
+
+1. **模拟器不能用 `CODE_SIGNING_ALLOWED=NO`**：没有 CodeSign 时 Keychain 返回
+   `errSecMissingEntitlement(-34018)`，症状是「登录成功但身份指纹一直空、设备列表 0 台」。
+   模拟器保持默认的 ad-hoc 签名即可；真机才需要开发者 Team。
+2. **登录不要放在 `.task {}` 里**：登录一成功界面就切到设备页，`LoginView` 消失时
+   SwiftUI 会取消 `.task` 正在进行的异步工作，表现为发布密钥的请求被取消
+   （`transport("cancelled")`）。用非结构化 `Task { await model.login() }`。
+
 ## 两个环境坑（都遇到过，写下来省时间）
 
 1. **只装了 Command Line Tools 时**，`swift build` 可能报

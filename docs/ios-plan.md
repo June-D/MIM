@@ -56,7 +56,12 @@ Swift 通过 `mim_core.h` 调用；密钥只经过内存，落盘交给 Keychain
   密钥包生成 → 组装首条消息 → 对端解出明文 → 签名 + 篡改被拒（见 `ios-api-map.md`），
   所以 M0 剩下的只是「把它装进 App 并在模拟器里跑起来」
 
-**M1 登录与本地保险库（2~3 天）**
+**M1 登录与本地保险库 —— 已在模拟器跑通（2026-11-23）**
+
+iPhone 17 / iOS 27.2 上验证：登录 → 发布密钥（设备登记 + 身份公钥 + 签名预密钥 +
+一次性预密钥）→ 设备列表 → 密钥包存 Keychain（显示身份指纹）。
+两个 iOS 特有坑记在 `MIMiOS/README.md`：模拟器关签名会让 Keychain 报 -34018；
+登录放在 `.task` 里会被视图切换取消。
 
 > 库层已提前完成：`MIMiOS/MIMKit` 里 `MimCore`（ABI 封装）、`Keychain`、
 > `MIMClient`（登录/设备）都已可编译，`swift run MIMKitSmoke` 通过。

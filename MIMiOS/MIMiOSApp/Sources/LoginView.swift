@@ -52,5 +52,21 @@ struct LoginView: View {
             }
         }
         .navigationTitle("MiM")
+        .onAppear {
+            #if DEBUG
+            model.applyDemoPrefill()
+            #endif
+        }
+        .task {
+            #if DEBUG
+            if model.shouldAutoLogin {
+                model.shouldAutoLogin = false
+                // 必须用「非结构化 Task」：登录成功会立刻把界面换成设备页，
+                // LoginView 消失时 SwiftUI 会取消 `.task` 里正在进行的工作，
+                // 表现为发布密钥请求被取消（transport("cancelled")）。
+                Task { await model.login() }
+            }
+            #endif
+        }
     }
 }

@@ -521,6 +521,13 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS M1 在模拟器（iPhone 17 / iOS 27.2）跑通：登录 → 发布密钥 → 设备列表，
+  密钥包存 Keychain 并显示身份指纹。踩到两个 iOS 特有问题并修掉：
+  模拟器关签名导致 Keychain `-34018`（症状像「登录了但没身份」）；
+  登录写在 `.task` 里会被视图切换取消（`transport("cancelled")`）。
+  另加 DEBUG-only 的环境变量预填（`SIMCTL_CHILD_MIM_DEMO_*`），方便截图与联调，
+  发布版不编译该路径。
+
 - iOS M1 的 HTTP 链路打通并经真服务端验证：`MIMKitSmoke --login` 跑通
   「登录 → 登记设备 → 上传身份公钥 + 签名预密钥 + 一次性预密钥 → 设备列表 →
   注销」。过程中修掉两个真问题：`MIMClient` 误用 snake_case 编码（服务端是
