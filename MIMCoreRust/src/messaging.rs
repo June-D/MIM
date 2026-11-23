@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 /// 与 `RatchetService.ALGORITHM` 一致。
 pub const ALGORITHM: &str = "X3DH-P256-DOUBLE-RATCHET-AES-256-GCM";
 
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct ComposeRequest {
     /// 本设备身份私钥（PKCS#8 DER 十六进制）。
     pub identity_private: String,
@@ -114,7 +114,7 @@ pub fn compose_first_message(request: &ComposeRequest) -> Option<ComposeResponse
 }
 
 /// 接收方拆首条消息：X3DH 回应 + 解密 + 拆证书信封。
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 pub struct OpenFirstRequest {
     pub identity_private: String,
     pub identity_public: String,

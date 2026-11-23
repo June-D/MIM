@@ -32,6 +32,10 @@ Swift 通过 `mim_core.h` 调用；密钥只经过内存，落盘交给 Keychain
 ## 3. 里程碑
 
 **M0 环境与骨架（1 天，取决于 Xcode 是否装好）**
+
+> Swift 侧要调的接口已盘点完毕，见 [`ios-api-map.md`](ios-api-map.md)；
+> C ABI 现有 22 个导出（含首条消息与身份签名），`cargo test --test ffi_abi_test` 可验。
+
 - 装 Xcode（App Store）+ 命令行工具指向它：`sudo xcode-select -s /Applications/Xcode.app`
 - `MIMCoreRust/tools/build-ios.sh` 产出 `MimCore.xcframework`（device + simulator 双架构）
 - 新建 SwiftUI 工程 `MIMiOS`，链接 xcframework，跑通一次 `mim_random_bytes` /

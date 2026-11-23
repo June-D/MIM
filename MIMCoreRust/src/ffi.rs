@@ -580,3 +580,137 @@ pub unsafe extern "C" fn mim_open_sealed(
         crate::session_store::open_sealed_message,
     )
 }
+
+// ---------------------------------------------------------------------------
+// iOS / 非 JVM 语言需要的入口
+//
+// 桌面端走 JNI，iOS 只能走 C ABI（Swift 通过头文件调）。下面四个函数是
+// 「首条消息握手」与「身份签名」在 iOS 上的必需项，逻辑全部复用 messaging / keys，
+// 这里只做 JSON 编解码与缓冲交接，避免出现第二套协议实现。
+// ---------------------------------------------------------------------------
+
+/// 把 C 指针 + 长度读成 Vec；空指针或超长直接判为非法参数，不猜。
+unsafe fn read_bytes(ptr: *const u8, len: usize) -> Option<Vec<u8>> {
+    if ptr.is_null() || len == 0 {
+        return None;
+    }
+    Some(std::slice::from_raw_parts(ptr, len).to_vec())
+}
+
+/// 组装首条消息（X3DH + 发送者证书 + 双棘轮）。请求/响应都是 JSON，与 JNI 同一套 DTO。
+///
+/// 返回码：MIM_OK / MIM_ERR_INVALID_ARG（JSON 或指针不合法）/ MIM_ERR_HANDSHAKE。
+#[no_mangle]
+pub unsafe extern "C" fn mim_compose_first_message(
+    request_json: *const u8,
+    request_len: usize,
+    out_json: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let raw = match read_bytes(request_json, request_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let request: crate::messaging::ComposeRequest = match serde_json::from_slice(&raw) {
+        Ok(v) => v,
+        Err(_) => return MIM_ERR_INVALID_ARG,
+    };
+    match crate::messaging::compose_first_message(&request) {
+        Some(response) => match serde_json::to_vec(&response) {
+            Ok(json) => give_bytes(json, out_json, out_len),
+            Err(_) => MIM_ERR_STATE,
+        },
+        None => MIM_ERR_HANDSHAKE,
+    }
+}
+
+/// 打开首条消息，返回 JSON（含会话状态与明文）。
+///
+/// 返回码：MIM_OK / MIM_ERR_INVALID_ARG / MIM_ERR_DECRYPT（握手或解密失败）。
+#[no_mangle]
+pub unsafe extern "C" fn mim_open_first_message(
+    request_json: *const u8,
+    request_len: usize,
+    out_json: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let raw = match read_bytes(request_json, request_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let request: crate::messaging::OpenFirstRequest = match serde_json::from_slice(&raw) {
+        Ok(v) => v,
+        Err(_) => return MIM_ERR_INVALID_ARG,
+    };
+    match crate::messaging::open_first_message(&request) {
+        Some(response) => match serde_json::to_vec(&response) {
+            Ok(json) => give_bytes(json, out_json, out_len),
+            Err(_) => MIM_ERR_STATE,
+        },
+        None => MIM_ERR_DECRYPT,
+    }
+}
+
+/// 用身份私钥签名（ECDSA P-256 / SHA-256，DER 后 Base64）。
+///
+/// `identity_private_hex` 是 PKCS#8 DER 的十六进制文本（与密钥包里的一致）。
+/// 输出是 Base64 文本字节，调用方用 mim_bytes_free 释放。
+#[no_mangle]
+pub unsafe extern "C" fn mim_sign_with_identity(
+    identity_private_hex: *const u8,
+    identity_private_len: usize,
+    payload: *const u8,
+    payload_len: usize,
+    out_signature: *mut *mut u8,
+    out_len: *mut usize,
+) -> i32 {
+    let private = match read_bytes(identity_private_hex, identity_private_len) {
+        Some(v) => match String::from_utf8(v) {
+            Ok(text) => text,
+            Err(_) => return MIM_ERR_INVALID_ARG,
+        },
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let payload = match read_bytes(payload, payload_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    match crate::keys::sign_payload(&private, &payload) {
+        Some(signature) => give_bytes(signature.into_bytes(), out_signature, out_len),
+        None => MIM_ERR_STATE,
+    }
+}
+
+/// 验证身份签名：MIM_OK 表示有效，MIM_ERR_STATE 表示无效。
+///
+/// 任何解析失败都返回 MIM_ERR_INVALID_ARG，不把「格式错」和「签名错」混在一起。
+#[no_mangle]
+pub unsafe extern "C" fn mim_verify_with_identity(
+    identity_public: *const u8,
+    identity_public_len: usize,
+    payload: *const u8,
+    payload_len: usize,
+    signature: *const u8,
+    signature_len: usize,
+) -> i32 {
+    let public = match read_bytes(identity_public, identity_public_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let payload = match read_bytes(payload, payload_len) {
+        Some(v) => v,
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    let signature = match read_bytes(signature, signature_len) {
+        Some(v) => match String::from_utf8(v) {
+            Ok(text) => text,
+            Err(_) => return MIM_ERR_INVALID_ARG,
+        },
+        None => return MIM_ERR_INVALID_ARG,
+    };
+    if crate::keys::verify_payload(&public, &payload, &signature) {
+        MIM_OK
+    } else {
+        MIM_ERR_STATE
+    }
+}

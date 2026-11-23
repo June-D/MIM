@@ -116,6 +116,37 @@ int32_t mim_state_decrypt(const uint8_t *blob, size_t blob_len,
                           const uint8_t *key, size_t key_len,
                           uint8_t **out_plaintext, size_t *out_len);
 
+/*
+ * 首条消息（X3DH）：iOS 走这两个入口，不再经过 JNI。
+ *
+ * 请求/响应都是 UTF-8 JSON，字段与 `src/messaging.rs` 的 DTO 一一对应
+ * （ComposeRequest / ComposeResponse / OpenFirstRequest / OpenFirstResponse）。
+ * 返回 MIM_ERR_HANDSHAKE / MIM_ERR_DECRYPT 表示对端参数或密文有问题，
+ * MIM_ERR_INVALID_ARG 表示 JSON 或指针不合法——两者不要混为一谈。
+ */
+int32_t mim_compose_first_message(const uint8_t *request_json, size_t request_len,
+                                  uint8_t **out_json, size_t *out_len);
+
+int32_t mim_open_first_message(const uint8_t *request_json, size_t request_len,
+                               uint8_t **out_json, size_t *out_len);
+
+/*
+ * 身份签名（多设备历史同步的副本归属）。
+ *
+ * identity_private_hex 是 PKCS#8 DER 的十六进制文本，输出是 Base64 文本字节；
+ * 验签返回 MIM_OK 表示有效、MIM_ERR_STATE 表示签名无效、
+ * MIM_ERR_INVALID_ARG 表示参数或编码有问题。
+ */
+int32_t mim_sign_with_identity(const uint8_t *identity_private_hex,
+                               size_t identity_private_len,
+                               const uint8_t *payload, size_t payload_len,
+                               uint8_t **out_signature, size_t *out_len);
+
+int32_t mim_verify_with_identity(const uint8_t *identity_public,
+                                 size_t identity_public_len,
+                                 const uint8_t *payload, size_t payload_len,
+                                 const uint8_t *signature, size_t signature_len);
+
 /* 用安全随机填充调用方缓冲。 */
 int32_t mim_random_bytes(uint8_t *out, size_t len);
 

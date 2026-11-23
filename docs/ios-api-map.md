@@ -1,0 +1,107 @@
+# iOS 客户端要用的接口地图
+
+> 目的：Xcode 装好之前，先把「Swift 侧要调什么、调完是第几步」定下来。
+> 全部内容来自现有代码，不是设想——C ABI 的每一条都能在 `MIMCoreRust/include/mim_core.h`
+> 找到，HTTP 每一条都能在 `docs/server-api.md` 找到。
+
+## 1. 结论：密码学这层已经够用
+
+`libmim_core_rust` 现在导出 **22 个 `mim_*` 符号**，其中首条消息（X3DH）与身份签名
+在 2026-11 补齐——之前只有 JNI 有，iOS 拿不到。补齐后 iOS 不需要 JNI，
+也不需要为了「能跑起来」重写任何密码学。
+
+验证方式（不需要 Xcode）：`cargo test --test ffi_abi_test`，4 项用例直接调 C ABI：
+
+```
+first_message_round_trips_through_c_abi ... ok
+identity_signature_round_trips_through_c_abi ... ok
+garbage_input_returns_error_codes ... ok
+key_bundle_generation_works_through_c_abi ... ok
+```
+
+## 2. C ABI 清单（Swift 侧 `import MimCore`）
+
+| 函数 | 用途 | iOS 何时调 |
+|---|---|---|
+| `mim_key_bundle_generate(version, opk_count, ...)` | 生成身份密钥 + 签名预密钥 + 一次性预密钥（JSON） | 首次登录，上传到 `/key/bundle` |
+| `mim_signed_pre_key_verify(...)` | 校验对端签名预密钥 | 收到对端 bundle 后 |
+| `mim_compose_first_message(request_json)` | 组装首条消息（X3DH + 证书信封 + 双棘轮） | 与该对端的第一条消息 |
+| `mim_open_first_message(request_json)` | 拆首条消息，拿回明文与会话状态 | 收到对端第一条消息 |
+| `mim_initiator_session` / `mim_responder_session` | 老接口：直接持会话句柄 | 暂不需要（首条消息接口已封装） |
+| `mim_encrypt` / `mim_decrypt` | 会话内加解密（句柄式） | 同上，走 `*_sealed` 更省事 |
+| `mim_compose_sealed` / `mim_open_sealed` | 会话内加解密（JSON 进 JSON 出，带会话状态） | 后续每条消息 |
+| `mim_session_store_insert` | 把会话状态并入存储 JSON（按 peer + device + tag 索引） | 首条消息之后 |
+| `mim_session_save` / `mim_session_load` | 会话状态落盘/读取 | 冷启动恢复 |
+| `mim_initiator_pubkeys` | 导出首条消息要携带的公开参数 | 首条消息组装时内部用 |
+| `mim_state_encrypt` / `mim_state_decrypt` | 用 Keychain 里的 32 字节密钥加密本地状态 | 本地保险库 |
+| `mim_sign_with_identity` / `mim_verify_with_identity` | 身份签名/验签（多设备同步副本归属） | 同步历史时 |
+| `mim_random_bytes` / `mim_bytes_free` / `mim_session_free` / `mim_version` | 随机数、释放、版本 | 基础设施 |
+
+约定（头文件里写明，Swift 侧要遵守）：
+
+- 所有 `const uint8_t *` 输入都带长度，不要求 NUL 结尾；
+- 输出缓冲由库分配，**必须** `mim_bytes_free` 归还；
+- 返回 0 成功，非 0 是 `MIM_ERR_*`；**参数错与密码学失败分开**（1 vs 2/4/5），不要都当「失败」处理；
+- 消息与状态都是 UTF-8 JSON，加字段不破坏 ABI。
+
+## 3. HTTP 接口（按 M1→M3 的调用顺序）
+
+| 阶段 | 接口 | 说明 |
+|---|---|---|
+| M1 登录 | `POST /login/token` | 账号密码 + 设备名 + 可选二次验证码；返回 JWT |
+| | `GET /user/info` | 校验令牌是否还活着 |
+| | `POST /key/bundle` / `GET /key/{username}` | 上传/拉取预密钥包 |
+| | `GET /user/devices` / `DELETE /user/device/{id}` | 设备列表与注销 |
+| M2 文本 | `POST /message/send` / `GET /message/history` | 发送与拉历史 |
+| | `POST /message/read` | 已读（带 `clientMsgIds` 才能跨设备副本） |
+| | `POST /message/recall` | 撤回（一次性凭证） |
+| | `POST /message/clear` / `GET /message/clear` | 清除范围与对账 |
+| | `WS /websocket/{deviceId}` | 推送（见第 4 节） |
+| M3 媒体 | `POST /media` | ≤8MB 单请求上传密文 |
+| | `POST /media/upload/init` + `PUT .../{index}` + `POST .../complete` | >8MB 分片（64KB~8MB 一片） |
+| | `GET /media/{id}` | 下载密文 |
+| | `DELETE /media/{id}` | 清除/撤回后释放 |
+| 其它 | `GET /user/avatar/{username}` / `POST /user/avatar` | 头像（非端到端加密） |
+| | `POST /message/sync` / `POST /message/sync/request` | 多设备历史同步 |
+
+## 4. WebSocket 推送类型
+
+| 类型 | 含义 | iOS 侧动作 |
+|---|---|---|
+| `100010` | 新消息 | 拉增量 → 解密 → 入库 + 本地通知 |
+| `100011` | 已读回执 | 更新自己发出的消息状态 |
+| `100014` | 撤回 | 替换为「已撤回」 |
+| `100019` | 对方清除会话 | 清本地缓存 + 释放自己上传的密文 |
+| `100022` | 另一台设备请求历史 | 弹确认框（显示设备 id + 指纹） |
+| `100024` | 另一台设备已读 | 清该会话红点 + 重拉未读 |
+
+## 5. 三条时序（照这个顺序写，少走弯路）
+
+1. **首次登录**：`login/token` → `key_bundle_generate` → `POST /key/bundle` →
+   Keychain 存私钥 → 若本机无历史则 `POST /message/sync/request`。
+2. **发消息**（已与会话）：`compose_sealed` → `POST /message/send` →
+   `session_store_insert` → 本地入库（带 `syncedFrom = null`）。
+3. **收消息**（首条与会话内分开）：`GET /message/history` →
+   `syncFromDevice == null` 时，若 `sessionId` 未知走 `open_first_message`，
+   否则走 `open_sealed` → 验签/归属 → 入库。
+
+## 6. iOS 侧要自己实现的部分
+
+- **Keychain**：身份私钥、设备标识、本地状态密钥（`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`）；
+- **网络**：`URLSession` + `URLSessionWebSocketTask`（wss）；
+- **JSON**：与 `src/messaging.rs` 的 DTO 字段逐字对齐（可在 Rust 侧生成夹具防漂移）；
+- **分片上传**：与服务端一致的长度校验（末片是余数）；
+- **后台推送**：APNs（需 Apple 开发者账号签发 `.p8`，服务端要加通道；MVP 可先不做）。
+
+## 7. 已知缺口（诚实清单）
+
+| 缺口 | 影响 | 什么时候补 |
+|---|---|---|
+| APNs 服务端通道 | 后台收不到推送（前台 WSS 正常） | M4 |
+| C ABI 无「批量补一次性预密钥」 | 预密钥耗尽后需重新生成整包 | M2 之后再评估 |
+| 本地状态加密依赖调用方提供 nonce | iOS 侧必须每次新生成（12 字节），否则复用 nonce 会毁掉 GCM 安全性 | M1 就注意 |
+
+> 第 7 节第 3 条不是小问题：`mim_state_encrypt` 把 nonce 交给调用方，
+> 是为了让平台密钥不出 Keychain；代价是**每次加密都必须换新 nonce**。
+> Swift 侧建议把它封装成「只能通过 `mim_random_bytes` 取 nonce」的 API，
+> 从类型上避免手写常量。

@@ -197,6 +197,9 @@ java -cp "/tmp/e2e:target/classes:$(cat /tmp/cp.txt)" \
 阻塞点：本机未安装 Xcode（只有 Command Line Tools），Rust 交叉编译在链接阶段
 会撞到 macOS SDK。装好 Xcode 后先跑 `MIMCoreRust/tools/build-ios.sh --check`。
 
+已就绪：C ABI 22 个导出（含首条消息、身份签名），`cargo test --test ffi_abi_test`
+在 macOS 上即可验证；Swift 侧要调的接口见 `docs/ios-api-map.md`。
+
 ### 当前优先级（2026-11）
 
 1. 移动端（Android/iOS）与系统密钥库；需要先装 Android SDK。

@@ -211,6 +211,7 @@ tools/backup.sh ./backups
 | [`docs/sealed-sender-design.md`](docs/sealed-sender-design.md) | 发送者证书与匿名提交的设计与实现差异 |
 | [`docs/device-sync-design.md`](docs/device-sync-design.md) | 多设备历史同步：设备信任模型、流程与分期（未实施） |
 | [`docs/ios-plan.md`](docs/ios-plan.md) | iOS 立项稿：环境实测、架构选型、里程碑与风险 |
+| [`docs/ios-api-map.md`](docs/ios-api-map.md) | iOS 接口地图：C ABI 清单、HTTP/WS 接口、三条时序与已知缺口 |
 | [`docs/deploy.md`](docs/deploy.md) | **从零部署**：拓扑选择、配置、验证、备份恢复、升级回滚、排障 |
 | [`docs/operations.md`](docs/operations.md) | 运行、建库、TLS、多实例、限流、密钥轮换、自测 |
 | [`docs/server-api.md`](docs/server-api.md) | HTTP 接口与 WebSocket 通知类型 |

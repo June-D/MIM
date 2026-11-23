@@ -521,6 +521,13 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS 准备工作（不需要 Xcode 就能做的那部分）：C ABI 补齐首条消息与身份签名
+  四个导出（`mim_compose_first_message` / `mim_open_first_message` /
+  `mim_sign_with_identity` / `mim_verify_with_identity`）——此前只有 JNI 有，
+  iOS 拿不到会直接卡在 M1。新增 `tests/ffi_abi_test.rs` 直接调 C ABI 验证
+  X3DH 往返、签名往返与非法输入的错误码；`docs/ios-api-map.md` 把 Swift 侧
+  要用的 C ABI、HTTP/WS 接口与三条时序整理成清单。
+
 - 移动端立项（iOS 优先）：`docs/ios-plan.md` 记录环境实测（本机无 Xcode，
   Rust 交叉编译在链接阶段失败的真实报错）、架构选择（SwiftUI + Rust 静态库，
   协议核心已有 C ABI 不必重写密码学）、五个里程碑与需要账号/签名的前置条件；
