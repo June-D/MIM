@@ -155,6 +155,14 @@ interface MessagingBackend {
      */
     fun dropClearedMessages(contactId: String, cursor: Long, clearedAt: Long): Boolean = false
 
+    /**
+     * 本机在该会话里**自己发出**、且带媒体的消息的媒体 id。
+     *
+     * 清除对账时在丢弃前后各取一次，差集才是这次真正被清掉的密文；
+     * 只报自己上传的——服务端删除接口也只允许上传者操作。
+     */
+    fun ownMediaIds(contactId: String): List<String> = emptyList()
+
     /** 只丢弃本地缓存，不动服务端（对方清除会话时用）。 */
     fun forgetLocalConversation(contactId: String) = Unit
 

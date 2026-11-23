@@ -665,6 +665,69 @@ class AppStoreTest {
         assertTrue(store.state.value.avatars["alice"] == null)
     }
 
+    /**
+     * 登录对账丢掉缓存时，也要释放「这次真被清掉」的本机媒体密文。
+     *
+     * 之前只覆盖了推送与主动清除，这条路径漏了，只能靠服务端 30 天保留期兜底。
+     * 注意不能把整段会话的媒体都释放：清除点之后的消息附件还得能打开。
+     */
+    @Test
+    fun reconcile_releases_only_media_dropped_by_clear() {
+        val mine = mutableListOf("mine-dropped-0001", "mine-kept-0002")
+        var released: List<String> = emptyList()
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, listOf(Contact("bob", "bob", "")))
+
+            override suspend fun clearPoints(
+                token: String,
+                peers: List<String>,
+            ): Map<String, ClearPoint> = mapOf("bob" to ClearPoint(100, 5_000))
+
+            override fun ownMediaIds(contactId: String): List<String> = mine.toList()
+
+            override fun dropClearedMessages(
+                contactId: String,
+                cursor: Long,
+                clearedAt: Long,
+            ): Boolean {
+                // 模拟：清除点之前的那条被丢掉，之后的留下。
+                mine.remove("mine-dropped-0001")
+                return true
+            }
+
+            override suspend fun history(token: String, contactId: String): List<ChatMessage> = listOf(
+                ChatMessage(
+                    "m2",
+                    true,
+                    "[图片]",
+                    "10:05",
+                    epochMs = 6_000,
+                    kind = "image",
+                    media = MediaAttachment("mine-kept-0002", "key", "image/png", 12),
+                ),
+            )
+
+            override suspend fun releaseUploadedMedia(token: String, mediaIds: List<String>) {
+                released = mediaIds
+            }
+
+            override fun hasLocalHistory(): Boolean = true
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+
+        assertEquals(listOf("mine-dropped-0001"), released)
+    }
+
     @Test
     fun pinned_contact_sorts_before_recent_ones() {
         val store = store()

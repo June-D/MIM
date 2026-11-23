@@ -1220,17 +1220,32 @@ class AppStore(
         if (points.isEmpty()) {
             return
         }
-        val dropped = points.filter { (peer, point) ->
-            runCatching {
+        val refreshed = mutableMapOf<String, List<ChatMessage>>()
+        val released = mutableListOf<String>()
+        for ((peer, point) in points) {
+            // 丢弃前后各取一次「我上传的媒体」：差集才是这次真被清掉的密文。
+            // 不能直接把整段会话的媒体都释放——清除点之前的才是被删的，
+            // 之后的消息还得能正常打开附件。
+            val mineBefore = runCatching { backend.ownMediaIds(peer) }.getOrDefault(emptyList())
+            val changed = runCatching {
                 backend.dropClearedMessages(peer, point.clearedBeforeId, point.updatedAt)
             }.getOrDefault(false)
+            if (!changed) {
+                continue
+            }
+            // 缓存已经变了，重新读一遍本地历史，界面才会同步（预览、未读分界都跟着走）。
+            val fresh = runCatching { backend.history(currentToken, peer) }
+                .getOrDefault(emptyList())
+            refreshed[peer] = fresh
+            val remaining = fresh.filter { it.fromMe }.mapNotNull { it.media?.id }.toSet()
+            released += mineBefore.filterNot { it in remaining }
         }
-        if (dropped.isEmpty()) {
+        if (refreshed.isEmpty()) {
             return
         }
-        // 缓存已经变了，重新读一遍本地历史，界面才会同步（预览、未读分界都跟着走）。
-        val refreshed = dropped.keys.associateWith { peer ->
-            runCatching { backend.history(currentToken, peer) }.getOrDefault(emptyList())
+        if (released.isNotEmpty()) {
+            // 之前只在推送 / 主动清除时释放，登录对账这条路径漏了，只能靠保留期兜底。
+            releaseMedia(currentToken, released.distinct())
         }
         _state.update { current ->
             val next = current.copy(messages = current.messages + refreshed)

@@ -456,6 +456,14 @@ class SecureBackend(
     }
 
     /**
+     * 本机发出的媒体消息，媒体 id 藏在缓存的载荷里（`CachedMessage.payload`）。
+     */
+    override fun ownMediaIds(contactId: String): List<String> =
+        messages.filter { it.contactId == contactId && it.fromMe }
+            .mapNotNull { cached -> cached.payload?.let(::parsePayload)?.media?.id }
+            .distinct()
+
+    /**
      * 丢掉该对端在清除点之前的本机缓存。
      *
      * 有服务端 id 的按 id 判断；旧版本写入的缓存没有 id，按清除时间兜底
