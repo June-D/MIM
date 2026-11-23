@@ -193,6 +193,10 @@ MIM_NATIVE_LIB=../MIMCoreRust/target/release/libmim_core_rust.dylib \
   （两者只取其一，避免「1px 边 + 宽投影」的幽灵卡片）。
 - 调色板是进程级单例（不是 Compose 状态），所以切换主题用 `key(darkTheme)` 重建界面
   子树，保证所有读色的地方都拿到新值；后端与账号状态在外层，不受影响。
+- 登录页左侧的品牌区**有意不随主题翻转**（品牌记忆点），但颜色也收进 `Theme.kt`：
+  `BrandTop/BrandBottom` 深色下整体提亮一档，避免和深色页面底糊在一起；
+  接缝处画一条 `BrandLine` 亮线；装饰环半径比面板大，必须 `clipToBounds()`，
+  否则会溢到右侧表单区（浅色纸上尤其明显）。
 - 空态收进 `ui/EmptyState.kt`：圆底 54dp、图标 22dp、说明限宽 236dp 居中、
   可选主操作，左右两栏共用同一规格。
 

@@ -40,6 +40,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -361,12 +362,21 @@ fun AuthScreen(
 @Composable
 private fun BrandPanel(modifier: Modifier = Modifier) {
     Box(
-        modifier = modifier.background(
-            Brush.verticalGradient(listOf(Color(0xFF0A3B33), Color(0xFF10614F))),
-        ),
+        modifier = modifier
+            .background(Brush.verticalGradient(listOf(MimPalette.BrandTop, MimPalette.BrandBottom)))
+            // 装饰环的半径比面板还大，不裁会溢到右侧表单区，在浅色纸上很显眼。
+            .clipToBounds(),
     ) {
+        // 接缝：深色下页面底色与品牌区都偏深，一条极淡亮线把两栏分开。
+        Box(
+            modifier = Modifier
+                .align(Alignment.CenterEnd)
+                .fillMaxHeight()
+                .width(1.dp)
+                .background(MimPalette.BrandLine),
+        )
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val base = Color(0x18FFFFFF)
+            val base = MimPalette.BrandLine
             for (index in 1..4) {
                 drawCircle(
                     color = base,
@@ -383,13 +393,13 @@ private fun BrandPanel(modifier: Modifier = Modifier) {
             Text(
                 "MiM",
                 style = MaterialTheme.typography.displaySmall,
-                color = Color(0xFFFDFDFB),
+                color = MimPalette.OnBrand,
             )
             Spacer(Modifier.height(10.dp))
             Text(
                 "私密对话，只属于你们。",
                 style = MaterialTheme.typography.titleLarge,
-                color = Color(0xFFDDEBE6),
+                color = MimPalette.OnBrandSoft,
             )
             Spacer(Modifier.height(28.dp))
             SecurityPoint("密钥只在本机", "服务器不保存私钥，也无法代你解密。")
@@ -399,7 +409,7 @@ private fun BrandPanel(modifier: Modifier = Modifier) {
             Text(
                 "服务器只转发密文，并保存收发所必需的元数据。",
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFFB9D4CC),
+                color = MimPalette.OnBrandFaint,
             )
         }
     }
@@ -412,17 +422,17 @@ private fun SecurityPoint(title: String, detail: String) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(
-            modifier = Modifier.size(30.dp).background(Color(0x22FFFFFF), CircleShape),
+            modifier = Modifier.size(30.dp).background(MimPalette.BrandChip, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
-            MimIcon(MimIcon.Lock, size = 15.dp, tint = Color(0xFFDDEBE6))
+            MimIcon(MimIcon.Lock, size = 15.dp, tint = MimPalette.OnBrandSoft)
         }
         Column {
-            Text(title, style = MaterialTheme.typography.labelLarge, color = Color(0xFFF4FAF7))
+            Text(title, style = MaterialTheme.typography.labelLarge, color = MimPalette.OnBrand)
             Text(
                 detail,
                 style = MaterialTheme.typography.labelSmall,
-                color = Color(0xFFB9D4CC),
+                color = MimPalette.OnBrandFaint,
             )
         }
     }

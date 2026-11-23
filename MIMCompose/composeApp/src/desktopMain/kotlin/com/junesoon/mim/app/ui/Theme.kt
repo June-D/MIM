@@ -82,6 +82,23 @@ object MimPalette {
     val BubbleMine: Color get() = if (dark) Color(0xFF1C6F5F) else Color(0xFF0F5B4F)
     val BubblePeer: Color get() = if (dark) Color(0xFF232722) else Color(0xFFFFFFFF)
 
+    // ---------------- 品牌区 ----------------
+
+    /**
+     * 登录页左侧那块深青是「品牌」，不跟随主题翻转：两套主题下都保持深底白字，
+     * 品牌记忆点不会因为切主题而变。深色下页面底色本就很深，两块深色相邻会糊在
+     * 一起，所以深色下把渐变整体提亮一档，并在接缝处画一条极淡的亮线（[BrandLine]）。
+     */
+    val BrandTop: Color get() = if (dark) Color(0xFF0C3B33) else Color(0xFF0A3B33)
+    val BrandBottom: Color get() = if (dark) Color(0xFF175F4E) else Color(0xFF10614F)
+    val OnBrand: Color = Color(0xFFFDFDFB)
+    val OnBrandSoft: Color = Color(0xFFDDEBE6)
+    val OnBrandFaint: Color = Color(0xFFB9D4CC)
+    val BrandChip: Color = Color(0x22FFFFFF)
+
+    /** 品牌区上的装饰环与接缝线；深色下要更亮一点才看得见。 */
+    val BrandLine: Color get() = if (dark) Color(0x2EFFFFFF) else Color(0x18FFFFFF)
+
     // ---------------- 状态 ----------------
 
     /** 悬停 / 按下底色：浅色用主色淡染，深色用白光提亮。 */
