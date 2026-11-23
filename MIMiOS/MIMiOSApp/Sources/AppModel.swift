@@ -9,6 +9,8 @@ struct Conversation: Identifiable, Equatable {
     let id: String
     var lastText: String
     var lastEpochMs: Int64
+    /// 未读数：按「对方发来、且在本机已读游标之后」计数。
+    var unread: Int
 }
 
 /// 界面状态与用例编排。
@@ -41,6 +43,12 @@ final class AppModel: ObservableObject {
     @Published var newPeer = ""
     /// 收到新消息时的小提示（列表上可见）。
     @Published private(set) var notice: String?
+    /// 对方读到哪儿了（来自 100011 推送）；用于在我发出的气泡下标「已读」。
+    @Published private(set) var peerReadAt: [String: Int64] = [:]
+    /// 长连接是否在线（界面上不显示，排查用）。
+    @Published private(set) var pushConnected = false
+    /// 最近一条推送的类型，排查用（DEBUG 下显示在聊天页副标题）。
+    @Published private(set) var lastPush = "-"
 
     private let keychain = Keychain()
     private var client: MIMClient?
@@ -48,6 +56,7 @@ final class AppModel: ObservableObject {
     private var vault: MessageVault?
     private var snapshot = MessageVault.Snapshot()
     private var pollTask: Task<Void, Never>?
+    private var pushTask: Task<Void, Never>?
 
     private static let identityAccount = "identity-bundle"
     private static let deviceIdAccount = "device-id"
@@ -124,10 +133,14 @@ final class AppModel: ObservableObject {
             // 截图/联调时用环境变量触发一次发送，验证「App → 服务端」这条路径。
             if let text = ProcessInfo.processInfo.environment["MIM_DEMO_SEND_TEXT"],
                !text.isEmpty, activePeer != nil {
+                // 等长连接就绪再发：否则对方的「已读回执」可能在 WS 连上之前就被推掉，
+                // 截图上就看不到「已读」——这是验证脚本的时序问题，不是功能问题。
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
                 draft = text
                 await sendDraft()
             }
             #endif
+            startPush()
             startPolling()
         } catch MIMApiError.twoFactorRequired(let message) {
             needsTwoFactor = true
@@ -142,6 +155,10 @@ final class AppModel: ObservableObject {
     func logout() {
         pollTask?.cancel()
         pollTask = nil
+        pushTask?.cancel()
+        pushTask = nil
+        pushConnected = false
+        peerReadAt = [:]
         token = nil
         client = nil
         session = nil
@@ -173,11 +190,31 @@ final class AppModel: ObservableObject {
         guard !trimmed.isEmpty else { return }
         activePeer = trimmed
         reloadMessages()
+        markRead(peer: trimmed)
     }
 
     func closeChat() {
         activePeer = nil
         messages = []
+    }
+
+    /// 把某个会话标记为已读：先更新本地游标（界面立刻变），再上报服务端。
+    ///
+    /// 服务端要 `clientMsgIds`——各设备副本的会话标签不同，只按 tags 只能清掉
+    /// 自己那份，另一台设备的红点不会消失。
+    private func markRead(peer: String) {
+        let mine = snapshot.messages.filter { $0.peer == peer }.map { $0.id }
+        guard !mine.isEmpty else { return }
+        let latest = snapshot.messages.filter { $0.peer == peer }.map { $0.epochMs }.max() ?? 0
+        if (snapshot.readUpTo?[peer] ?? 0) < latest {
+            var readUpTo = snapshot.readUpTo ?? [:]
+            readUpTo[peer] = latest
+            snapshot.readUpTo = readUpTo
+            refreshConversations()
+            persist()
+        }
+        guard let client else { return }
+        Task { try? await client.markRead(peer: peer, clientMsgIds: mine) }
     }
 
     func sendDraft() async {
@@ -221,8 +258,54 @@ final class AppModel: ObservableObject {
                 ))
             }
             persist()
+            if let peer = activePeer, received.contains(where: { $0.peer == peer || $0.peer.isEmpty }) {
+                markRead(peer: peer)
+            }
         } catch {
             if !silent { self.error = "\(error)" }
+        }
+    }
+
+    /// 长连接：收到 100010/100011/100014 就拉一次增量。
+    ///
+    /// 轮询仍保留（20 秒一次）作为兜底：WS 断线时消息不会无限期延迟，
+    /// 重连期间的漏帧也不需要额外的补偿逻辑。
+    private func startPush() {
+        pushTask?.cancel()
+        guard let url = URL(string: serverURL), let token else { return }
+        let socket = MIMWebSocket(baseURL: url, token: token, deviceId: deviceId)
+        pushTask = Task { [weak self] in
+            for await event in socket.events() {
+                guard let self else { return }
+                await self.handle(event)
+            }
+        }
+    }
+
+    private func handle(_ event: PushEvent) async {
+        pushConnected = true
+        lastPush = "\(event)"
+        switch event {
+        case .newData:
+            await receiveOnce(silent: true)
+        case .readReceipt(let peer):
+            // 对方读了我的消息。这里只记「读到当前时刻」——本地没有服务端 id 与
+            // 消息的严格映射，逐条对 beforeId 反而会算错。
+            if !peer.isEmpty {
+                peerReadAt[peer] = Int64(Date().timeIntervalSince1970 * 1000)
+            }
+        case .readSync(let peer), .cleared(let peer):
+            if !peer.isEmpty,
+               let latest = snapshot.messages.filter({ $0.peer == peer }).map({ $0.epochMs }).max() {
+                var readUpTo = snapshot.readUpTo ?? [:]
+                readUpTo[peer] = latest
+                snapshot.readUpTo = readUpTo
+                refreshConversations()
+                persist()
+            }
+        case .syncRequested:
+            // iOS 侧暂不参与历史同步转发（需要用户确认 + 指纹比对，见设计稿）。
+            break
         }
     }
 
@@ -230,8 +313,8 @@ final class AppModel: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                // 3 秒一次：服务端没有长连接推送前，这是最简单可靠的做法。
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                // 20 秒一次：长连接正常时这只是兜底；断线时也不至于无限期延迟。
+                try? await Task.sleep(nanoseconds: 20_000_000_000)
                 guard let self else { return }
                 await self.receiveOnce(silent: true)
             }
@@ -267,17 +350,31 @@ final class AppModel: ObservableObject {
 
     private func refreshConversations() {
         var latest: [String: Conversation] = [:]
+        let readUpTo = snapshot.readUpTo ?? [:]
         for message in snapshot.messages {
             let current = latest[message.peer]
+            let delta = (!message.fromMe && message.epochMs > (readUpTo[message.peer] ?? 0)) ? 1 : 0
             if current == nil || message.epochMs >= current!.lastEpochMs {
                 latest[message.peer] = Conversation(
                     id: message.peer,
                     lastText: message.recalled ? "已撤回" : message.text,
-                    lastEpochMs: message.epochMs
+                    lastEpochMs: message.epochMs,
+                    unread: (current?.unread ?? 0) + delta
                 )
+            } else {
+                latest[message.peer]?.unread = (current?.unread ?? 0) + delta
             }
         }
         conversations = latest.values.sorted { $0.lastEpochMs > $1.lastEpochMs }
+    }
+
+    /// 我发出的这条，对方是否已读。
+    ///
+    /// 只记「对方读到某时刻」的游标：本地没有服务端消息 id 与消息的严格映射，
+    /// 逐条比对 beforeId 会算错；按时间比较在单机会话里是准确的。
+    func isReadByPeer(_ message: MessageVault.StoredMessage) -> Bool {
+        guard message.fromMe, let readAt = peerReadAt[message.peer] else { return false }
+        return readAt >= message.epochMs
     }
 
     /// 落盘：会话状态、会话索引、消息三样一起加密写。

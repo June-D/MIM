@@ -135,7 +135,9 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
    `POST /message/delivered?beforeId=<最大 id>`。漏了这一步的表现很隐蔽——
    消息不丢，但每轮轮询都会再收到一次，界面重复、时间戳不停刷新。
    另外 `beforeId` 是**查询参数**，不是请求体。
-7. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
+7. **已读回执的类型是 `100012`，不是 `100011`**：写错不会报错，只是「消息到了但
+   永远显示未读」。`PushEventTests` 把这几个编号钉死了。
+8. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
    `POST /prekey/one-time` 返回数字、某些接口是 null。只关心 `status` 的请求
    用 `MIMEnvelope<IgnoredPayload>` 吞掉 `data`，别为类型匹配反复改结构体。
 
@@ -172,7 +174,7 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
 | 类型 | 含义 | iOS 侧动作 |
 |---|---|---|
 | `100010` | 新消息 | 拉增量 → 解密 → 入库 + 本地通知 |
-| `100011` | 已读回执 | 更新自己发出的消息状态 |
+| `100012` | 已读回执（payload `{peer, beforeId}`） | 在我发出的消息下标「已读」 |
 | `100014` | 撤回 | 替换为「已撤回」 |
 | `100019` | 对方清除会话 | 清本地缓存 + 释放自己上传的密文 |
 | `100022` | 另一台设备请求历史 | 弹确认框（显示设备 id + 指纹） |

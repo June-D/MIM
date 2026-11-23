@@ -68,6 +68,24 @@ extension MIMClient {
         }
     }
 
+    /// 标记已读（账号级语义：同一逻辑消息在本人各设备上一起置已读）。
+    ///
+    /// 必须带 `clientMsgIds`——各设备副本的会话标签不同，只按 tags 只能命中自己那份。
+    public func markRead(peer: String, clientMsgIds: [String]) async throws {
+        guard !clientMsgIds.isEmpty else { return }
+        struct Request: Encodable {
+            let peer: String
+            let clientMsgIds: [String]
+        }
+        let envelope: MIMEnvelope<IgnoredPayload> = try await send(
+            method: "POST", path: "/message/read",
+            body: Request(peer: peer, clientMsgIds: Array(clientMsgIds.suffix(200)))
+        )
+        guard envelope.status == 200 else {
+            throw MIMApiError.failed(envelope.status, envelope.message ?? "标记已读失败")
+        }
+    }
+
     /// 会话历史（服务端只存密文；能解开的靠本地会话状态与会话内密钥）。
     public func history(peer: String, tags: [String], limit: Int = 50) async throws -> [IncomingCopy] {
         guard !tags.isEmpty else { return [] }

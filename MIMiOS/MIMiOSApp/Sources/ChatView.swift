@@ -48,8 +48,11 @@ struct ChatView: View {
                             .padding(.top, 24)
                     }
                     ForEach(model.messages, id: \.id) { message in
-                        MessageBubble(message: message)
-                            .id(message.id)
+                        MessageBubble(
+                            message: message,
+                            readByThem: model.isReadByPeer(message)
+                        )
+                        .id(message.id)
                     }
                 }
                 .padding(.horizontal, 14)
@@ -104,6 +107,8 @@ struct ChatView: View {
 
 private struct MessageBubble: View {
     let message: MessageVault.StoredMessage
+    /// 对方已读（仅对我方消息有意义）。
+    let readByThem: Bool
 
     var body: some View {
         HStack {
@@ -121,6 +126,9 @@ private struct MessageBubble: View {
                     .foregroundStyle(message.recalled ? .secondary : .primary)
 
                 HStack(spacing: 6) {
+                    if message.fromMe && readByThem {
+                        Text("已读").foregroundStyle(.secondary)
+                    }
                     Text(Self.timeText(message.epochMs))
                     if let from = message.syncedFrom, !from.isEmpty {
                         Text("来自另一台设备")

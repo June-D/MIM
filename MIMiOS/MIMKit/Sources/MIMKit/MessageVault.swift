@@ -51,12 +51,16 @@ public final class MessageVault {
         public var store: JSONValue
         public var sessions: [String: SessionRef]
         public var messages: [StoredMessage]
+        /// 每个会话读到哪儿了（epochMs）。未读数 = 这之后对方发来的条数。
+        /// 用可选类型：老版本的库文件没有这个字段，缺省按「全未读」处理。
+        public var readUpTo: [String: Int64]?
 
         public init(store: JSONValue = .emptyStore, sessions: [String: SessionRef] = [:],
-                    messages: [StoredMessage] = []) {
+                    messages: [StoredMessage] = [], readUpTo: [String: Int64]? = [:]) {
             self.store = store
             self.sessions = sessions
             self.messages = messages
+            self.readUpTo = readUpTo
         }
     }
 

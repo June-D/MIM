@@ -28,6 +28,14 @@ struct ConversationListView: View {
                         VStack(alignment: .leading, spacing: 4) {
                             HStack {
                                 Text(conversation.id).font(.headline)
+                                if conversation.unread > 0 {
+                                    Text("\(conversation.unread)")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.white)
+                                        .padding(.horizontal, 7)
+                                        .padding(.vertical, 2)
+                                        .background(Color.accentColor, in: Capsule())
+                                }
                                 Spacer()
                                 Text(Self.timeText(conversation.lastEpochMs))
                                     .font(.caption)

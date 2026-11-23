@@ -160,6 +160,95 @@ func sendOnce(_ arguments: [String]) async {
     }
 }
 
+/// `--receipt <url> <user> <pass> <peer>`：等对端发来一条消息，然后标记已读。
+///
+/// 用来验证「已读回执」这条链路：本进程作为**新设备**注册并发布预密钥，
+/// 对端随后发来的消息会扇出一份到本设备，解出来后调用 markRead，
+/// 服务端就会推 100011 给对方。
+func receiptSmoke(_ arguments: [String]) async {
+    guard arguments.count >= 6, let url = URL(string: arguments[2]) else {
+        FileHandle.standardError.write(
+            Data("用法：MIMKitSmoke --receipt <url> <user> <pass> <peer>\n".utf8)
+        )
+        exit(2)
+    }
+    let user = arguments[3], password = arguments[4], peer = arguments[5]
+    do {
+        let client = MIMClient(
+            baseURL: url,
+            deviceId: "cli-read-\(Int(Date().timeIntervalSince1970))"
+        )
+        _ = try await client.login(username: user, password: password)
+        let bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        try await client.publishKeys(password: password, deviceName: "CLI Reader", bundle: bundle)
+        check(true, "已注册为 \(user) 的新设备，等待来自 \(peer) 的消息")
+
+        let session = MessagingSession(client: client, bundle: bundle)
+        for _ in 0..<25 {
+            let received = try await session.receive()
+            if let first = received.first {
+                let ids = received.map(\.clientMsgId).filter { !$0.isEmpty }
+                try await client.markRead(peer: peer, clientMsgIds: ids)
+                check(true, "收到「\(first.text)」并已标记已读")
+                print("RECEIPT_OK")
+                return
+            }
+            try await Task.sleep(nanoseconds: 2_000_000_000)
+        }
+        FileHandle.standardError.write(Data("✗ 40 秒内没有收到消息\n".utf8))
+        exit(1)
+    } catch {
+        FileHandle.standardError.write(Data("✗ 已读回执链路失败：\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+/// `--listen <url> <user> <pass> [秒]`：只连 WebSocket 并打印收到的事件。
+///
+/// 单独把长连接拿出来验证：不涉及模拟器、不涉及界面，收到什么就是什么。
+func listenSmoke(_ arguments: [String]) async {
+    guard arguments.count >= 5, let url = URL(string: arguments[2]) else {
+        FileHandle.standardError.write(
+            Data("用法：MIMKitSmoke --listen <url> <user> <pass> [秒]\n".utf8)
+        )
+        exit(2)
+    }
+    let user = arguments[3], password = arguments[4]
+    let seconds = Int(arguments.count > 5 ? arguments[5] : "30") ?? 30
+    do {
+        let client = MIMClient(
+            baseURL: url,
+            deviceId: "cli-listen-\(Int(Date().timeIntervalSince1970))"
+        )
+        _ = try await client.login(username: user, password: password)
+        let bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        try await client.publishKeys(password: password, deviceName: "CLI Listen", bundle: bundle)
+        check(true, "已登录并发布密钥，开始监听 \(seconds) 秒…")
+
+        let socket = MIMWebSocket(baseURL: url, token: client.currentToken ?? "", deviceId: client.deviceId)
+        let deadline = Date().addingTimeInterval(Double(seconds))
+        for await event in socket.events() {
+            // 直接写 stderr：重定向到文件时 stdout 是块缓冲的，看不到实时输出。
+            FileHandle.standardError.write(Data("EVENT \(event)\n".utf8))
+            if Date() > deadline { break }
+        }
+        FileHandle.standardError.write(Data("LISTEN_DONE\n".utf8))
+    } catch {
+        FileHandle.standardError.write(Data("✗ 监听失败：\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--listen" {
+    await listenSmoke(CommandLine.arguments)
+    exit(0)
+}
+
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--receipt" {
+    await receiptSmoke(CommandLine.arguments)
+    exit(0)
+}
+
 if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--send" {
     await sendOnce(CommandLine.arguments)
     exit(0)

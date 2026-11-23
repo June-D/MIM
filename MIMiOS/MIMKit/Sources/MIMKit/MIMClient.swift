@@ -42,6 +42,9 @@ public final class MIMClient: @unchecked Sendable {
     private let session: URLSession
     private(set) var token: String?
 
+    /// 当前令牌（供 WebSocket 等复用；调用方不必自己再存一份）。
+    public var currentToken: String? { token }
+
     public init(baseURL: URL, deviceId: String, token: String? = nil) {
         self.baseURL = baseURL
         self.deviceId = deviceId
