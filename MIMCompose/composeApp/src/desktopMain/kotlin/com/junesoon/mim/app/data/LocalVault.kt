@@ -114,6 +114,21 @@ class LocalVault(
      * 只记设备 id：批准与否是本机决定，不上报服务端——否则服务端就成了
      * 「谁批准了谁」的权威，和这个功能要防的东西正好相反。
      */
+    /**
+     * 未完成的分片上传：`内容哈希 → uploadId`。
+     *
+     * 断网 / 退出后再发同一个文件时，用它问服务端「还缺哪几片」继续传，
+     * 而不是从头再来。只在传成功或主动取消后删除。
+     */
+    fun loadUploads(): Map<String, String> =
+        read("uploads.bin")?.let {
+            runCatching { JsonCodec.decode<Map<String, String>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveUploads(uploads: Map<String, String>) {
+        write("uploads.bin", JsonCodec.encode(uploads))
+    }
+
     fun loadTrustedDevices(): Set<String> =
         read("trusted_devices.bin")?.let {
             runCatching { JsonCodec.decode<Set<String>>(it) }.getOrNull()

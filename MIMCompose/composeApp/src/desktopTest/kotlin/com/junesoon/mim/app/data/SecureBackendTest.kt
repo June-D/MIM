@@ -375,6 +375,55 @@ class SecureBackendTest {
         assertEquals(0, b.unread(tokenB, bob), "A 读过了，B 不应再有未读")
     }
 
+    /**
+     * 大文件走分片上传，服务端合并后内容必须与原件一致。
+     *
+     * 把阈值调小（256KB / 128KB 分片）才能在测试里真的走多片，
+     * 否则要传 8MB 以上才触发分片，跑起来太慢。
+     */
+    @Test
+    fun large_file_uses_chunked_upload() = withEnv { server ->
+        val alice = "composealice"
+        val bob = "composebob"
+        TestAccounts.ensure(server, alice)
+        TestAccounts.ensure(server, bob)
+        val stamp = System.currentTimeMillis().toString().takeLast(6)
+        val rootA = Files.createTempDirectory("mim-chunk-a")
+        val rootB = Files.createTempDirectory("mim-chunk-b")
+        writeDeviceId(rootA, alice, "testalice-ca-$stamp")
+        writeDeviceId(rootB, bob, "testbob-c-$stamp")
+
+        val a = SecureBackend(
+            server, rootA,
+            chunkThreshold = 256L * 1024,
+            uploadChunkSize = 128 * 1024,
+        )
+        val tokenA = TestAccounts.withLoginBudget {
+            a.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        }.token
+        pruneOtherDevices(server, tokenA, a.currentDeviceId)
+
+        val b = SecureBackend(server, rootB)
+        val tokenB = TestAccounts.withLoginBudget {
+            b.login(bob, TestAccounts.PASSWORD, "Bob Phone")
+        }.token
+        pruneOtherDevices(server, tokenB, b.currentDeviceId)
+
+        // 600KB 明文 → 密文约 630KB，按 128KB 分片就是 5 片。
+        val payload = ByteArray(600 * 1024) { index -> (index % 251).toByte() }
+        a.sendFile(tokenA, bob, payload, "application/pdf", "大文件.pdf")
+
+        val incoming = b.poll(tokenB).firstOrNull { it.message.kind == "file" }
+        assertTrue(incoming != null, "B 未收到文件消息")
+        val message = incoming!!.message
+        assertEquals(payload.size, message.media?.size)
+        assertEquals("大文件.pdf", message.media?.name)
+
+        val received = b.mediaBytes(message)
+        assertTrue(received != null, "B 应能取到合并后的密文并解密")
+        assertTrue(received!!.contentEquals(payload), "分片合并后的内容必须与原件一致")
+    }
+
     private fun withEnv(block: suspend CoroutineScope.(String) -> Unit) {
         val server = System.getenv("MIM_SERVER_URL") ?: return
         if (System.getenv("MIM_NATIVE_LIB").isNullOrBlank()) return

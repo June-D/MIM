@@ -289,6 +289,29 @@ data class ClearResultDto(
 )
 
 /** 上传头像（`POST /user/avatar`）：客户端已重编码成 PNG。 */
+/** 开始分片上传（`POST /media/upload/init`）。 */
+@Serializable
+data class ChunkInitRequest(val size: Long, val chunkSize: Int)
+
+@Serializable
+data class ChunkInitDto(
+    val uploadId: String? = null,
+    val chunkSize: Int? = null,
+    val totalChunks: Int? = null,
+    val received: List<Int> = emptyList(),
+)
+
+/** 分片上传进度（断点续传用）。 */
+@Serializable
+data class ChunkStatusDto(
+    val chunkSize: Int? = null,
+    val totalChunks: Int? = null,
+    val received: List<Int> = emptyList(),
+)
+
+@Serializable
+data class ChunkAckDto(val received: Int? = null)
+
 @Serializable
 data class AvatarRequest(val image: String)
 

@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+    "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.junesoon.mim.mapper.MediaUploadMapper">
+
+    <insert id="insert" parameterType="com.junesoon.mim.entity.MediaUpload">
+        insert into t_media_upload (upload_id, owner, total_size, chunk_size, created_at, updated_at)
+        values (#{uploadId}, #{owner}, #{totalSize}, #{chunkSize}, #{createdAt}, #{updatedAt})
+    </insert>
+
+    <select id="select" resultType="com.junesoon.mim.entity.MediaUpload">
+        select upload_id as uploadId, owner, total_size as totalSize, chunk_size as chunkSize,
+               created_at as createdAt, updated_at as updatedAt
+        from t_media_upload
+        where upload_id = #{uploadId,jdbcType=VARCHAR}
+    </select>
+
+    <select id="countByOwner" resultType="int">
+        select count(*) from t_media_upload where owner = #{owner,jdbcType=VARCHAR}
+    </select>
+
+    <select id="selectStale" resultType="com.junesoon.mim.entity.MediaUpload">
+        select upload_id as uploadId, owner, total_size as totalSize, chunk_size as chunkSize,
+               created_at as createdAt, updated_at as updatedAt
+        from t_media_upload
+        where updated_at &lt; #{cutoff,jdbcType=BIGINT}
+        order by updated_at asc
+        limit #{limit,jdbcType=INTEGER}
+    </select>
+
+    <update id="touch">
+        update t_media_upload set updated_at = #{updatedAt,jdbcType=BIGINT}
+        where upload_id = #{uploadId,jdbcType=VARCHAR}
+    </update>
+
+    <delete id="delete">
+        delete from t_media_upload where upload_id = #{uploadId,jdbcType=VARCHAR}
+    </delete>
+</mapper>

@@ -31,7 +31,13 @@ object MediaTools {
      * 与服务端 `mim.media.max-bytes`（18MB 密文）对齐：8MB 明文加密后约 15MB，
      * 留出余量；超限时明确报错，不做静默截断。
      */
-    const val MAX_FILE_BYTES = 8 * 1024 * 1024
+    /**
+     * 单文件上限。
+     *
+     * 超过 8MB 的部分走分片上传（服务端逐片落盘、合并时校验长度），
+     * 所以这里可以放到 100MB；再大就该考虑专线/对象存储，不适合走消息附件。
+     */
+    const val MAX_FILE_BYTES = 100 * 1024 * 1024
 
     private var playing: Clip? = null
 

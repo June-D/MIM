@@ -11,6 +11,10 @@ import com.junesoon.mim.app.data.messaging.ClearRequest
 import com.junesoon.mim.app.data.messaging.ClearResultDto
 import com.junesoon.mim.app.data.messaging.ChatContactGroup
 import com.junesoon.mim.app.data.messaging.CipherMessageDto
+import com.junesoon.mim.app.data.messaging.ChunkAckDto
+import com.junesoon.mim.app.data.messaging.ChunkInitDto
+import com.junesoon.mim.app.data.messaging.ChunkInitRequest
+import com.junesoon.mim.app.data.messaging.ChunkStatusDto
 import com.junesoon.mim.app.data.messaging.ClearPointDto
 import com.junesoon.mim.app.data.messaging.CipherMessageOut
 import com.junesoon.mim.app.data.messaging.ComposeRequestJson
@@ -69,6 +73,7 @@ import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.request.url
 import io.ktor.http.ContentType
@@ -108,6 +113,10 @@ class SecureBackend(
     },
     /** 仅内网调试使用；远端明文连接会被拒绝，见 [ServerUrl]。 */
     allowInsecure: Boolean = System.getenv("MIM_ALLOW_INSECURE") == "1",
+    /** 超过这个大小的密文走分片上传（默认 8MB，与服务端单请求上限对齐）。 */
+    private val chunkThreshold: Long = 8L * 1024 * 1024,
+    /** 分片大小（服务端要求 64KB~8MB）。 */
+    private val uploadChunkSize: Int = 1024 * 1024,
 ) : MessagingBackend {
 
     /** 规范化后的基地址：去尾斜杠、校验协议（非回环的 http 直接拒绝）。 */
@@ -967,6 +976,13 @@ class SecureBackend(
     }
 
     private suspend fun uploadMedia(token: String, encrypted: ByteArray): String {
+        if (encrypted.size <= chunkThreshold) {
+            return uploadSingleShot(token, encrypted)
+        }
+        return uploadChunked(token, encrypted)
+    }
+
+    private suspend fun uploadSingleShot(token: String, encrypted: ByteArray): String {
         val response: ApiEnvelope<MediaUploadDto> = client.post("$server/media") {
             header("Authorization", "Bearer $token")
             contentType(ContentType.Application.OctetStream)
@@ -975,6 +991,113 @@ class SecureBackend(
         require(response.status == 200) { response.message ?: "媒体上传失败" }
         return response.data?.id?.takeIf { it.isNotBlank() }
             ?: throw IllegalStateException("媒体上传未返回标识")
+    }
+
+    /**
+     * 分片上传。
+     *
+     * 大文件不能一个请求发完（内存与网关都会顶不住）。这里按内容哈希记住 uploadId：
+     * 半途失败后再发同一个文件，会先问服务端「还缺哪几片」，从缺口继续。
+     */
+    private suspend fun uploadChunked(token: String, encrypted: ByteArray): String {
+        val chunk = uploadChunkSize.coerceAtLeast(com.junesoon.mim.app.domain.Chunking.MIN_CHUNK)
+        val total = encrypted.size.toLong()
+        val key = sha256Hex(encrypted)
+        val uploads = vault.loadUploads().toMutableMap()
+
+        var uploadId = uploads[key]?.let { id ->
+            val status = chunkStatus(token, id)
+            if (status == null) {
+                uploads.remove(key)
+                vault.saveUploads(uploads)
+                null
+            } else {
+                id
+            }
+        }
+        if (uploadId == null) {
+            uploadId = initChunkedUpload(token, total, chunk)
+            uploads[key] = uploadId
+            vault.saveUploads(uploads)
+        }
+
+        val received = chunkStatus(token, uploadId)?.received?.toSet().orEmpty()
+        val count = com.junesoon.mim.app.domain.Chunking.count(total, chunk)
+        for (index in 0 until count) {
+            if (index in received) {
+                continue
+            }
+            val slice = com.junesoon.mim.app.domain.Chunking.slice(encrypted, chunk, index)
+            putChunkWithRetry(token, uploadId, index, slice)
+        }
+
+        val id = completeChunkedUpload(token, uploadId)
+        uploads.remove(key)
+        vault.saveUploads(uploads)
+        return id
+    }
+
+    private suspend fun initChunkedUpload(token: String, total: Long, chunk: Int): String {
+        val response: ApiEnvelope<ChunkInitDto> = client.post("$server/media/upload/init") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(ChunkInitRequest(size = total, chunkSize = chunk))
+        }.body()
+        require(response.status == 200) { response.message ?: "无法开始分片上传" }
+        return response.data?.uploadId?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("分片上传未返回 uploadId")
+    }
+
+    private suspend fun chunkStatus(token: String, uploadId: String): ChunkStatusDto? {
+        val response = client.get("$server/media/upload/$uploadId") {
+            header("Authorization", "Bearer $token")
+        }
+        if (response.status.value !in 200..299) {
+            return null
+        }
+        val envelope: ApiEnvelope<ChunkStatusDto> = response.body()
+        return envelope.data
+    }
+
+    /** 单片失败重试一次：弱网下偶发超时不该让整个大文件白传。 */
+    private suspend fun putChunkWithRetry(
+        token: String,
+        uploadId: String,
+        index: Int,
+        slice: ByteArray,
+    ) {
+        var lastError: Throwable? = null
+        repeat(2) {
+            val result = runCatching {
+                val response: ApiEnvelope<ChunkAckDto> =
+                    client.put("$server/media/upload/$uploadId/$index") {
+                        header("Authorization", "Bearer $token")
+                        contentType(ContentType.Application.OctetStream)
+                        setBody(slice)
+                    }.body()
+                require(response.status == 200) { response.message ?: "分片上传失败" }
+            }
+            if (result.isSuccess) {
+                return
+            }
+            lastError = result.exceptionOrNull()
+        }
+        throw IllegalStateException("第 $index 片上传失败：${lastError?.message}")
+    }
+
+    private suspend fun completeChunkedUpload(token: String, uploadId: String): String {
+        val response: ApiEnvelope<MediaUploadDto> =
+            client.post("$server/media/upload/$uploadId/complete") {
+                header("Authorization", "Bearer $token")
+            }.body()
+        require(response.status == 200) { response.message ?: "合并分片失败" }
+        return response.data?.id?.takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("分片上传未返回媒体标识")
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        val digest = java.security.MessageDigest.getInstance("SHA-256").digest(bytes)
+        return digest.joinToString("") { "%02x".format(it) }
     }
 
     override fun mediaBytes(message: ChatMessage): ByteArray? {

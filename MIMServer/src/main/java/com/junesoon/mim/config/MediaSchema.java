@@ -28,6 +28,20 @@ public class MediaSchema implements ApplicationRunner {
         + "  KEY idx_media_owner (owner)"
         + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
 
+    /** 分片上传的进度表；分片文件在磁盘，表里只有大小与时间。 */
+    private static final String UPLOAD_DDL = ""
+        + "CREATE TABLE IF NOT EXISTS t_media_upload ("
+        + "  upload_id varchar(64) NOT NULL,"
+        + "  owner varchar(64) NOT NULL,"
+        + "  total_size bigint NOT NULL,"
+        + "  chunk_size int NOT NULL,"
+        + "  created_at bigint NOT NULL,"
+        + "  updated_at bigint NOT NULL,"
+        + "  PRIMARY KEY (upload_id),"
+        + "  KEY idx_upload_owner (owner),"
+        + "  KEY idx_upload_updated (updated_at)"
+        + ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci";
+
     private final JdbcTemplate jdbcTemplate;
 
     public MediaSchema(JdbcTemplate jdbcTemplate) {
@@ -37,6 +51,7 @@ public class MediaSchema implements ApplicationRunner {
     @Override
     public void run(ApplicationArguments args) {
         jdbcTemplate.execute(DDL);
-        log.info("加密媒体表已就绪");
+        jdbcTemplate.execute(UPLOAD_DDL);
+        log.info("加密媒体表已就绪（含分片上传进度表）");
     }
 }

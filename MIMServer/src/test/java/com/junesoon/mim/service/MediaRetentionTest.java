@@ -37,7 +37,9 @@ class MediaRetentionTest {
     @BeforeEach
     void setUp() {
         mapper = new FakeMediaMapper();
-        service = new MediaServiceImpl(mapper, dir.toString(), 1024 * 1024);
+        // 保留期用不到分片上传的映射，传一个空实现即可。
+        service = new MediaServiceImpl(mapper, null, dir.toString(), 1024 * 1024,
+            160L * 1024 * 1024);
     }
 
     @Test

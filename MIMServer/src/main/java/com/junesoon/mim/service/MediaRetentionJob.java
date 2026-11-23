@@ -41,6 +41,10 @@ public class MediaRetentionJob {
         this.mediaService = mediaService;
     }
 
+    /** 未完成的分片上传超过这个时间就视为废弃，连目录一起清掉。 */
+    @Value("${mim.media.upload-ttl-hours:24}")
+    private int uploadTtlHours;
+
     @Scheduled(cron = "${mim.media.purge-cron:0 30 3 * * ?}")
     public void purgeExpiredMedia() {
         if (retentionDays <= 0) {
@@ -55,6 +59,19 @@ public class MediaRetentionJob {
         } catch (RuntimeException e) {
             // 巡检失败不能影响主流程，下一轮会重试。
             log.warn("媒体保留期巡检失败：{}", e.getMessage());
+        }
+        // 半成品分片同样不能无限期占磁盘：按「最后活跃时间」清。
+        if (uploadTtlHours > 0) {
+            long uploadCutoff = System.currentTimeMillis() - uploadTtlHours * 60L * 60L * 1000L;
+            try {
+                int stale = mediaService.purgeStaleUploads(uploadCutoff, batchSize);
+                if (stale > 0) {
+                    log.info("分片上传巡检完成：清理 {} 个超过 {} 小时未完成的上传",
+                        stale, uploadTtlHours);
+                }
+            } catch (RuntimeException e) {
+                log.warn("分片上传巡检失败：{}", e.getMessage());
+            }
         }
     }
 }
