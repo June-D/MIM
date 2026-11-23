@@ -190,6 +190,13 @@ java -cp "/tmp/e2e:target/classes:$(cat /tmp/cp.txt)" \
 - 跨设备历史仍受上面那条限制：没有原文的消息补不回来；
   Compose 客户端尚未接入自有设备同步。
 
+### iOS（进行中，卡在环境）
+
+方案与里程碑见 `docs/ios-plan.md`。可复用的部分：协议核心的 C ABI
+（`MIMCoreRust/include/mim_core.h`，15 个导出）与 `MIMCoreRust/tools/build-ios.sh`。
+阻塞点：本机未安装 Xcode（只有 Command Line Tools），Rust 交叉编译在链接阶段
+会撞到 macOS SDK。装好 Xcode 后先跑 `MIMCoreRust/tools/build-ios.sh --check`。
+
 ### 当前优先级（2026-11）
 
 1. 移动端（Android/iOS）与系统密钥库；需要先装 Android SDK。

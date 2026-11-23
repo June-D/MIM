@@ -111,7 +111,10 @@ MIMServer（Java）──────────► 鉴权、设备登记、预
 
 ### 七、继续完善的内容（按优先级）
 
-1. **移动端**：Android / iOS 工程、Keystore / Keychain、后台推送与断线重连。
+1. **移动端（iOS 优先）**：立项稿见 [`docs/ios-plan.md`](docs/ios-plan.md)。
+   方案是 SwiftUI + Rust 静态库（协议核心已有 C ABI，不用重写密码学）。
+   当前卡在环境：本机只有 Command Line Tools，没有 Xcode，`tools/build-ios.sh --check`
+   会明确报错；装好 Xcode 后 M0 可当天验完。
 2. **多设备同步进阶**：媒体引用同步与跨设备已读已完成；剩下的只有「全量搬迁」
    （现在限最近 50 条 / 30 天，全量需要更强的设备授权机制）与双向 6 位确认码
    （设计见 `docs/device-sync-design.md` 第 10 节）。
@@ -207,6 +210,7 @@ tools/backup.sh ./backups
 | [`docs/security.md`](docs/security.md) | 加密方案、棘轮、TOFU、安全性质与已知局限 |
 | [`docs/sealed-sender-design.md`](docs/sealed-sender-design.md) | 发送者证书与匿名提交的设计与实现差异 |
 | [`docs/device-sync-design.md`](docs/device-sync-design.md) | 多设备历史同步：设备信任模型、流程与分期（未实施） |
+| [`docs/ios-plan.md`](docs/ios-plan.md) | iOS 立项稿：环境实测、架构选型、里程碑与风险 |
 | [`docs/deploy.md`](docs/deploy.md) | **从零部署**：拓扑选择、配置、验证、备份恢复、升级回滚、排障 |
 | [`docs/operations.md`](docs/operations.md) | 运行、建库、TLS、多实例、限流、密钥轮换、自测 |
 | [`docs/server-api.md`](docs/server-api.md) | HTTP 接口与 WebSocket 通知类型 |

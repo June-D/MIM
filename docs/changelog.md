@@ -521,6 +521,11 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- 移动端立项（iOS 优先）：`docs/ios-plan.md` 记录环境实测（本机无 Xcode，
+  Rust 交叉编译在链接阶段失败的真实报错）、架构选择（SwiftUI + Rust 静态库，
+  协议核心已有 C ABI 不必重写密码学）、五个里程碑与需要账号/签名的前置条件；
+  新增 `MIMCoreRust/tools/build-ios.sh`（环境检查 + 双架构 xcframework）。
+
 - 附件支持分片上传：单文件上限从 8MB 提到 100MB。超过 8MB 时客户端切成 1MB 分片，
 服务端逐片落盘、`complete` 时按顺序合并并校验每片长度（缺片/长短不符直接拒绝，
 不会产生半张媒体）。同一片重复上传幂等；按内容哈希记住 uploadId，断线后重发
