@@ -1005,11 +1005,13 @@ class SecureBackend(
             return 0
         }
         val cutoff = System.currentTimeMillis() - SYNC_MAX_AGE_MS
-        // 只转发本机有明文的文本消息：媒体走引用不搬密文；自己发出的密文棘轮解不开，
-        // 所以「我说过的话」也只能靠本机留存的 text。
+        // 文本与媒体都同步：媒体只带引用与密钥（payload），不搬密文。
+        // 自己发出的密文棘轮解不开，所以「我说过的话」也只能靠本机留存的副本。
         val candidates = messages
             .asSequence()
-            .filter { it.payload == null && !it.pending && it.epochMs >= cutoff && it.text.isNotBlank() }
+            .filter {
+                !it.pending && it.epochMs >= cutoff && (it.text.isNotBlank() || it.payload != null)
+            }
             .sortedByDescending { it.epochMs }
             .take(limit)
             .toList()
@@ -1031,6 +1033,7 @@ class SecureBackend(
                 device = cachedDeviceId,
                 clientTime = cached.epochMs,
                 text = cached.text,
+                media = cached.payload,
             )
             // 归属由本设备身份私钥签名：服务端不验签，接收端用已固定的公钥验。
             val canonical = syncCanonical(cached.id, tag, from, to, cachedDeviceId)
@@ -1408,18 +1411,30 @@ class SecureBackend(
         if (messages.any { it.id == id && it.contactId == contact }) {
             return
         }
+        val parsed = payload.media?.let(::parsePayload)
+        val attachment = parsed?.let(::attachmentOf)
+        if (attachment != null && vault.loadMedia(attachment.id) == null) {
+            // 密文还在服务端保留期内就顺手缓存；过期了界面会显示「已过期或被清理」。
+            runCatching {
+                val blob = downloadMedia(token, attachment.id)
+                vault.saveMedia(attachment.id, blob)
+            }
+        }
         val message = ChatMessage(
             id = id,
             fromMe = payload.from == self,
             text = payload.text,
             time = nowTime(),
             epochMs = payload.clientTime,
+            kind = parsed?.kind ?: "text",
+            media = attachment,
             syncedFrom = sourceDevice,
         )
         cache(
             contactId = contact,
             message = message,
             epochMs = payload.clientTime,
+            payload = payload.media,
             serverId = raw.id,
             syncedFrom = sourceDevice,
         )

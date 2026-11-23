@@ -53,6 +53,12 @@ class SyncE2eTest {
         val atA = a.poll(tokenA).firstOrNull { it.contactId == bob }
         assertTrue(atA != null, "A 应收到 bob 的回复")
 
+        // 附件也要能同步：只搬引用与密钥，B 端按 id 去服务端取密文再解密。
+        val fileBytes = ByteArray(3072) { index -> (index % 251).toByte() }
+        a.sendFile(tokenA, bob, fileBytes, "application/pdf", "季度预算.pdf")
+        val atBobFile = bobBackend.poll(tokenBob).firstOrNull { it.message.kind == "file" }
+        assertTrue(atBobFile != null, "bob 应收到文件消息")
+
         // 新设备必须在这些消息之后才登录：否则它会作为普通设备直接收到一份，
         // 服务端按 clientMsgId 判定「副本已存在」，同步就没什么可搬的了。
         val b = SecureBackend(server, rootB)
@@ -71,10 +77,10 @@ class SyncE2eTest {
                 error,
             )
         }
-        assertEquals(2, submitted, "两条消息都应提交给服务端")
+        assertEquals(3, submitted, "两条文本 + 一个附件都应提交给服务端")
 
         val synced = b.poll(tokenB).filter { it.contactId == bob }
-        assertEquals(2, synced.size, "B 应收到两条同步副本：${synced.map { it.message.text }}")
+        assertEquals(3, synced.size, "B 应收到三条同步副本：${synced.map { it.message.text }}")
 
         val mine = synced.first { it.message.text == outgoing }.message
         assertTrue(mine.fromMe, "A 发出去的那条在 B 上仍标记为自己发送")
@@ -82,6 +88,14 @@ class SyncE2eTest {
 
         val theirs = synced.first { it.message.text == incoming }.message
         assertTrue(!theirs.fromMe, "bob 发来的那条在 B 上仍是对方发送")
+
+        val file = synced.first { it.message.kind == "file" }.message
+        assertTrue(file.fromMe, "A 发出的附件在 B 上仍标记为自己发送")
+        assertEquals("季度预算.pdf", file.media?.name, "附件名来自端到端密文，同步后应完整还原")
+        assertEquals("application/pdf", file.media?.mime)
+        val fileContent = b.mediaBytes(file)
+        assertTrue(fileContent != null, "B 应能取到密文并解密")
+        assertTrue(fileContent!!.contentEquals(fileBytes), "同步过来的附件内容必须与原件一致")
     }
 
     private fun withEnv(block: suspend CoroutineScope.(String) -> Unit) {

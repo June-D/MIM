@@ -311,6 +311,12 @@ data class SyncPayloadDto(
     val device: String,
     val clientTime: Long,
     val text: String,
+    /**
+     * 原消息的媒体载荷（媒体 id + 一次性密钥 + 类型/尺寸/文件名），纯文本消息为 null。
+     *
+     * 只搬引用与密钥，不搬密文：接收设备按 id 去服务端取密文（保留期内有效）。
+     */
+    val media: String? = null,
 )
 
 /** `GET /user/info` 只回给账号本人。 */
