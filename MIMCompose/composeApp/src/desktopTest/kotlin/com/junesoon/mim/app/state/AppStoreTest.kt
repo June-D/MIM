@@ -728,6 +728,47 @@ class AppStoreTest {
         assertEquals(listOf("mine-dropped-0001"), released)
     }
 
+    /** 另一台设备读过了：红点立刻消失，并重拉一次未读对账。 */
+    @Test
+    fun read_on_another_device_clears_unread() {
+        var unreadCalls = 0
+        // 服务端此刻的未读数：一开始 3 条，另一台设备读完后变 0。
+        var serverUnread = 3
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult(
+                "t",
+                username,
+                listOf(Contact("bob", "bob", "", unread = 3)),
+            )
+
+            override suspend fun unread(token: String, contactId: String): Int {
+                unreadCalls++
+                return serverUnread
+            }
+
+            override fun hasLocalHistory(): Boolean = true
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+        assertEquals(3, store.state.value.contacts.first { it.id == "bob" }.unread)
+
+        // 另一台设备读完：服务端计数已经是 0，本机收到 100024 后应当马上清红点。
+        serverUnread = 0
+        store.onReadOnAnotherDevice("bob")
+
+        assertEquals(0, store.state.value.contacts.first { it.id == "bob" }.unread)
+        assertTrue(unreadCalls >= 1, "除了本地清零，还要向服务端对一次账")
+    }
+
     @Test
     fun pinned_contact_sorts_before_recent_ones() {
         val store = store()

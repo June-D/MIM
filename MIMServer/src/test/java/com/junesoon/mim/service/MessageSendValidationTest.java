@@ -97,6 +97,11 @@ class MessageSendValidationTest {
         }
 
         @Override
+        public int markReadByClientMsgIds(String toUsername, java.util.List<String> clientMsgIds) {
+            return 0;
+        }
+
+        @Override
         public long countUnreadByTags(List<String> tags, String toUsername, Long afterId) {
             return 0;
         }

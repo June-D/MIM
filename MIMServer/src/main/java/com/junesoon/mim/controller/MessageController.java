@@ -137,9 +137,13 @@ public class MessageController {
      */
     @PostMapping("/read")
     public ObjectRestResponse<Integer> read(@CurrentUser String username,
-        @RequestBody ReadRequest request) {
-        int affected = messageService.markRead(username, request.getPeer(), request.getBeforeId(),
-            request.getTags());
+        @CurrentDevice String deviceId, @RequestBody ReadRequest request) {
+        // 有 clientMsgIds 就按逻辑消息标记（能跨设备副本），否则退回按标签。
+        int affected = request.getClientMsgIds() != null && !request.getClientMsgIds().isEmpty()
+            ? messageService.markReadByIds(username, request.getPeer(),
+                request.getClientMsgIds(), deviceId)
+            : messageService.markRead(username, request.getPeer(), request.getBeforeId(),
+                request.getTags(), deviceId);
         return new ObjectRestResponse<Integer>().data(affected).rel(true);
     }
 

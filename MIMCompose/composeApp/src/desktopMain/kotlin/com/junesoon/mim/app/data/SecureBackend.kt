@@ -180,6 +180,12 @@ class SecureBackend(
             TYPE_NEW_MESSAGE, TYPE_READ_RECEIPT, TYPE_RECALLED -> PushEvent.NewData
             TYPE_FRIEND_REQUEST, TYPE_FRIEND_ACCEPTED, TYPE_FRIEND_REJECTED ->
                 PushEvent.FriendsChanged
+            TYPE_READ_SYNC -> {
+                val peer = runCatching {
+                    envelope.data?.jsonObject?.get("peer")?.jsonPrimitive?.content
+                }.getOrNull()
+                peer?.takeIf { it.isNotBlank() }?.let { PushEvent.ReadOnAnotherDevice(it) }
+            }
             TYPE_HISTORY_SYNC -> {
                 // 只带设备 id：转不转发由用户决定，服务端不替用户做决定。
                 val device = runCatching {
@@ -628,10 +634,23 @@ class SecureBackend(
             return
         }
         val beforeId = serverIds[contactId] ?: return
+        // 关键：同一逻辑消息在各设备上的会话标签不同，只按标签只能标记本机那份副本。
+        // 带上本机已读到的 clientMsgId，服务端才能把它们在其它设备上的副本一起置已读。
+        val ids = messages
+            .filter { it.contactId == contactId && !it.fromMe }
+            .map { it.id }
+            .takeLast(200)
         val response: StatusEnvelope = client.post("$server/message/read") {
             header("Authorization", "Bearer $token")
             contentType(ContentType.Application.Json)
-            setBody(ReadRequest(peer = contactId, beforeId = beforeId, tags = tags))
+            setBody(
+                ReadRequest(
+                    peer = contactId,
+                    beforeId = beforeId,
+                    tags = tags,
+                    clientMsgIds = ids,
+                ),
+            )
         }.body()
         require(response.status == 200) { response.message ?: "标记已读失败" }
     }
@@ -1728,6 +1747,7 @@ class SecureBackend(
         private const val TYPE_RECALLED = 100014
         private const val TYPE_CONVERSATION_CLEARED = 100019
         private const val TYPE_HISTORY_SYNC = 100022
+        private const val TYPE_READ_SYNC = 100024
 
         /** 同步信封前缀：与媒体载荷一样靠前缀区分「这是什么」，不靠猜。 */
         private const val SYNC_PREFIX = "{\"v\":1,\"kind\":\"sync\""

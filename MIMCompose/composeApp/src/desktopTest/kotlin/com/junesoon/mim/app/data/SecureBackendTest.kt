@@ -321,6 +321,60 @@ class SecureBackendTest {
         assertTrue(received!!.contentEquals(payload), "解密后的字节必须与发送的一致")
     }
 
+    /**
+     * 已读是**账号级**语义：A 读了，B 的红点也要消失。
+     *
+     * 服务端本来就按 to_user 更新（所有设备副本一起置已读），
+     * 这条用例锁住的是「另一台设备确实能看到这个结果」。
+     */
+    @Test
+    fun read_on_one_device_clears_unread_on_the_other() = withEnv { server ->
+        val alice = "composealice"
+        val bob = "composebob"
+        TestAccounts.ensure(server, alice)
+        TestAccounts.ensure(server, bob)
+        val stamp = System.currentTimeMillis().toString().takeLast(6)
+        val rootA = Files.createTempDirectory("mim-read-a")
+        val rootB = Files.createTempDirectory("mim-read-b")
+        val rootBob = Files.createTempDirectory("mim-read-bob")
+        writeDeviceId(rootA, alice, "testalice-ra-$stamp")
+        writeDeviceId(rootB, alice, "testalice-rb-$stamp")
+        writeDeviceId(rootBob, bob, "testbob-r-$stamp")
+
+        val a = SecureBackend(server, rootA)
+        val tokenA = TestAccounts.withLoginBudget {
+            a.login(alice, TestAccounts.PASSWORD, "Alice Desktop")
+        }.token
+        pruneOtherDevices(server, tokenA, a.currentDeviceId)
+
+        val b = SecureBackend(server, rootB)
+        // 不要在这里 prune：会连 A 一起注销掉，本用例正需要两台设备并存。
+        val tokenB = TestAccounts.withLoginBudget {
+            b.login(alice, TestAccounts.PASSWORD, "Alice Laptop")
+        }.token
+
+        val bobBackend = SecureBackend(server, rootBob)
+        val tokenBob = TestAccounts.withLoginBudget {
+            bobBackend.login(bob, TestAccounts.PASSWORD, "Bob Phone")
+        }.token
+        pruneOtherDevices(server, tokenBob, bobBackend.currentDeviceId)
+
+        bobBackend.send(tokenBob, alice, "在吗 $stamp")
+        // 两台设备都要真的拉过这条消息：会话标签要先落到本机，
+        // 未读统计与 markRead 都靠标签定位。
+        val atA = a.poll(tokenA)
+        val atB = b.poll(tokenB)
+        assertTrue(atA.any { it.contactId == bob }, "A 没收到消息：$atA")
+        assertTrue(atB.any { it.contactId == bob }, "B 没收到消息：$atB")
+
+        assertEquals(1, a.unread(tokenA, bob), "A 应有 1 条未读")
+        assertEquals(1, b.unread(tokenB, bob), "B 也应有 1 条未读")
+
+        a.markRead(tokenA, bob)
+
+        assertEquals(0, b.unread(tokenB, bob), "A 读过了，B 不应再有未读")
+    }
+
     private fun withEnv(block: suspend CoroutineScope.(String) -> Unit) {
         val server = System.getenv("MIM_SERVER_URL") ?: return
         if (System.getenv("MIM_NATIVE_LIB").isNullOrBlank()) return

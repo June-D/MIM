@@ -62,7 +62,22 @@ public interface MessageService {
     /**
      * 标记已读。{@code tags} 为客户端持有的会话标签，非空时一并按标签标记。
      */
-    int markRead(String username, String peer, Long beforeId, List<String> tags);
+    /**
+     * 标记与某人的会话已读。
+     *
+     * <p>已读是**账号级**语义：库里按 {@code to_user} 更新，同一逻辑消息的所有设备副本
+     * 一起置为已读。{@code deviceId} 只用来把「另一台设备读过了」通知给本人的其它设备，
+     * 不会写库。
+     */
+    int markRead(String username, String peer, Long beforeId, List<String> tags, String deviceId);
+
+    /**
+     * 按逻辑消息 id 标记已读（跨设备副本）。
+     *
+     * <p>用于「我在这台设备上读过的这些消息」：同一逻辑消息在各设备上的副本
+     * 会话标签不同，按标签只能命中自己那份，按 client_msg_id 才能全部覆盖。
+     */
+    int markReadByIds(String username, String peer, List<String> clientMsgIds, String deviceId);
 
     /**
      * 未读数。{@code tags} 非空时额外按标签统计（不依赖盲引用）。

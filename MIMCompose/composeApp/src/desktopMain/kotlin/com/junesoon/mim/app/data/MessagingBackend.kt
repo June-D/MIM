@@ -301,6 +301,14 @@ sealed interface PushEvent {
      * 服务端无权替用户把历史交出去。
      */
     data class SyncRequested(val deviceId: String) : PushEvent
+
+    /**
+     * 同账号的另一台设备把这人的会话读过了（WS 100024）。
+     *
+     * 已读是账号级语义，服务端库里已经把所有设备副本一起置为已读；
+     * 这条推送只是叫本机重拉未读数，别让红点留在已读的会话上。
+     */
+    data class ReadOnAnotherDevice(val peer: String) : PushEvent
 }
 
 /** 启用二次验证的结果。 */

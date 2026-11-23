@@ -1112,6 +1112,30 @@ class AppStore(
      * 已批准的设备直接转发；没批准过的一律只落到「待确认」，
      * 绝不自动把历史交给一台新注册的设备——这是这个功能的信任边界。
      */
+    /**
+     * 另一台设备把这人的会话读过了：本地红点要马上消失。
+     *
+     * 先把该联系人的未读清零（界面立刻有反馈），再重拉一次对账；
+     * 如果正开着这段会话，顺带刷新消息状态。
+     */
+    fun onReadOnAnotherDevice(peer: String) {
+        _state.update { current ->
+            current.copy(
+                contacts = current.contacts.map { contact ->
+                    if (contact.id == peer) contact.copy(unread = 0) else contact
+                },
+            )
+        }
+        val currentToken = token ?: return
+        scope.launch {
+            refreshUnread(currentToken, force = true)
+            val screen = _state.value.screen
+            if (screen is Screen.Chat && screen.contactId == peer) {
+                refreshStates(currentToken, peer)
+            }
+        }
+    }
+
     /** 另一台设备请求历史同步的入口（推送与测试共用）。 */
     fun onSyncRequested(deviceId: String) {
         scope.launch { handleSyncRequested(deviceId) }
@@ -1317,6 +1341,7 @@ class AppStore(
                             refreshUnread(current, force = true)
                         }
                         is PushEvent.SyncRequested -> onSyncRequested(event.deviceId)
+                        is PushEvent.ReadOnAnotherDevice -> onReadOnAnotherDevice(event.peer)
                         is PushEvent.Cleared -> {
                             // 对方清除了会话：本机缓存与「我上传的密文」一起释放。
                             val released = ownMediaIds(event.peer)

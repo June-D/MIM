@@ -84,6 +84,14 @@ public class CommonConstants {
     public static final Integer NOTIFY_TYPE_SECURITY_ALERT = 100023;
 
     /**
+     * 已读状态在本人设备间的同步（100024）。
+     *
+     * <p>只发给「同一账号的其它设备」，payload 为 {@code {peer}}，不含任何内容：
+     * 收到后重新拉一次未读数即可。
+     */
+    public static final Integer NOTIFY_TYPE_READ_SYNC = 100024;
+
+    /**
      * 跨实例消息路由的 Redis 频道。所有实例都订阅，收到后只投递给本机在线会话。
      */
     public static final String REDIS_PUSH_CHANNEL = "mim:ws:push";

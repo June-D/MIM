@@ -40,7 +40,7 @@
 | GET | `/message/history/{peer}` | 历史消息（按 clientMsgId 去重） |
 | GET | `/message/undelivered` | 本设备未投递消息 |
 | POST | `/message/delivered?beforeId=` | 本设备批量确认已投递 |
-| POST | `/message/read` | 标记已读并发回执 |
+| POST | `/message/read`（可带 `clientMsgIds` 跨设备副本置已读） | 标记已读并发回执 |
 | GET | `/message/unread/{peer}` | 未读数（按逻辑消息计数） |
 | POST | `/message/recall/{clientMsgId}` | 撤回（作用于所有设备副本，限 120s） |
 | POST | `/message/clear` | 清除与某人的会话（`forBoth` 时对方也看不到，并抹除密文） |

@@ -574,23 +574,72 @@ public class MessageServiceImpl implements MessageService {
     }
 
     @Override
-    public int markRead(String username, String peer, Long beforeId, List<String> tags) {
+    public int markRead(String username, String peer, Long beforeId, List<String> tags,
+        String deviceId) {
         ValidationUtil.validateUsername(peer);
         // 只按会话标签标记；没有标签就无从定位这段会话。
         List<String> safeTags = normalizeTags(tags);
         int affected = safeTags.isEmpty() ? 0
             : messageMapper.markReadByTags(safeTags, username, beforeId);
         if (affected > 0) {
-            Map<String, Object> receipt = new LinkedHashMap<>(2);
-            receipt.put("peer", username);
-            receipt.put("beforeId", beforeId);
-            try {
-                pushService.pushToUser(peer, BaseNotify.of(CommonConstants.NOTIFY_TYPE_READ_RECEIPT, receipt));
-            } catch (Exception e) {
-                log.warn("已读回执推送失败：{}", e.getMessage());
-            }
+            notifyRead(username, peer, deviceId, beforeId);
         }
         return affected;
+    }
+
+    @Override
+    public int markReadByIds(String username, String peer, List<String> clientMsgIds,
+        String deviceId) {
+        ValidationUtil.validateUsername(peer);
+        List<String> ids = normalizeClientMsgIds(clientMsgIds);
+        if (ids.isEmpty()) {
+            return 0;
+        }
+        int affected = messageMapper.markReadByClientMsgIds(username, ids);
+        if (affected > 0) {
+            notifyRead(username, peer, deviceId, null);
+        }
+        return affected;
+    }
+
+    /** 已读的两条推送：给对方发回执、给本人其它设备发「重拉未读」。 */
+    private void notifyRead(String username, String peer, String deviceId, Long beforeId) {
+        Map<String, Object> receipt = new LinkedHashMap<>(2);
+        receipt.put("peer", username);
+        receipt.put("beforeId", beforeId);
+        try {
+            pushService.pushToUser(peer, BaseNotify.of(CommonConstants.NOTIFY_TYPE_READ_RECEIPT, receipt));
+        } catch (Exception e) {
+            log.warn("已读回执推送失败：{}", e.getMessage());
+        }
+        // 同账号其它设备的未读数与列表预览也要跟着变；不带任何内容，只叫它们重拉。
+        if (StringUtils.hasText(deviceId)) {
+            Map<String, Object> synced = new LinkedHashMap<>(1);
+            synced.put("peer", peer);
+            try {
+                pushService.pushToUserExcept(username, deviceId,
+                    BaseNotify.of(CommonConstants.NOTIFY_TYPE_READ_SYNC, synced));
+            } catch (Exception e) {
+                log.warn("已读同步推送失败：{}", e.getMessage());
+            }
+        }
+    }
+
+    /** 只留合法的 client_msg_id，单次上限 200：够标记一整段会话，也不至于把 SQL 撑爆。 */
+    private static List<String> normalizeClientMsgIds(List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> safe = new ArrayList<>();
+        for (String id : ids) {
+            if (id != null && CLIENT_MSG_ID.matcher(id).matches()) {
+                safe.add(id);
+            }
+            if (safe.size() >= 200) {
+                break;
+            }
+        }
+        return safe;
     }
 
     @Override

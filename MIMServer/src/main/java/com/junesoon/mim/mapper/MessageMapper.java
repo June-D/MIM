@@ -68,6 +68,16 @@ public interface MessageMapper {
         @Param("toUsername") String toUsername, @Param("beforeId") Long beforeId);
 
     /**
+     * 按逻辑消息 id 标记已读。
+     *
+     * <p>多设备副本各自持有**不同的会话标签**（标签是「发送方 ←→ 某台接收设备」的
+     * 会话级随机值），所以按标签只能命中调用方自己那份副本。要表达「这条我读过了」，
+     * 只能按 client_msg_id 跨副本更新。
+     */
+    int markReadByClientMsgIds(@Param("toUsername") String toUsername,
+        @Param("clientMsgIds") List<String> clientMsgIds);
+
+    /**
      * 标签会话的未读数；{@code afterId} 用于忽略已清除的消息。
      */
     long countUnreadByTags(@Param("tags") List<String> tags,

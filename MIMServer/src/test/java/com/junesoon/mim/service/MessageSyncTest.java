@@ -32,6 +32,9 @@ class MessageSyncTest {
     private MemoryMessages messages;
     private MessageServiceImpl service;
 
+    /** 记录每次推送的 target|excludedDevice，用于断言「只发给其它设备」。 */
+    private final List<String> pushes = new java.util.ArrayList<>();
+
     @BeforeEach
     void setUp() {
         messages = new MemoryMessages();
@@ -108,10 +111,12 @@ class MessageSyncTest {
         }, new PushService(null, null, null) {
             @Override
             public void pushToDevice(String target, String deviceId, Object notify) {
+                pushes.add(target + "|" + deviceId);
             }
 
             @Override
             public void pushToUserExcept(String target, String excludedDeviceId, Object notify) {
+                pushes.add(target + "|" + excludedDeviceId);
             }
         });
         ReflectionTestUtils.setField(service, "maxCiphertextBytes", 262144);
@@ -138,6 +143,53 @@ class MessageSyncTest {
         // sessionId 由客户端生成、服务端不理解，但接收设备靠它路由密文；
         // 漏掉这一列，副本会永远解不开（真实 e2e 就是这么发现漏的）。
         assertEquals("session-01", copy.getSessionId());
+    }
+
+    @Test
+    @DisplayName("已读只通知本人其它设备，不回推当前设备")
+    void markReadNotifiesOtherOwnDevices() {
+        messages.rows.clear();
+        CipherMessage incoming = new CipherMessage();
+        incoming.setClientMsgId("msg-read-01");
+        incoming.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
+        incoming.setToUsername("alice");
+        incoming.setTargetDeviceId("dev-a");
+        incoming.setReadFlag(false);
+        messages.rows.add(incoming);
+
+        int affected = service.markRead("alice", "bob", null,
+            Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1"), "dev-a");
+
+        assertEquals(1, affected);
+        assertEquals(Boolean.TRUE, messages.rows.get(0).getReadFlag());
+        assertTrue(pushes.contains("alice|dev-a"), "应把已读同步给同账号其它设备：" + pushes);
+    }
+
+    @Test
+    @DisplayName("同一逻辑消息在其它设备上的副本也要置已读（副本标签不同）")
+    void markReadByIdsCoversOtherDeviceCopies() {
+        messages.rows.clear();
+        CipherMessage onA = new CipherMessage();
+        onA.setClientMsgId("msg-multi-01");
+        onA.setConversationTag("tagAAAAAAAAAAAAAAAAAAAAAAAA1");
+        onA.setToUsername("alice");
+        onA.setTargetDeviceId("dev-a");
+        onA.setReadFlag(false);
+        CipherMessage onB = new CipherMessage();
+        onB.setClientMsgId("msg-multi-01");
+        // 同一逻辑消息，另一台设备上的会话标签不同——按标签永远命中不到它。
+        onB.setConversationTag("tagBBBBBBBBBBBBBBBBBBBBBBBB2");
+        onB.setToUsername("alice");
+        onB.setTargetDeviceId("dev-b");
+        onB.setReadFlag(false);
+        messages.rows.add(onA);
+        messages.rows.add(onB);
+
+        int affected = service.markReadByIds("alice", "bob",
+            Collections.singletonList("msg-multi-01"), "dev-a");
+
+        assertEquals(2, affected, "两份副本都应置已读");
+        assertTrue(Boolean.TRUE.equals(onA.getReadFlag()) && Boolean.TRUE.equals(onB.getReadFlag()));
     }
 
     @Test
@@ -352,7 +404,35 @@ class MessageSyncTest {
 
         @Override
         public int markReadByTags(List<String> tags, String toUsername, Long beforeId) {
-            return 0;
+            int affected = 0;
+            for (CipherMessage row : rows) {
+                if (!toUsername.equals(row.getToUsername())
+                    || !tags.contains(row.getConversationTag())
+                    || Boolean.TRUE.equals(row.getReadFlag())) {
+                    continue;
+                }
+                if (beforeId != null && row.getId() != null && row.getId() > beforeId) {
+                    continue;
+                }
+                row.setReadFlag(true);
+                affected++;
+            }
+            return affected;
+        }
+
+        @Override
+        public int markReadByClientMsgIds(String toUsername, List<String> clientMsgIds) {
+            int affected = 0;
+            for (CipherMessage row : rows) {
+                if (!toUsername.equals(row.getToUsername())
+                    || !clientMsgIds.contains(row.getClientMsgId())
+                    || Boolean.TRUE.equals(row.getReadFlag())) {
+                    continue;
+                }
+                row.setReadFlag(true);
+                affected++;
+            }
+            return affected;
         }
 
         @Override

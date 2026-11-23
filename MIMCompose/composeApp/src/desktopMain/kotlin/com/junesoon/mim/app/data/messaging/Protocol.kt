@@ -154,6 +154,13 @@ data class ReadRequest(
     val peer: String,
     val beforeId: Long? = null,
     val tags: List<String> = emptyList(),
+    /**
+     * 本次读到的逻辑消息 id。
+     *
+     * 同一逻辑消息在本账号各设备上的副本**会话标签不同**，只按标签只能清掉本机那份；
+     * 带上 id 服务端才能把这些副本一起置为已读。
+     */
+    val clientMsgIds: List<String> = emptyList(),
 )
 
 @Serializable
