@@ -1,6 +1,7 @@
 package com.junesoon.mim.app.data
 
 import com.junesoon.mim.app.data.messaging.ApiEnvelope
+import com.junesoon.mim.app.data.messaging.AvatarRequest
 import com.junesoon.mim.app.data.messaging.BindEmailRequest
 import com.junesoon.mim.app.data.messaging.UserInfoDto
 import com.junesoon.mim.app.data.messaging.CertDto
@@ -277,6 +278,37 @@ class SecureBackend(
         }
         codes.forEach { (deviceId, code) -> seenSafetyCodes["$contactId|$deviceId"] = code }
         vault.saveSafetyCodes(seenSafetyCodes)
+    }
+
+    override suspend fun uploadAvatar(token: String, png: ByteArray): Int {
+        val body = AvatarRequest(java.util.Base64.getEncoder().encodeToString(png))
+        val response: ApiEnvelope<Int> = client.post("$server/user/avatar") {
+            header("Authorization", "Bearer $token")
+            contentType(ContentType.Application.Json)
+            setBody(body)
+        }.body()
+        require(response.status == 200) { response.message ?: "头像上传失败" }
+        return response.data ?: 0
+    }
+
+    override suspend fun deleteAvatar(token: String): Boolean {
+        val response: StatusEnvelope = client.delete("$server/user/avatar") {
+            header("Authorization", "Bearer $token")
+        }.body()
+        return response.status == 200
+    }
+
+    override suspend fun avatarBytes(token: String, username: String): ByteArray? {
+        if (!com.junesoon.mim.app.utils.isSafeUsername(username)) {
+            return null
+        }
+        val response = client.get("$server/user/avatar/$username") {
+            header("Authorization", "Bearer $token")
+        }
+        if (response.status.value !in 200..299) {
+            return null
+        }
+        return response.body()
     }
 
     override suspend fun userEmail(token: String): String {

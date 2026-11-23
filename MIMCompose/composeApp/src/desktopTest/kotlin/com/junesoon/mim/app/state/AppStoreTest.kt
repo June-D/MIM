@@ -620,6 +620,51 @@ class AppStoreTest {
         assertTrue(store.state.value.notice.orEmpty().contains("另一台设备"))
     }
 
+    /** 头像上传后立刻在界面上生效（本机头像走同一份头像表）。 */
+    @Test
+    fun uploading_avatar_updates_state() {
+        var uploaded = 0
+        var deleted = 0
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, emptyList())
+
+            override suspend fun uploadAvatar(token: String, png: ByteArray): Int {
+                uploaded++
+                return 1
+            }
+
+            override suspend fun deleteAvatar(token: String): Boolean {
+                deleted++
+                return true
+            }
+
+            override suspend fun avatarBytes(token: String, username: String): ByteArray? = null
+
+            override fun hasLocalHistory(): Boolean = true
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+
+        val png = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte())
+        store.uploadAvatar(png)
+        assertEquals(1, uploaded)
+        assertTrue(store.state.value.avatars["alice"]?.contentEquals(png) == true)
+        assertEquals("头像已更新", store.state.value.notice)
+
+        store.removeAvatar()
+        assertEquals(1, deleted)
+        assertTrue(store.state.value.avatars["alice"] == null)
+    }
+
     @Test
     fun pinned_contact_sorts_before_recent_ones() {
         val store = store()

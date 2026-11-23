@@ -97,10 +97,61 @@ TTL 90 秒；Redis 故障时放行，此时防重放暂时失效（不影响口�
 - 重置成功后关闭该账号的二次验证、自增所有设备令牌版本并踢掉 WebSocket，
   用户用新密码重新登录。
 
-邮件服务通过环境变量配置：`MIM_SMTP_HOST`、`MIM_SMTP_PORT`（默认 465）、
-`MIM_SMTP_USERNAME`、`MIM_SMTP_PASSWORD`、`MIM_MAIL_FROM`、`MIM_SMTP_SSL`。
-未配置 SMTP 时找回密码接口会提示“邮件服务未配置”，其它功能不受影响。
-SSL 端口强制校验服务器证书主机名；非 SSL 端口要求 STARTTLS，拒绝明文降级。
+### SMTP 配置
+
+| 环境变量 | 含义 | 默认 |
+|---|---|---|
+| `MIM_SMTP_HOST` | SMTP 主机；**留空即视为未配置** | 空 |
+| `MIM_SMTP_PORT` | 端口 | `465` |
+| `MIM_SMTP_USERNAME` | 登录账号（通常等于发信地址） | 空 |
+| `MIM_SMTP_PASSWORD` | 密码 / 授权码（不是登录密码） | 空 |
+| `MIM_MAIL_FROM` | 发信人；留空时取 `MIM_SMTP_USERNAME` | 空 |
+| `MIM_SMTP_SSL` | `true` 走 SMTPS（465）；`false` 走 STARTTLS（587） | `true` |
+
+协议侧的硬约束（代码里写死的，不要指望配置能放宽）：
+
+- `MIM_SMTP_SSL=true` 时校验服务器证书**主机名**，防止中间人替换证书；
+- `MIM_SMTP_SSL=false` 时强制 `STARTTLS` 并要求成功，**拒绝明文降级**；
+- 连接、读、写超时各 10 秒，失败只影响这一次发信，不会卡住请求线程。
+
+常见服务商（端口二选一，优先 465）：
+
+```bash
+# QQ 邮箱 / 企业微信邮箱：密码位置填「授权码」，不是登录密码
+export MIM_SMTP_HOST=smtp.qq.com MIM_SMTP_PORT=465 MIM_SMTP_SSL=true
+export MIM_SMTP_USERNAME=you@qq.com MIM_SMTP_PASSWORD=<授权码>
+export MIM_MAIL_FROM=you@qq.com
+
+# Gmail：必须用「应用专用密码」，且账号需允许 SMTP
+export MIM_SMTP_HOST=smtp.gmail.com MIM_SMTP_PORT=587 MIM_SMTP_SSL=false
+export MIM_SMTP_USERNAME=you@gmail.com MIM_SMTP_PASSWORD=<应用专用密码>
+
+# 自建 Postfix / 邮件网关：确认 465 提供 SMTPS，或 587 提供 STARTTLS
+export MIM_SMTP_HOST=mail.internal.example.com MIM_SMTP_PORT=587 MIM_SMTP_SSL=false
+```
+
+验证（服务端已启动、账号已绑定邮箱）：
+
+```bash
+curl -s -X POST http://127.0.0.1:8080/recover/email \
+  -H 'Content-Type: application/json' -d '{"username":"composealice"}'
+# 账号不存在 / 未绑定邮箱时静默返回 200（避免账号枚举），所以「没报错」不等于「发出去了」
+tail -n 20 /tmp/mim-server.log | grep -i "邮件"
+```
+
+**未配置时如何降级**（这是有意的行为，不是故障）：
+
+| 场景 | 行为 |
+|---|---|
+| 找回密码 | `POST /recover/email` 返回「邮件服务未配置」，不会静默成功 |
+| 注册 | 邮箱是可选字段，留空即可正常注册 |
+| 绑定邮箱 | 可以绑定（只做格式校验），但发不出验证码，界面会在找回页说明 |
+| 其它功能 | 完全不受影响：登录、收发、附件、同步、二次验证都不依赖 SMTP |
+
+运维建议：用**专用发信账号**并单独保管授权码（放环境变量或 `*_COMMAND` 从
+Vault/AWS/GCP 取，别写进仓库）；服务端对 `/recover/email` 已限流（60 秒一次 / 账号），
+上游服务商通常还有每日配额，超了会表现为「发送失败」而不是「验证码错误」。
+
 
 ## 跨设备历史
 
@@ -253,6 +304,18 @@ export MIM_MEDIA_PURGE_CRON="0 30 3 * * ?"  # 巡检时间
 过期后消息里的附件无法再下载，客户端显示「附件已过期或被清理」。这是有意的
 取舍：服务端不长期保存任何用户内容；需要长期留存的附件请在本机另存为。
 巡检日志：`媒体保留期巡检完成：保留 30 天，本次清理 N 个密文`。
+
+### 头像存储
+
+```bash
+export MIM_AVATAR_DIR=/var/lib/mim/avatar   # 默认 data/avatar
+```
+
+一个账号一份 `<用户名>.png`，元数据（版本号、更新时间）在 `t_avatar`，启动时自动建表。
+头像**不是端到端加密的**：服务端要直接把它返回给联系人，所以要按「公开资料」对待。
+上限 512KB、只接受 PNG（客户端上传前会重编码并丢掉 EXIF）；
+读取只允许本人或联系人，其它账号拿到用户名也读不到（404）。备份时记得连
+`MIM_AVATAR_DIR` 一起归档——虽然丢了只是回到首字母头像，没法从数据库还原。
 
 ### 启动服务端
 

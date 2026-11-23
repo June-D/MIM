@@ -15,6 +15,7 @@ import javax.sound.sampled.AudioSystem
 import javax.sound.sampled.Clip
 import javax.sound.sampled.DataLine
 import javax.sound.sampled.TargetDataLine
+import org.jetbrains.skia.EncodedImageFormat
 import org.jetbrains.skia.Image as SkiaImage
 
 /** 桌面端媒体工具：选图、解码、录音与播放。 */
@@ -92,6 +93,32 @@ object MediaTools {
         val target = Paths.get(dialog.directory, name)
         Files.write(target, bytes)
         return target.toString()
+    }
+
+    /** 头像上限：与客户端缩放后的常见尺寸留足余量，服务端还会再校验一次。 */
+    const val MAX_AVATAR_BYTES = 512 * 1024
+
+    /**
+     * 把任意受支持图片重编码成 PNG，并丢掉元数据。
+     *
+     * 直接上传原图会把 EXIF（相机型号、GPS）一起交给服务端；头像又不是端到端加密的，
+     * 所以这里一律重编码。解码不了（损坏 / 非图片）时返回 null，不猜格式。
+     */
+    fun normalizeAvatarPng(bytes: ByteArray): ByteArray? = runCatching {
+        val image = SkiaImage.makeFromEncoded(bytes)
+        val data = image.encodeToData(EncodedImageFormat.PNG) ?: return null
+        val png = data.bytes
+        if (png.size > MAX_AVATAR_BYTES) null else png
+    }.getOrNull()
+
+    /** 选一张图片当头像；取消或不合规时返回 null 并给出原因。 */
+    fun pickAvatarPng(): ByteArray? {
+        val picked = pickImage() ?: return null
+        val png = normalizeAvatarPng(picked.bytes)
+            ?: throw IllegalStateException(
+                "无法处理这张图片（格式不支持或超过 ${MAX_AVATAR_BYTES / 1024}KB）",
+            )
+        return png
     }
 
     fun decodeImage(bytes: ByteArray): ImageBitmap? = runCatching {

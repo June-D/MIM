@@ -213,6 +213,20 @@ interface MessagingBackend {
      */
     fun rememberSafetyCodes(contactId: String, codes: Map<String, String>) = Unit
 
+    /** 上传头像（PNG），返回服务端版本号。 */
+    suspend fun uploadAvatar(token: String, png: ByteArray): Int = 0
+
+    /** 删除头像。 */
+    suspend fun deleteAvatar(token: String): Boolean = false
+
+    /**
+     * 读取某账号的头像字节。
+     *
+     * 头像不是端到端加密的（要给联系人看），服务端只允许本人与联系人读取；
+     * 没有或无权读取时返回 null，界面回落到首字母头像。
+     */
+    suspend fun avatarBytes(token: String, username: String): ByteArray? = null
+
     /** 当前账号绑定的找回邮箱；未绑定或后端不支持时返回空串。 */
     suspend fun userEmail(token: String): String = ""
 

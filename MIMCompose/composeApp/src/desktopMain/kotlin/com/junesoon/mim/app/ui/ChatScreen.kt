@@ -109,6 +109,8 @@ fun ChatScreen(
     onToggleBlock: () -> Unit,
     onRemove: () -> Unit,
     safetyNumbers: List<SafetyEntry>,
+    /** 对方头像字节（服务端下发）；为空时回落到首字母头像。 */
+    peerAvatar: ByteArray? = null,
     /** 分栏布局里列表一直可见，不需要返回箭头。 */
     showBack: Boolean = true,
     /** 本次打开会话的第一条未读：在它上面画「以下为新消息」。 */
@@ -184,7 +186,12 @@ fun ChatScreen(
             if (showBack) {
                 MimIconAction(MimIcon.Back, tooltip = "返回列表", onClick = onBack)
             }
-            Avatar(name = contact.name, size = 36.dp, online = contact.online)
+            Avatar(
+                name = contact.name,
+                size = 36.dp,
+                online = contact.online,
+                image = rememberAvatar(peerAvatar),
+            )
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(1.dp),

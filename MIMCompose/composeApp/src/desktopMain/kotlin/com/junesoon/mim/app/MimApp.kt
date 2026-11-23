@@ -50,6 +50,7 @@ import com.junesoon.mim.app.ui.ChatScreen
 import com.junesoon.mim.app.ui.ContactsScreen
 import com.junesoon.mim.app.ui.DeviceScreen
 import com.junesoon.mim.app.ui.MimIcon
+import com.junesoon.mim.app.ui.MediaTools
 import com.junesoon.mim.app.ui.MimEmptyState
 import com.junesoon.mim.app.ui.MimPalette
 import com.junesoon.mim.app.ui.MimTheme
@@ -347,6 +348,7 @@ private fun ConversationWorkspace(
                     onToggleBlock = { store.toggleBlock(selectedId) },
                     onRemove = { store.removeContact(selectedId) },
                     safetyNumbers = state.safetyNumbers,
+                    peerAvatar = state.avatars[selectedId],
                     firstUnreadId = state.firstUnreadMessageId,
                     safetyChanged = state.safetyChanges,
                     onAcknowledgeSafety = store::acknowledgeSafetyChange,

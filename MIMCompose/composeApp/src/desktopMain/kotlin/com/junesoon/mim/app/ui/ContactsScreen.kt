@@ -69,6 +69,10 @@ fun ContactsScreen(
     /** 当前外观（跟随系统 / 浅色 / 深色），点一下循环切换。 */
     themeLabel: String = "",
     onCycleTheme: () -> Unit = {},
+    /** 已加载的头像字节（key 是用户名）；没有条目就显示首字母。 */
+    avatars: Map<String, ByteArray> = emptyMap(),
+    onPickAvatar: () -> Unit = {},
+    onRemoveAvatar: () -> Unit = {},
     /** 分栏布局里当前打开的会话；用于高亮选中行。 */
     selectedId: String? = null,
     modifier: Modifier = Modifier,
@@ -94,7 +98,43 @@ fun ContactsScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Avatar(name = selfName, size = 34.dp, online = true)
+            Box {
+                var showAvatarMenu by remember { mutableStateOf(false) }
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .mimHoverable(shape = CircleShape, onClick = { showAvatarMenu = true }),
+                ) {
+                    Avatar(
+                        name = selfName,
+                        size = 34.dp,
+                        online = true,
+                        image = rememberAvatar(avatars[selfName]),
+                    )
+                }
+                DropdownMenu(
+                    expanded = showAvatarMenu,
+                    onDismissRequest = { showAvatarMenu = false },
+                    containerColor = MimPalette.Card,
+                ) {
+                    DropdownMenuItem(
+                        text = { MenuRow(MimIcon.Image, "更换头像") },
+                        onClick = {
+                            showAvatarMenu = false
+                            onPickAvatar()
+                        },
+                    )
+                    if (avatars.containsKey(selfName)) {
+                        DropdownMenuItem(
+                            text = { MenuRow(MimIcon.Close, "移除头像", danger = true) },
+                            onClick = {
+                                showAvatarMenu = false
+                                onRemoveAvatar()
+                            },
+                        )
+                    }
+                }
+            }
             Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
                 Text(
                     selfName.ifBlank { "未登录" },
@@ -207,6 +247,7 @@ fun ContactsScreen(
                 items(visible, key = { it.id }) { contact ->
                     ContactRow(
                         contact = contact,
+                        image = rememberAvatar(avatars[contact.id]),
                         selected = contact.id == selectedId,
                         onClick = { onOpenChat(contact.id) },
                         onTogglePin = { onTogglePin(contact.id) },
@@ -221,6 +262,7 @@ fun ContactsScreen(
 @Composable
 private fun ContactRow(
     contact: Contact,
+    image: androidx.compose.ui.graphics.ImageBitmap?,
     selected: Boolean,
     onClick: () -> Unit,
     onTogglePin: () -> Unit,
@@ -254,7 +296,12 @@ private fun ContactRow(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            Avatar(name = contact.name, size = 38.dp, online = contact.online)
+            Avatar(
+                name = contact.name,
+                size = 38.dp,
+                online = contact.online,
+                image = image,
+            )
             Column(
                 modifier = Modifier.weight(1f),
                 verticalArrangement = Arrangement.spacedBy(2.dp),

@@ -281,6 +281,10 @@ data class ClearResultDto(
     val forBoth: Boolean = false,
 )
 
+/** 上传头像（`POST /user/avatar`）：客户端已重编码成 PNG。 */
+@Serializable
+data class AvatarRequest(val image: String)
+
 /** 绑定 / 解绑找回邮箱（`POST /user/email`）。 */
 @Serializable
 data class BindEmailRequest(

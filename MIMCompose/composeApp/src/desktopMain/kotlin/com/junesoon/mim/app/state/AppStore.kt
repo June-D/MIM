@@ -69,6 +69,15 @@ data class AppState(
     val pendingSyncRequest: SyncRequest? = null,
     /** 正在把历史加密发给另一台设备。 */
     val syncBusy: Boolean = false,
+    /**
+     * 已加载的头像字节：key 是用户名。
+     *
+     * 头像不是端到端加密的（要给联系人看），所以这里是服务端下发的原始 PNG，
+     * 由界面按需解码；没有条目就回落到首字母头像。
+     */
+    val avatars: Map<String, ByteArray> = emptyMap(),
+    /** 正在上传 / 删除头像。 */
+    val avatarBusy: Boolean = false,
     /** 记住的账号，用于表单预填与自动登录。 */
     val rememberedUsername: String = "",
     val rememberedPassword: String = "",
@@ -228,6 +237,7 @@ class AppStore(
                     refreshFriendRequests(result.token)
                     // 断线期间对方清过会话的话，登录时先把本机缓存对齐再展示。
                     reconcileCleared(result.token, result.contacts.map { it.id })
+                    loadAvatar(result.token, result.displayName)
                     maybeRequestHistorySync(result.token)
                 }
                 .onFailure { error ->
@@ -476,6 +486,7 @@ class AppStore(
                     val newest = history.maxOfOrNull { it.epochMs } ?: 0L
                     runCatching { backend.setReadMark(contactId, newest) }
                 }
+            loadAvatar(currentToken, contactId)
             runCatching { backend.markRead(currentToken, contactId) }
             refreshStates(currentToken, contactId)
             loadSafetyNumbers(currentToken, contactId)
@@ -1040,6 +1051,61 @@ class AppStore(
         _state.update { it.copy(notice = null) }
     }
 
+    /** 上传头像；字节必须是 PNG（界面层已重编码，EXIF 不会上传）。 */
+    fun uploadAvatar(png: ByteArray) {
+        val currentToken = token ?: return
+        _state.update { it.copy(avatarBusy = true, error = null) }
+        scope.launch {
+            runCatching { backend.uploadAvatar(currentToken, png) }
+                .onSuccess {
+                    _state.update { current ->
+                        current.copy(
+                            avatarBusy = false,
+                            avatars = current.avatars + (current.selfName to png),
+                            notice = "头像已更新",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(avatarBusy = false, error = error.message ?: "头像上传失败") }
+                }
+        }
+    }
+
+    fun removeAvatar() {
+        val currentToken = token ?: return
+        _state.update { it.copy(avatarBusy = true, error = null) }
+        scope.launch {
+            runCatching { backend.deleteAvatar(currentToken) }
+                .onSuccess {
+                    _state.update { current ->
+                        current.copy(
+                            avatarBusy = false,
+                            avatars = current.avatars - current.selfName,
+                            notice = "已移除头像",
+                        )
+                    }
+                }
+                .onFailure { error ->
+                    _state.update { it.copy(avatarBusy = false, error = error.message ?: "移除头像失败") }
+                }
+        }
+    }
+
+    /** 界面层选择文件失败时把原因显示出来，不写进日志了事。 */
+    fun reportError(message: String) {
+        _state.update { it.copy(error = message) }
+    }
+
+    /** 按需加载头像；已加载过或后端不支持时直接跳过。 */
+    private suspend fun loadAvatar(currentToken: String, username: String) {
+        if (username.isBlank() || _state.value.avatars.containsKey(username)) {
+            return
+        }
+        val bytes = runCatching { backend.avatarBytes(currentToken, username) }.getOrNull() ?: return
+        _state.update { it.copy(avatars = it.avatars + (username to bytes)) }
+    }
+
     /**
      * 另一台设备请求历史同步。
      *
@@ -1336,6 +1402,8 @@ class AppStore(
                 }
                 // 顺带对账：对方在线时靠推送通知，离线时只能靠这一次查询。
                 reconcileCleared(currentToken, fresh.map { it.id })
+                // 头像按需补：一次最多 30 个，失败就保持首字母，不影响列表。
+                fresh.take(30).forEach { loadAvatar(currentToken, it.id) }
             }
     }
 

@@ -20,10 +20,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
 /**
- * 首字母头像。
+ * 头像：有真实图片就显示图片，没有就按名字稳定推导配色与首字母。
  *
- * 服务端没有头像上传接口，所以头像由名字稳定地推导出配色与首字母：
- * 同一账号在任何设备上看到的颜色一致。接入真实头像后只替换这一处。
+ * 图片由调用方从 `AppState.avatars` 取（服务端只存头像，不是端到端加密的）。
  */
 private val AvatarPalettes = listOf(
     listOf(Color(0xFF0F5B4F), Color(0xFF2E8474)),
@@ -39,6 +38,7 @@ fun Avatar(
     name: String,
     size: Dp = 40.dp,
     online: Boolean? = null,
+    image: androidx.compose.ui.graphics.ImageBitmap? = null,
     modifier: Modifier = Modifier,
 ) {
     val palette = AvatarPalettes[stableIndex(name)]
@@ -50,13 +50,22 @@ fun Avatar(
                 .background(Brush.linearGradient(palette)),
             contentAlignment = Alignment.Center,
         ) {
-            Text(
-                initial(name),
-                color = Color(0xFFFDFDFB),
-                fontSize = (size.value * 0.38f).sp,
-                fontWeight = FontWeight.SemiBold,
-                style = MaterialTheme.typography.titleMedium,
-            )
+            if (image != null) {
+                androidx.compose.foundation.Image(
+                    bitmap = image,
+                    contentDescription = null,
+                    contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            } else {
+                Text(
+                    initial(name),
+                    color = Color(0xFFFDFDFB),
+                    fontSize = (size.value * 0.38f).sp,
+                    fontWeight = FontWeight.SemiBold,
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
         }
         if (online == true) {
             Box(
@@ -70,6 +79,13 @@ fun Avatar(
         }
     }
 }
+
+/** 把服务端下发的 PNG 解成可绘制的位图；同一份字节只解一次。 */
+@Composable
+fun rememberAvatar(bytes: ByteArray?): androidx.compose.ui.graphics.ImageBitmap? =
+    androidx.compose.runtime.remember(bytes) {
+        bytes?.let { MediaTools.decodeImage(it) }
+    }
 
 private fun initial(name: String): String {
     val trimmed = name.trim()
