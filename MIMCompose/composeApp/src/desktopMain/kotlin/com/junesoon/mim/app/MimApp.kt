@@ -12,8 +12,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.VerticalDivider
 import androidx.compose.runtime.Composable
@@ -41,6 +43,7 @@ import com.junesoon.mim.app.data.SecureBackend
 import com.junesoon.mim.app.state.AppState
 import com.junesoon.mim.app.state.AppStore
 import com.junesoon.mim.app.state.Screen
+import com.junesoon.mim.app.domain.SyncRequest
 import com.junesoon.mim.app.ui.AddContactScreen
 import com.junesoon.mim.app.ui.AuthScreen
 import com.junesoon.mim.app.ui.ChatScreen
@@ -209,13 +212,85 @@ fun MimApp() {
                     devices = state.devices,
                     onBack = store::backToContacts,
                     onRevoke = store::revokeDevice,
+                    trustedDevices = state.trustedDevices,
+                    onRevokeTrust = store::revokeTrustedDevice,
                     notice = state.notice,
                     error = state.error,
+                )
+            }
+
+            // 历史同步确认：这是唯一一次由本机用户决定「要不要把历史交给另一台设备」。
+            state.pendingSyncRequest?.let { request ->
+                SyncRequestDialog(
+                    request = request,
+                    busy = state.syncBusy,
+                    onApprove = store::approveSyncRequest,
+                    onReject = store::rejectSyncRequest,
                 )
             }
         }
         }
     }
+}
+
+/**
+ * 「另一台设备请求同步历史」的确认框。
+ *
+ * 显示设备 id 与身份指纹：指纹要能和那台设备「我的设备」页上的值对上，
+ * 对不上说明不是同一台机器，应当拒绝。
+ */
+@Composable
+private fun SyncRequestDialog(
+    request: SyncRequest,
+    busy: Boolean,
+    onApprove: () -> Unit,
+    onReject: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = { if (!busy) onReject() },
+        title = { Text("另一台设备请求同步历史") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    "设备 ${request.deviceId} 想获取最近的聊天记录。同意后，本机会把" +
+                        "能解密的历史（最近 30 天、最多 50 条文本）重新加密发给它。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MimPalette.Ink,
+                )
+                if (request.fingerprint.isNotBlank()) {
+                    Text(
+                        "对方身份指纹",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MimPalette.InkSoft,
+                    )
+                    Text(
+                        request.fingerprint,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MimPalette.TealDeep,
+                    )
+                    Text(
+                        "请和那台设备「我的设备」页显示的指纹比对；不一致说明不是同一台机器。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MimPalette.InkSoft,
+                    )
+                }
+                Text(
+                    "如果不是你本人发起的，请拒绝。拒绝后它仍能正常收发消息，但看不到历史。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MimPalette.InkSoft,
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onApprove, enabled = !busy) {
+                Text(if (busy) "同步中…" else "同意并同步")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onReject, enabled = !busy) { Text("拒绝") }
+        },
+        containerColor = MimPalette.Card,
+    )
 }
 
 /** 会话列表 + 聊天详情。宽窗口下的主工作区。 */

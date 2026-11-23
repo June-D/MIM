@@ -17,6 +17,7 @@ import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.MessageHit
 import com.junesoon.mim.app.domain.SafetyEntry
 import com.junesoon.mim.app.domain.SafetyNumber
+import com.junesoon.mim.app.domain.SyncRequest
 import com.junesoon.mim.app.domain.TwoFactorSetup
 import com.junesoon.mim.app.domain.UserSummary
 import kotlinx.coroutines.CoroutineScope
@@ -62,6 +63,12 @@ data class AppState(
     val blockedPeers: Set<String> = emptySet(),
     /** 置顶的会话；只在本机生效。 */
     val pinnedPeers: Set<String> = emptySet(),
+    /** 已批准历史同步的本账号其它设备；只在本机记录。 */
+    val trustedDevices: Set<String> = emptySet(),
+    /** 另一台设备正在请求历史同步；非 null 时弹确认框。 */
+    val pendingSyncRequest: SyncRequest? = null,
+    /** 正在把历史加密发给另一台设备。 */
+    val syncBusy: Boolean = false,
     /** 记住的账号，用于表单预填与自动登录。 */
     val rememberedUsername: String = "",
     val rememberedPassword: String = "",
@@ -171,6 +178,7 @@ class AppStore(
                     val wipedAt = runCatching { guard.consumeWipedAt(account) }.getOrNull()
                     token = result.token
                     blockedPeers = backend.blockedContacts().toMutableSet()
+                    trustedDevices = backend.trustedDevices().toMutableSet()
                     pinnedPeers = backend.pinnedContacts().toMutableSet()
                     _state.update { current ->
                         val next = current.copy(
@@ -186,6 +194,7 @@ class AppStore(
                                 "本机历史已于 ${formatStamp(it)} 清空（连续 ${guard.limit} 次密码错误）"
                             } ?: current.notice,
                             blockedPeers = blockedPeers.toSet(),
+                            trustedDevices = trustedDevices.toSet(),
                             pinnedPeers = pinnedPeers.toSet(),
                             rememberedUsername = if (remember) username.trim() else "",
                             rememberedPassword = if (remember) password else "",
@@ -219,6 +228,7 @@ class AppStore(
                     refreshFriendRequests(result.token)
                     // 断线期间对方清过会话的话，登录时先把本机缓存对齐再展示。
                     reconcileCleared(result.token, result.contacts.map { it.id })
+                    maybeRequestHistorySync(result.token)
                 }
                 .onFailure { error ->
                     // 本机登录保护：只有「手动输入 + 账号密码错误」才计数。
@@ -760,6 +770,7 @@ class AppStore(
                             screen = Screen.Contacts,
                             contacts = current.contacts.filterNot { it.id == peer },
                             blockedPeers = blockedPeers.toSet(),
+                            trustedDevices = trustedDevices.toSet(),
                             pinnedPeers = pinnedPeers.toSet(),
                             firstUnreadMessageId = null,
                             notice = "已移除 $peer，本机历史仍保留",
@@ -1030,6 +1041,104 @@ class AppStore(
     }
 
     /**
+     * 另一台设备请求历史同步。
+     *
+     * 已批准的设备直接转发；没批准过的一律只落到「待确认」，
+     * 绝不自动把历史交给一台新注册的设备——这是这个功能的信任边界。
+     */
+    /** 另一台设备请求历史同步的入口（推送与测试共用）。 */
+    fun onSyncRequested(deviceId: String) {
+        scope.launch { handleSyncRequested(deviceId) }
+    }
+
+    private suspend fun handleSyncRequested(deviceId: String) {
+        val currentToken = token ?: return
+        if (deviceId in trustedDevices) {
+            forwardHistory(currentToken, deviceId)
+            return
+        }
+        val fingerprint = runCatching { backend.deviceFingerprint(currentToken, deviceId) }
+            .getOrNull().orEmpty()
+        _state.update { it.copy(pendingSyncRequest = SyncRequest(deviceId, fingerprint)) }
+    }
+
+    /** 用户确认后：记入信任列表，并立刻把最近历史加密发过去。 */
+    fun approveSyncRequest() {
+        val currentToken = token ?: return
+        val request = _state.value.pendingSyncRequest ?: return
+        trustedDevices += request.deviceId
+        _state.update { it.copy(pendingSyncRequest = null, trustedDevices = trustedDevices.toSet()) }
+        scope.launch {
+            runCatching { backend.setTrustedDevice(request.deviceId, true) }
+            forwardHistory(currentToken, request.deviceId)
+        }
+    }
+
+    fun rejectSyncRequest() {
+        val request = _state.value.pendingSyncRequest ?: return
+        _state.update {
+            it.copy(
+                pendingSyncRequest = null,
+                notice = "已拒绝设备 ${request.deviceId} 的历史同步请求",
+            )
+        }
+    }
+
+    /** 撤销授权：之后再请求会重新弹确认框。不影响设备本身。 */
+    fun revokeTrustedDevice(deviceId: String) {
+        trustedDevices -= deviceId
+        _state.update {
+            it.copy(
+                trustedDevices = trustedDevices.toSet(),
+                notice = "已撤销设备 $deviceId 的历史同步授权",
+            )
+        }
+        scope.launch { runCatching { backend.setTrustedDevice(deviceId, false) } }
+    }
+
+    private suspend fun forwardHistory(currentToken: String, deviceId: String) {
+        _state.update { it.copy(syncBusy = true, error = null) }
+        runCatching { backend.syncToDevice(currentToken, deviceId) }
+            .onSuccess { count ->
+                _state.update {
+                    it.copy(
+                        syncBusy = false,
+                        notice = if (count > 0) {
+                            "已向设备 $deviceId 同步 $count 条最近历史"
+                        } else {
+                            "本机没有可同步的内容（只同步最近 30 天、本机留存的文本消息）"
+                        },
+                    )
+                }
+            }
+            .onFailure { error ->
+                _state.update { it.copy(syncBusy = false, error = error.message ?: "历史同步失败") }
+            }
+    }
+
+    /**
+     * 新设备登录时主动请另一台设备转发历史。
+     *
+     * 只在本机确实没有历史、且账号下还有别的设备时才发：
+     * 否则每次登录都会去打扰另一台设备。
+     */
+    private suspend fun maybeRequestHistorySync(currentToken: String) {
+        if (backend.hasLocalHistory()) {
+            return
+        }
+        val devices = runCatching { backend.devices(currentToken) }.getOrDefault(emptyList())
+        if (devices.none { !it.current }) {
+            return
+        }
+        runCatching { backend.requestHistorySync(currentToken) }
+            .onSuccess {
+                _state.update {
+                    it.copy(notice = "已请求另一台设备同步最近历史，需要在那台设备上确认")
+                }
+            }
+    }
+
+    /**
      * 把本机缓存对齐到服务端的清除点。
      *
      * 对方执行「双方清除」时，如果这台设备不在线就收不到推送，
@@ -1126,11 +1235,7 @@ class AppStore(
                             refreshContacts(current, force = true)
                             refreshUnread(current, force = true)
                         }
-                        is PushEvent.SyncRequested -> {
-                            // 多设备同步尚未在界面上开放（设计见 docs/device-sync-design.md）。
-                            // 这里先接住事件、不静默丢弃未知类型；转发与确认弹窗在下一提交接入。
-                            Unit
-                        }
+                        is PushEvent.SyncRequested -> onSyncRequested(event.deviceId)
                         is PushEvent.Cleared -> {
                             // 对方清除了会话：本机缓存与「我上传的密文」一起释放。
                             val released = ownMediaIds(event.peer)
@@ -1291,6 +1396,8 @@ class AppStore(
         }
 
     private var blockedPeers: MutableSet<String> = mutableSetOf()
+    /** 已批准历史同步的设备；服务端不知道这份名单。 */
+    private var trustedDevices: MutableSet<String> = mutableSetOf()
     private var pinnedPeers: MutableSet<String> = mutableSetOf()
     private var polling = false
     private var pushJob: Job? = null

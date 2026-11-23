@@ -9,6 +9,7 @@ import com.junesoon.mim.app.data.MessagingBackend
 import com.junesoon.mim.app.data.TwoFactorRequiredException
 import com.junesoon.mim.app.domain.ChatMessage
 import com.junesoon.mim.app.domain.ClearPoint
+import com.junesoon.mim.app.domain.DeviceInfo
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.MediaAttachment
 import com.junesoon.mim.app.domain.PeerIdentityKey
@@ -464,6 +465,159 @@ class AppStoreTest {
         succeed = true
         store.login("alice", "pass1234", "desktop")
         assertEquals(0, guard.failures("alice"))
+    }
+
+    /**
+     * 未批准的设备请求历史：只弹确认，绝不自动转发。
+     *
+     * 这是整个功能的信任边界——拿到 JWT 的人注册一台新设备也能发请求，
+     * 服务端无法替他拒绝，只有本机用户能。
+     */
+    @Test
+    fun unapproved_sync_request_waits_for_confirmation() {
+        val forwarded = mutableListOf<String>()
+        val trustedWrites = mutableListOf<Pair<String, Boolean>>()
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, emptyList())
+
+            override suspend fun deviceFingerprint(token: String, deviceId: String): String =
+                "A1B2 C3D4 E5F6 0718"
+
+            override suspend fun syncToDevice(token: String, deviceId: String, limit: Int): Int {
+                forwarded += deviceId
+                return 12
+            }
+
+            override fun setTrustedDevice(deviceId: String, trusted: Boolean) {
+                trustedWrites += deviceId to trusted
+            }
+
+            override fun hasLocalHistory(): Boolean = true
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+
+        store.onSyncRequested("device-b")
+
+        val pending = store.state.value.pendingSyncRequest
+        assertTrue(pending != null && pending.deviceId == "device-b")
+        assertEquals("A1B2 C3D4 E5F6 0718", pending!!.fingerprint)
+        assertTrue(forwarded.isEmpty(), "没确认之前一条历史都不能发")
+
+        store.approveSyncRequest()
+        assertEquals(listOf("device-b"), forwarded)
+        assertEquals(listOf("device-b" to true), trustedWrites)
+        assertTrue("device-b" in store.state.value.trustedDevices)
+        assertTrue(store.state.value.pendingSyncRequest == null)
+    }
+
+    /** 拒绝：不转发、不记信任，只留一条提示。 */
+    @Test
+    fun reject_sync_request_sends_nothing() {
+        var forwarded = 0
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, emptyList())
+
+            override suspend fun syncToDevice(token: String, deviceId: String, limit: Int): Int {
+                forwarded++
+                return 1
+            }
+
+            override fun hasLocalHistory(): Boolean = true
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+        store.onSyncRequested("device-c")
+        store.rejectSyncRequest()
+
+        assertEquals(0, forwarded)
+        assertTrue(store.state.value.pendingSyncRequest == null)
+        assertTrue(store.state.value.notice.orEmpty().contains("拒绝"))
+    }
+
+    /** 已批准的设备再来请求：直接转发，不再打扰用户。 */
+    @Test
+    fun trusted_device_is_forwarded_without_asking() {
+        val forwarded = mutableListOf<String>()
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, emptyList())
+
+            override fun trustedDevices(): Set<String> = setOf("device-d")
+
+            override suspend fun syncToDevice(token: String, deviceId: String, limit: Int): Int {
+                forwarded += deviceId
+                return 3
+            }
+
+            override fun hasLocalHistory(): Boolean = true
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+        store.onSyncRequested("device-d")
+
+        assertEquals(listOf("device-d"), forwarded)
+        assertTrue(store.state.value.pendingSyncRequest == null, "已批准就不该再弹框")
+    }
+
+    /** 新设备（本机没有历史）登录时，主动请另一台设备转发。 */
+    @Test
+    fun new_device_asks_for_history_on_login() {
+        var requested = 0
+        val backend = object : MessagingBackend by DemoBackend() {
+            override suspend fun login(
+                username: String,
+                password: String,
+                deviceName: String,
+                code: String?,
+            ): LoginResult = LoginResult("t", username, emptyList())
+
+            override fun hasLocalHistory(): Boolean = false
+
+            override suspend fun devices(token: String): List<DeviceInfo> = listOf(
+                DeviceInfo("device-old", "旧电脑", null, current = false),
+                DeviceInfo("device-me", "本机", null, current = true),
+            )
+
+            override suspend fun requestHistorySync(token: String) {
+                requested++
+            }
+        }
+        val store = AppStore(
+            backend = backend,
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined),
+            credentials = CredentialStore(Files.createTempDirectory("mim-remember")),
+        )
+        store.login("alice", "pass1234", "desktop")
+
+        assertEquals(1, requested)
+        assertTrue(store.state.value.notice.orEmpty().contains("另一台设备"))
     }
 
     @Test

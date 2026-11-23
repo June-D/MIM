@@ -41,6 +41,9 @@ fun DeviceScreen(
     devices: List<DeviceInfo>,
     onBack: () -> Unit,
     onRevoke: (String) -> Unit,
+    /** 已批准历史同步的设备；只在本机记录。 */
+    trustedDevices: Set<String> = emptySet(),
+    onRevokeTrust: (String) -> Unit = {},
     notice: String? = null,
     error: String? = null,
 ) {
@@ -117,6 +120,26 @@ fun DeviceScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
+                        if (device.deviceId in trustedDevices) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                Tag("已批准历史同步", MimPalette.Teal, MimPalette.TealSoft)
+                                Text(
+                                    "撤销授权",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MimPalette.InkSoft,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .mimHoverable(
+                                            shape = RoundedCornerShape(4.dp),
+                                            onClick = { onRevokeTrust(device.deviceId) },
+                                        )
+                                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                                )
+                            }
+                        }
                         device.lastSeen?.let {
                             Text(
                                 "最近活跃 " + SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault())
@@ -146,7 +169,8 @@ fun DeviceScreen(
                 ) {
                     MimIcon(MimIcon.Shield, size = 15.dp, tint = MimPalette.Teal)
                     Text(
-                        "注销后该设备立即失去访问能力。若这里不是你的设备，建议同时修改密码。",
+                        "注销后该设备立即失去访问能力。若这里不是你的设备，建议同时修改密码。" +
+                            "「已批准历史同步」只影响它能否拉取历史，与本机缓存和消息收发无关。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

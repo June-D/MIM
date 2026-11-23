@@ -14,6 +14,13 @@ data class PeerIdentityKey(
     val publicKeyBase64: String,
 )
 
+/** 一台设备请求历史同步，等本机用户确认。 */
+data class SyncRequest(
+    val deviceId: String,
+    /** 请求设备身份公钥的短指纹，供线下比对；取不到时为空串。 */
+    val fingerprint: String,
+)
+
 /** 与某台对端设备的安全码。 */
 data class SafetyEntry(
     val deviceId: String,

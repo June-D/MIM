@@ -76,6 +76,17 @@ interface MessagingBackend {
      */
     suspend fun requestHistorySync(token: String) = Unit
 
+    /** 本机已批准「历史同步」的本账号其它设备。只记设备 id，不上报服务端。 */
+    fun trustedDevices(): Set<String> = emptySet()
+
+    fun setTrustedDevice(deviceId: String, trusted: Boolean) = Unit
+
+    /** 本机是否已有历史缓存（决定新设备登录时要不要请求另一台设备同步）。 */
+    fun hasLocalHistory(): Boolean = false
+
+    /** 某台本账号设备的身份公钥短指纹；取不到时返回 null（不猜）。 */
+    suspend fun deviceFingerprint(token: String, deviceId: String): String? = null
+
     /**
      * 把本机留存的最近历史重新加密给本账号的另一台设备，返回实际提交条数。
      *

@@ -108,6 +108,21 @@ class LocalVault(
             runCatching { JsonCodec.decode<Map<String, Long>>(it) }.getOrNull()
         }.orEmpty()
 
+    /**
+     * 已批准「历史同步」的本账号其它设备。
+     *
+     * 只记设备 id：批准与否是本机决定，不上报服务端——否则服务端就成了
+     * 「谁批准了谁」的权威，和这个功能要防的东西正好相反。
+     */
+    fun loadTrustedDevices(): Set<String> =
+        read("trusted_devices.bin")?.let {
+            runCatching { JsonCodec.decode<Set<String>>(it) }.getOrNull()
+        }.orEmpty()
+
+    fun saveTrustedDevices(devices: Set<String>) {
+        write("trusted_devices.bin", JsonCodec.encode(devices))
+    }
+
     fun saveServerIds(ids: Map<String, Long>) {
         write("server_ids.bin", JsonCodec.encode(ids))
     }

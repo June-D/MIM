@@ -123,6 +123,9 @@ class SecureBackend(
 
     /** key 形如 `联系人|设备`，值是上次见到的安全码。 */
     private var seenSafetyCodes: MutableMap<String, String> = mutableMapOf()
+
+    /** 已批准历史同步的本账号其它设备。 */
+    private var trustedDevices: MutableSet<String> = mutableSetOf()
     private val mediaCache = object : LinkedHashMap<String, ByteArray>(8, 0.75f, true) {}
     private var mediaCacheSize = 0L
     private var outbox: MutableList<OutboxEntry> = mutableListOf()
@@ -510,6 +513,7 @@ class SecureBackend(
         pinnedPeers = vault.loadPinned().toMutableSet()
         readMarks = vault.loadReadMarks().toMutableMap()
         seenSafetyCodes = vault.loadSafetyCodes().toMutableMap()
+        trustedDevices = vault.loadTrustedDevices().toMutableSet()
         return LoginResult(token, username, contacts(token))
     }
 
@@ -931,6 +935,24 @@ class SecureBackend(
             plain
         }
         return cached
+    }
+
+    override fun trustedDevices(): Set<String> = trustedDevices.toSet()
+
+    override fun setTrustedDevice(deviceId: String, trusted: Boolean) {
+        if (trusted) trustedDevices += deviceId else trustedDevices -= deviceId
+        vault.saveTrustedDevices(trustedDevices)
+    }
+
+    override fun hasLocalHistory(): Boolean = messages.isNotEmpty()
+
+    override suspend fun deviceFingerprint(token: String, deviceId: String): String? {
+        val self = cachedUsername.ifBlank { return null }
+        val key = runCatching { peerIdentityKeys(token, self) }
+            .getOrDefault(emptyList())
+            .firstOrNull { it.deviceId == deviceId }
+            ?.publicKeyBase64 ?: return null
+        return com.junesoon.mim.app.domain.DeviceFingerprint.of(key)
     }
 
     override suspend fun requestHistorySync(token: String) {
