@@ -61,6 +61,77 @@ func liveSmoke(_ arguments: [String]) async {
     }
 }
 
+/// `--chat <url>`：注册两个临时账号，跑一遍「A 发 → B 收 → B 回 → A 收」。
+///
+/// 这是 M2 的核心验证：X3DH 首条消息 + 双棘轮 + 服务端多设备副本 + 解密，
+/// 全部走 Swift 与真服务端，不依赖界面。
+func chatSmoke(_ arguments: [String]) async {
+    guard arguments.count >= 3, let url = URL(string: arguments[2]) else {
+        FileHandle.standardError.write(Data("用法：MIMKitSmoke --chat <url>\n".utf8))
+        exit(2)
+    }
+    let suffix = String(Int(Date().timeIntervalSince1970) % 100000)
+    let userA = "swiftchat-a-\(suffix)"
+    let userB = "swiftchat-b-\(suffix)"
+    let password = "SwiftChat123"
+
+    do {
+        // 1) 注册 + 登录（各自独立设备 id）
+        let clientA = MIMClient(baseURL: url, deviceId: "swift-a-\(suffix)")
+        let clientB = MIMClient(baseURL: url, deviceId: "swift-b-\(suffix)")
+        try await clientA.register(username: userA, password: password)
+        try await clientB.register(username: userB, password: password)
+        _ = try await clientA.login(username: userA, password: password)
+        _ = try await clientB.login(username: userB, password: password)
+        check(true, "两个账号已注册并登录（\(userA) / \(userB)）")
+
+        // 2) 发布密钥（不发布的话对方查不到预密钥）
+        let bundleA = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        let bundleB = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        try await clientA.publishKeys(password: password, deviceName: "Swift A", bundle: bundleA)
+        try await clientB.publishKeys(password: password, deviceName: "Swift B", bundle: bundleB)
+        check(true, "双方密钥已发布")
+
+        // 3) A → B：首条消息（X3DH + 证书信封）
+        let sessionA = MessagingSession(client: clientA, bundle: bundleA)
+        let hello = "你好，来自 Swift \(suffix)"
+        let delivered = try await sessionA.sendText(to: userB, text: hello)
+        check(delivered >= 1, "A 已投递到 \(delivered) 台设备")
+
+        // 4) B 收到并解密
+        let sessionB = MessagingSession(client: clientB, bundle: bundleB)
+        let inboxB = try await sessionB.receive()
+        guard let firstInB = inboxB.first else {
+            check(false, "B 没有收到消息")
+            exit(1)
+        }
+        check(firstInB.text == hello, "B 解出：\(firstInB.text)")
+        check(firstInB.peer == userA, "B 识别出是从 \(firstInB.peer) 发来的")
+
+        // 5) B 回复：走已建立的会话（双棘轮）
+        let reply = "收到，这是回信 \(suffix)"
+        _ = try await sessionB.sendText(to: userA, text: reply)
+        let inboxA = try await sessionA.receive()
+        guard let firstInA = inboxA.first else {
+            check(false, "A 没有收到回信")
+            exit(1)
+        }
+        check(firstInA.text == reply, "A 解出回信：\(firstInA.text)")
+
+        // 6) 会话存储与索引都要能落盘（界面侧会加密存起来）
+        check(!sessionA.sessions.isEmpty, "会话索引非空（\(sessionA.sessions.count) 条）")
+        print("CHAT_SMOKE_OK")
+    } catch {
+        FileHandle.standardError.write(Data("✗ 聊天链路失败：\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--chat" {
+    await chatSmoke(CommandLine.arguments)
+    exit(0)
+}
+
 if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--login" {
     await liveSmoke(CommandLine.arguments)
     exit(0)

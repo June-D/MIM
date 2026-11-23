@@ -521,6 +521,13 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS M2 协议核心打通（`swift run MIMKitSmoke --chat`）：两个临时账号注册 →
+  发钥 → A 发首条消息（X3DH + 证书信封）→ B 解密 → B 回信（双棘轮）→ A 解密，
+  全部走 Swift + 真服务端。踩到并修掉 6 个契约问题：`/cert/sender` 而非 `/cert`、
+  `/message` 而非 `/message/send`、`/prekey` 返回列表、公钥 Base64↔hex 三层不一致、
+  `alg` 只认固定字符串、会话存储必须 `{"sessions":[]}` 且 `state.skipped` 必填；
+  另有查询串被 `URLComponents.path` 转义成 `%3F` 导致的「用户名不合法」。
+
 - iOS M1 在模拟器（iPhone 17 / iOS 27.2）跑通：登录 → 发布密钥 → 设备列表，
   密钥包存 Keychain 并显示身份指纹。踩到两个 iOS 特有问题并修掉：
   模拟器关签名导致 Keychain `-34018`（症状像「登录了但没身份」）；

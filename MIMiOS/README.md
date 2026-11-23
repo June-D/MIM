@@ -37,8 +37,9 @@ cd MIMiOS/MIMiOSApp && xcodegen generate
 ./build.sh                      # 设备架构（arm64），不签名 → BUILD SUCCEEDED
 ./build.sh simulator            # 模拟器（需要先下载模拟器运行时）
 
-# 4) 与真服务端联调（不需要模拟器）：登录 → 发布密钥 → 设备列表 → 注销
+# 4) 与真服务端联调（不需要模拟器）
 swift run MIMKitSmoke --login http://127.0.0.1:8080 composealice <密码>
+swift run MIMKitSmoke --chat  http://127.0.0.1:8080   # 两个临时账号互发文本
 
 # 5) 在 Xcode 里跑起来（选 Team 后可装真机）
 open MIMiOSApp.xcodeproj

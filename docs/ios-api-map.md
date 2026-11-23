@@ -88,6 +88,22 @@ MIMKIT_SMOKE_OK
 - 返回 0 成功，非 0 是 `MIM_ERR_*`；**参数错与密码学失败分开**（1 vs 2/4/5），不要都当「失败」处理；
 - 消息与状态都是 UTF-8 JSON，加字段不破坏 ABI。
 
+### 文本收发已用真服务端验证（M2 的协议核心）
+
+```bash
+cd MIMiOS/MIMKit && swift run MIMKitSmoke --chat http://127.0.0.1:8080
+# · 两个账号已注册并登录（swiftchat-a-…/swiftchat-b-…）
+# · 双方密钥已发布
+# · A 已投递到 1 台设备
+# · B 解出：你好，来自 Swift …
+# · B 识别出是从 swiftchat-a-… 发来的
+# · A 解出回信：收到，这是回信 …
+# · 会话索引非空（1 条）
+# CHAT_SMOKE_OK
+```
+
+覆盖 X3DH 首条消息（含发送者证书）、双棘轮回信、多设备副本、会话存储往返。
+
 ### 与真服务端联调已验证（M1 的 HTTP 路径）
 
 ```bash
@@ -106,7 +122,16 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
 1. **命名风格不是统一的**：Rust DTO 是 `snake_case`，服务端 DTO 是 `camelCase`。
    `MIMClient` 不能对请求套 `.convertToSnakeCase`，否则 `deviceId` 变成 `device_id`，
    服务端回「设备标识不能为空」。MimCore（Rust 层）才用 snake_case。
-2. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
+2. **`GET /prekey/{username}` 即使带 `deviceId` 也返回列表**，要按 deviceId 取那一份；
+3. **公钥编码三层不一致**：服务端是 Base64(SPKI)，Rust 要 hex，`alg` 只认
+   `X3DH-P256-DOUBLE-RATCHET-AES-256-GCM`。把 Base64 当 hex 传会得到
+   `handshake` 失败；`alg` 写错会被服务端拒为「不支持的加密算法」。
+4. **会话存储的形状**：Rust 的 `SessionStore` 是 `{"sessions": []}`，且
+   `StateSnapshot.skipped` 是必填数组（没有 serde default）。少给一项就
+   `invalidArgument`——这个错误不带任何细节，只能靠对照结构体排查。
+5. **查询串必须单独设置**：把 `?deviceId=…` 塞进 `URLComponents.path` 会被转义成
+   `%3F`，服务端收到的用户名变成 `xxx?deviceId=yyy`，报「用户名不合法」。
+6. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
    `POST /prekey/one-time` 返回数字、某些接口是 null。只关心 `status` 的请求
    用 `MIMEnvelope<IgnoredPayload>` 吞掉 `data`，别为类型匹配反复改结构体。
 
@@ -122,7 +147,10 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
 | | `GET /user/info` | 校验令牌是否还活着 |
 | | `POST /key/bundle` / `GET /key/{username}` | 上传/拉取预密钥包 |
 | | `GET /user/devices` / `DELETE /user/device/{id}` | 设备列表与注销 |
-| M2 文本 | `POST /message/send` / `GET /message/history` | 发送与拉历史 |
+| M2 文本 | `POST /message` | 发送密文副本（**路径是 `/message`，不是 `/message/send`**） |
+| | `GET /message/undelivered` | 拉未投递（拉过即标记已投递） |
+| | `GET /message/history/{peer}?tags=…` | 历史 |
+| | `POST /cert/sender` | 为本设备签发发送者证书（`/cert` 是 404） |
 | | `POST /message/read` | 已读（带 `clientMsgIds` 才能跨设备副本） |
 | | `POST /message/recall` | 撤回（一次性凭证） |
 | | `POST /message/clear` / `GET /message/clear` | 清除范围与对账 |

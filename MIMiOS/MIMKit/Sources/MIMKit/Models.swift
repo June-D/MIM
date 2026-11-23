@@ -111,6 +111,25 @@ public struct StateSnapshot: Codable, Equatable {
     public let sendCount: UInt32
     public let recvCount: UInt32
     public let prevSendCount: UInt32
+    /// 跳过的消息密钥。Rust 侧是必填数组（没有 serde default），
+    /// 少传这一项整份状态会反序列化失败（表现为 invalidArgument）。
+    public let skipped: [JSONValue]
+
+    public init(rootKey: String, sendChainKey: String?, recvChainKey: String?,
+                dhSelfPrivate: String, dhSelfPublic: String, dhRemotePublic: String?,
+                sendCount: UInt32, recvCount: UInt32, prevSendCount: UInt32,
+                skipped: [JSONValue] = []) {
+        self.rootKey = rootKey
+        self.sendChainKey = sendChainKey
+        self.recvChainKey = recvChainKey
+        self.dhSelfPrivate = dhSelfPrivate
+        self.dhSelfPublic = dhSelfPublic
+        self.dhRemotePublic = dhRemotePublic
+        self.sendCount = sendCount
+        self.recvCount = recvCount
+        self.prevSendCount = prevSendCount
+        self.skipped = skipped
+    }
 }
 
 public struct ComposeFirstRequest: Codable, Equatable {

@@ -120,3 +120,11 @@ extension Data {
         self.init(bytes)
     }
 }
+
+extension Data {
+    /// Data → 小写十六进制。Rust 侧的密钥参数都是 hex，服务端传的是 Base64，
+    /// 两者之间必须显式转换——直接把 Base64 当 hex 传会得到 handshake 失败。
+    public var hexString: String {
+        map { String(format: "%02x", $0) }.joined()
+    }
+}

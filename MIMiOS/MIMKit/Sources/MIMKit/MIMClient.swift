@@ -109,7 +109,14 @@ public final class MIMClient: @unchecked Sendable {
     /// `%2Flogin%2Ftoken` 这种「unsupported URL」，而且遇到尾斜杠的行为不直观。
     func url(for path: String) -> URL {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        components?.path = path.hasPrefix("/") ? path : "/" + path
+        // 必须把查询串单独放：整体塞进 `path` 会把 "?" 转义成 %3F，
+        // 服务端收到的用户名变成 "xxx?deviceId=yyy"，然后报「用户名不合法」。
+        let parts = path.split(separator: "?", maxSplits: 1, omittingEmptySubsequences: false)
+        let rawPath = String(parts[0])
+        components?.path = rawPath.hasPrefix("/") ? rawPath : "/" + rawPath
+        if parts.count > 1 {
+            components?.percentEncodedQuery = String(parts[1])
+        }
         return components?.url ?? baseURL
     }
 
@@ -177,10 +184,12 @@ public final class MIMClient: @unchecked Sendable {
         // 响应是 camelCase；convertFromSnakeCase 对无下划线的键是恒等变换，
         // 保留它可以兼容将来出现的 snake_case 字段。
         decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let envelope: MIMEnvelope<T>
         do {
-            return try decoder.decode(MIMEnvelope<T>.self, from: data)
+            envelope = try decoder.decode(MIMEnvelope<T>.self, from: data)
         } catch {
-            throw MIMApiError.transport("响应不是预期的 JSON")
+            throw MIMApiError.transport("响应不是预期的 JSON（\(method) \(path)）")
         }
+        return envelope
     }
 }
