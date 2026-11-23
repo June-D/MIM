@@ -92,3 +92,14 @@ public struct SessionRef: Codable, Equatable, Sendable {
         self.tag = tag
     }
 }
+
+public struct MediaUploadAck: Decodable, Sendable {
+    public let id: String?
+    public let size: Int64?
+}
+
+public struct ChunkInitAck: Decodable, Sendable {
+    public let uploadId: String?
+    public let chunkSize: Int?
+    public let totalChunks: Int?
+}

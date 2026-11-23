@@ -1,16 +1,27 @@
 import SwiftUI
+import PhotosUI
 import MIMKit
 
 /// 聊天页：气泡 + 输入区。
 struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @FocusState private var inputFocused: Bool
+    @State private var pickerItem: PhotosPickerItem?
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             transcript
+        }
+        .onChange(of: pickerItem) { item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await model.sendImage(data)
+                }
+                pickerItem = nil
+            }
         }
         .navigationBarBackButtonHidden(true)
         .toolbar(.hidden, for: .navigationBar)
@@ -85,6 +96,11 @@ struct ChatView: View {
 
     private var composer: some View {
         HStack(spacing: 10) {
+            PhotosPicker(selection: $pickerItem, matching: .images) {
+                Image(systemName: "photo.on.rectangle")
+                    .font(.title3)
+            }
+            .disabled(model.busy)
             TextField("输入消息", text: $model.draft, axis: .vertical)
                 .lineLimit(1...4)
                 .textFieldStyle(.roundedBorder)
@@ -114,7 +130,12 @@ private struct MessageBubble: View {
         HStack {
             if message.fromMe { Spacer(minLength: 40) }
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
-                Text(message.recalled ? "已撤回" : message.text)
+                if message.kind == "image", let mediaId = message.mediaId {
+                    ImageBubble(mediaId: mediaId, message: message)
+                }
+                // 图片没有配文时不再画一行「[图片]」占位：气泡本身就是图片。
+                if !(message.kind == "image" && message.text.isEmpty) {
+                    Text(messageDisplayText)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(
@@ -124,6 +145,7 @@ private struct MessageBubble: View {
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous)
                     )
                     .foregroundStyle(message.recalled ? .secondary : .primary)
+                }
 
                 HStack(spacing: 6) {
                     if message.fromMe && readByThem {
@@ -141,9 +163,42 @@ private struct MessageBubble: View {
         }
     }
 
+    /// 媒体消息的正文为空，用类型占位；文本消息原样显示。
+    private var messageDisplayText: String {
+        if message.recalled { return "已撤回" }
+        if message.kind == "image" { return message.text.isEmpty ? "[图片]" : message.text }
+        return message.text
+    }
+
     private static func timeText(_ epochMs: Int64) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
         return formatter.string(from: Date(timeIntervalSince1970: Double(epochMs) / 1000))
+    }
+}
+
+
+/// 图片气泡：先显示占位，解密后替换成图片。
+private struct ImageBubble: View {
+    @EnvironmentObject private var model: AppModel
+    let mediaId: String
+    let message: MessageVault.StoredMessage
+
+    var body: some View {
+        Group {
+            if let image = model.loadedImages[mediaId] {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: 220, maxHeight: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            } else {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(uiColor: .tertiarySystemBackground))
+                    .frame(width: 160, height: 120)
+                    .overlay(ProgressView())
+                    .task { await model.loadImage(for: message) }
+            }
+        }
     }
 }

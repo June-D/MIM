@@ -47,6 +47,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var peerReadAt: [String: Int64] = [:]
     /// 长连接是否在线（界面上不显示，排查用）。
     @Published private(set) var pushConnected = false
+    /// 已解密并解码好的图片（key 是媒体 id）。只在内存里，不落盘明文。
+    @Published private(set) var loadedImages: [String: UIImage] = [:]
     /// 最近一条推送的类型，排查用（DEBUG 下显示在聊天页副标题）。
     @Published private(set) var lastPush = "-"
 
@@ -119,6 +121,7 @@ final class AppModel: ObservableObject {
 
             vault = MessageVault(root: Self.vaultRoot(), account: username)
             snapshot = vault?.load() ?? MessageVault.Snapshot()
+            migrateLegacyMediaMessages()
             session = MessagingSession(
                 client: client, bundle: bundle,
                 store: snapshot.store, sessions: snapshot.sessions
@@ -129,6 +132,12 @@ final class AppModel: ObservableObject {
             if let peer = autoOpenPeer {
                 autoOpenPeer = nil
                 openChat(peer)
+            }
+            // 联调：应用内生成一张图片发出去，验证「App 加密 → 上传 → 发消息」整条路径。
+            if ProcessInfo.processInfo.environment["MIM_DEMO_SEND_IMAGE"] == "1",
+               activePeer != nil {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                await sendImage(Self.demoImage(), name: "demo.png")
             }
             // 截图/联调时用环境变量触发一次发送，验证「App → 服务端」这条路径。
             if let text = ProcessInfo.processInfo.environment["MIM_DEMO_SEND_TEXT"],
@@ -239,6 +248,78 @@ final class AppModel: ObservableObject {
         _ = token
     }
 
+    /// 发送图片：加密 → 上传 → 把载荷当作消息正文发出去。
+    ///
+    /// 媒体本身走 `POST /media`（服务端只见密文），消息里只带 id + 一次性密钥。
+    func sendImage(_ data: Data, name: String? = nil) async {
+        guard let peer = activePeer, let session, let vault else { return }
+        busy = true
+        defer { busy = false }
+        do {
+            let encrypted = try MediaCrypto.encrypt(data)
+            let mediaId = try await uploadBlob(encrypted.blob)
+            let payload = MediaPayload(
+                kind: "image",
+                text: "",
+                media: MediaRef(
+                    id: mediaId,
+                    key: encrypted.keyBase64,
+                    size: data.count,
+                    mime: "image/jpeg",
+                    name: name,
+                    width: nil,
+                    height: nil,
+                    durationMs: nil
+                )
+            )
+            let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
+            try await session.sendText(to: peer, text: json)
+            vault.saveMedia(mediaId, blob: encrypted.blob)
+            if let image = UIImage(data: data) {
+                loadedImages[mediaId] = image
+            }
+            append(MessageVault.StoredMessage(
+                id: UUID().uuidString.lowercased(),
+                peer: peer,
+                text: payload.text,
+                epochMs: Int64(Date().timeIntervalSince1970 * 1000),
+                fromMe: true,
+                kind: "image",
+                mediaId: mediaId,
+                mediaMime: "image/jpeg",
+                mediaName: name,
+                mediaSize: data.count,
+                mediaKey: encrypted.keyBase64
+            ))
+            persist()
+        } catch {
+            self.error = "发送图片失败：\(error)"
+        }
+    }
+
+    /// 解出某条消息的图片（先查缓存，再查本地密文，最后从服务端下载）。
+    func loadImage(for message: MessageVault.StoredMessage) async {
+        guard let id = message.mediaId, let key = message.mediaKey else { return }
+        if loadedImages[id] != nil { return }
+        guard let vault, let client else { return }
+        var blob = vault.loadMedia(id)
+        if blob == nil {
+            blob = try? await client.downloadMedia(id)
+            if let blob { vault.saveMedia(id, blob: blob) }
+        }
+        guard let blob,
+              let plain = try? MediaCrypto.decrypt(blob: blob, keyBase64: key),
+              let image = UIImage(data: plain) else {
+            return
+        }
+        loadedImages[id] = image
+    }
+
+    private func uploadBlob(_ blob: Data) async throws -> String {
+        guard let client else { throw MIMApiError.transport("未登录") }
+        return try await client.uploadMedia(blob)
+    }
+
     /// 拉一次未投递消息。`silent` 用于轮询：失败不弹错，避免断网时满屏红字。
     func receiveOnce(silent: Bool = false) async {
         guard let session else { return }
@@ -248,6 +329,22 @@ final class AppModel: ObservableObject {
             for item in received {
                 let peer = item.peer.isEmpty ? (activePeer ?? "") : item.peer
                 guard !peer.isEmpty else { continue }
+                // 媒体消息的正文是一段 JSON 载荷：逐字对应桌面端的 MediaPayload。
+                if let payload = Self.parseMediaPayload(item.text) {
+                    append(MessageVault.StoredMessage(
+                        id: item.clientMsgId.isEmpty ? UUID().uuidString.lowercased() : item.clientMsgId,
+                        peer: peer, text: payload.text,
+                        epochMs: Int64(Date().timeIntervalSince1970 * 1000),
+                        fromMe: false,
+                        kind: payload.kind,
+                        mediaId: payload.media.id,
+                        mediaMime: payload.media.mime,
+                        mediaName: payload.media.name,
+                        mediaSize: payload.media.size,
+                        mediaKey: payload.media.key
+                    ))
+                    continue
+                }
                 append(MessageVault.StoredMessage(
                     id: item.clientMsgId.isEmpty ? UUID().uuidString.lowercased() : item.clientMsgId,
                     peer: peer, text: item.text,
@@ -386,6 +483,61 @@ final class AppModel: ObservableObject {
             try vault.save(snapshot)
         } catch {
             self.error = "本地保存失败：\(error)"
+        }
+    }
+
+    /// 识别媒体载荷。
+    ///
+    /// 不能按 `{"v":1,"kind":` 前缀判断：JSON 键顺序不保证（Swift 的 JSONEncoder
+    /// 就可能把 text 排到最前），桌面端的 Kotlin 序列化器才有固定顺序。
+    /// 这里只看「像不像一段短 JSON」，再靠解码结果说话。
+    static func parseMediaPayload(_ text: String) -> MediaPayload? {
+        guard text.hasPrefix("{"), text.count < 8_000 else { return nil }
+        guard let payload = try? JSONDecoder().decode(MediaPayload.self, from: Data(text.utf8))
+        else { return nil }
+        // 只认已知类型：普通文本恰好是 JSON 时不该被当作附件。
+        guard ["image", "file", "voice"].contains(payload.kind) else { return nil }
+        return payload
+    }
+
+    /// 生成一张带渐变的测试图片（仅 DEBUG 联调用）。
+    static func demoImage() -> Data {
+        let size = CGSize(width: 240, height: 160)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.pngData { context in
+            let colors = [UIColor.systemTeal.cgColor, UIColor.systemPink.cgColor]
+            guard let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(),
+                                            colors: colors as CFArray, locations: [0, 1]) else {
+                return
+            }
+            context.cgContext.drawLinearGradient(
+                gradient, start: .zero,
+                end: CGPoint(x: size.width, y: size.height), options: []
+            )
+        }
+    }
+
+    /// 老数据兼容：早期版本把媒体载荷当普通文本存了下来（界面上显示成一坨 JSON）。
+    ///
+    /// 这里就地升级成附件消息——媒体 id 与密钥都在载荷里，不用重新下载。
+    private func migrateLegacyMediaMessages() {
+        var changed = false
+        for index in snapshot.messages.indices {
+            let message = snapshot.messages[index]
+            guard message.kind == "text",
+                  let payload = Self.parseMediaPayload(message.text) else { continue }
+            snapshot.messages[index].kind = payload.kind
+            snapshot.messages[index].text = payload.text
+            snapshot.messages[index].mediaId = payload.media.id
+            snapshot.messages[index].mediaKey = payload.media.key
+            snapshot.messages[index].mediaMime = payload.media.mime
+            snapshot.messages[index].mediaName = payload.media.name
+            snapshot.messages[index].mediaSize = payload.media.size
+            changed = true
+        }
+        if changed {
+            refreshConversations()
+            persist()
         }
     }
 

@@ -239,6 +239,58 @@ func listenSmoke(_ arguments: [String]) async {
     }
 }
 
+/// `--send-image <url> <user> <pass> <peer> <图片路径>`：发一张图片。
+///
+/// 与 App 走同一条路径：加密 → `POST /media` → 把 MediaPayload 当正文发出去。
+/// 用来验证「另一端能否解开并显示」。
+func sendImageOnce(_ arguments: [String]) async {
+    guard arguments.count >= 7, let url = URL(string: arguments[2]) else {
+        FileHandle.standardError.write(
+            Data("用法：MIMKitSmoke --send-image <url> <user> <pass> <peer> <path>\n".utf8)
+        )
+        exit(2)
+    }
+    let user = arguments[3], password = arguments[4]
+    let peer = arguments[5], path = arguments[6]
+    do {
+        let plain = try Data(contentsOf: URL(fileURLWithPath: path))
+        let client = MIMClient(
+            baseURL: url,
+            deviceId: "cli-img-\(Int(Date().timeIntervalSince1970))"
+        )
+        _ = try await client.login(username: user, password: password)
+        let bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        try await client.publishKeys(password: password, deviceName: "CLI Image", bundle: bundle)
+
+        let encrypted = try MediaCrypto.encrypt(plain)
+        let mediaId = try await client.uploadMedia(encrypted.blob)
+        check(true, "已上传媒体密文 id=\(mediaId)（明文 \(plain.count) 字节）")
+
+        let payload = MediaPayload(
+            kind: "image",
+            text: "",
+            media: MediaRef(
+                id: mediaId, key: encrypted.keyBase64, size: plain.count,
+                mime: "image/png", name: "cli.png",
+                width: nil, height: nil, durationMs: nil
+            )
+        )
+        let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
+        let session = MessagingSession(client: client, bundle: bundle)
+        let delivered = try await session.sendText(to: peer, text: json)
+        check(true, "图片消息已投递到 \(delivered) 台设备")
+        print("IMAGE_OK")
+    } catch {
+        FileHandle.standardError.write(Data("✗ 发送图片失败：\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--send-image" {
+    await sendImageOnce(CommandLine.arguments)
+    exit(0)
+}
+
 if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--listen" {
     await listenSmoke(CommandLine.arguments)
     exit(0)

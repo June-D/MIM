@@ -137,7 +137,10 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
    另外 `beforeId` 是**查询参数**，不是请求体。
 7. **已读回执的类型是 `100012`，不是 `100011`**：写错不会报错，只是「消息到了但
    永远显示未读」。`PushEventTests` 把这几个编号钉死了。
-8. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
+8. **媒体载荷不能用前缀判断**：消息正文是 `{"v":1,"kind":"image","media":{…}}`，
+   但 JSON 键顺序不保证（Swift 的 JSONEncoder 会把 `text` 排到最前）。按
+   `{"v":1,"kind":` 匹配会漏，必须按解码结果 + `kind` 白名单判断。
+9. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
    `POST /prekey/one-time` 返回数字、某些接口是 null。只关心 `status` 的请求
    用 `MIMEnvelope<IgnoredPayload>` 吞掉 `data`，别为类型匹配反复改结构体。
 
@@ -162,7 +165,7 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
 | | `POST /message/recall` | 撤回（一次性凭证） |
 | | `POST /message/clear` / `GET /message/clear` | 清除范围与对账 |
 | | `WS /websocket/{deviceId}` | 推送（见第 4 节） |
-| M3 媒体 | `POST /media` | ≤8MB 单请求上传密文 |
+| M3 媒体 | `POST /media` | ≤8MB 单请求上传密文（octet-stream），返回 `{id,size}` |
 | | `POST /media/upload/init` + `PUT .../{index}` + `POST .../complete` | >8MB 分片（64KB~8MB 一片） |
 | | `GET /media/{id}` | 下载密文 |
 | | `DELETE /media/{id}` | 清除/撤回后释放 |

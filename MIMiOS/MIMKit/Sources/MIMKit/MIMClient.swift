@@ -110,7 +110,7 @@ public final class MIMClient: @unchecked Sendable {
     ///
     /// 不用 `appendingPathComponent`：它对 `/` 开头的路径会做转义，拼出
     /// `%2Flogin%2Ftoken` 这种「unsupported URL」，而且遇到尾斜杠的行为不直观。
-    func url(for path: String) -> URL {
+    public func url(for path: String) -> URL {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
         // 必须把查询串单独放：整体塞进 `path` 会把 "?" 转义成 %3F，
         // 服务端收到的用户名变成 "xxx?deviceId=yyy"，然后报「用户名不合法」。
@@ -153,6 +153,15 @@ public final class MIMClient: @unchecked Sendable {
             body: try encoder.encode(body),
             authenticated: authenticated
         )
+    }
+
+    /// 原始请求（媒体二进制用它，不走 JSON 信封）。
+    func rawSend(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        do {
+            return try await session.data(for: request)
+        } catch {
+            throw MIMApiError.transport(error.localizedDescription)
+        }
     }
 
     private func perform<T: Decodable>(

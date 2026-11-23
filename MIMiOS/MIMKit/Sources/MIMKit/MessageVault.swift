@@ -24,13 +24,16 @@ public final class MessageVault {
         public var mediaMime: String?
         public var mediaName: String?
         public var mediaSize: Int?
+        /// Base64 的一次性媒体密钥（用来解密本地/服务端密文）。
+        public var mediaKey: String?
         public var syncedFrom: String?
 
         public init(
             id: String, peer: String, text: String, epochMs: Int64,
             fromMe: Bool, kind: String = "text", recalled: Bool = false,
             mediaId: String? = nil, mediaMime: String? = nil,
-            mediaName: String? = nil, mediaSize: Int? = nil, syncedFrom: String? = nil
+            mediaName: String? = nil, mediaSize: Int? = nil,
+            mediaKey: String? = nil, syncedFrom: String? = nil
         ) {
             self.id = id
             self.peer = peer
@@ -43,6 +46,7 @@ public final class MessageVault {
             self.mediaMime = mediaMime
             self.mediaName = mediaName
             self.mediaSize = mediaSize
+            self.mediaKey = mediaKey
             self.syncedFrom = syncedFrom
         }
     }
@@ -108,6 +112,25 @@ public final class MessageVault {
             .appendingPathComponent("messages.bin.tmp")
         try blob.write(to: temp, options: .atomic)
         _ = try? FileManager.default.replaceItemAt(fileURL, withItemAt: temp)
+    }
+
+    // MARK: - 媒体密文缓存
+
+    /// 媒体密文缓存目录：与状态文件同根，文件名就是媒体 id。
+    ///
+    /// 缓存的是**密文**而不是明文：解密结果只在内存里停留，落到磁盘上的东西
+    /// 即使被拿到也解不开（密钥随消息密文走，不在这个目录里）。
+    private var mediaDirectory: URL {
+        fileURL.deletingLastPathComponent().appendingPathComponent("media", isDirectory: true)
+    }
+
+    public func saveMedia(_ id: String, blob: Data) {
+        try? FileManager.default.createDirectory(at: mediaDirectory, withIntermediateDirectories: true)
+        try? blob.write(to: mediaDirectory.appendingPathComponent(id))
+    }
+
+    public func loadMedia(_ id: String) -> Data? {
+        try? Data(contentsOf: mediaDirectory.appendingPathComponent(id))
     }
 
     // MARK: - 密钥与加解密

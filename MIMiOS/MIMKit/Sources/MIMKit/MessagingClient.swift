@@ -68,6 +68,85 @@ extension MIMClient {
         }
     }
 
+    /// 上传媒体密文（`POST /media`，octet-stream），返回媒体 id。
+    ///
+    /// 超过 8MB 时走分片（服务端 `init/chunk/complete`）——大图/文件不撑爆单请求。
+    public func uploadMedia(_ blob: Data) async throws -> String {
+        if blob.count <= 8 * 1024 * 1024 {
+            var request = URLRequest(url: url(for: "/media"))
+            request.httpMethod = "POST"
+            request.setValue("Bearer \(currentToken ?? "")", forHTTPHeaderField: "Authorization")
+            request.setValue(deviceId, forHTTPHeaderField: "X-Device-Id")
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            request.httpBody = blob
+            let (data, response) = try await rawSend(request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                throw MIMApiError.transport("媒体上传失败")
+            }
+            let decoder = JSONDecoder()
+            decoder.keyDecodingStrategy = .convertFromSnakeCase
+            let envelope = try decoder.decode(MIMEnvelope<MediaUploadAck>.self, from: data)
+            guard envelope.status == 200, let id = envelope.data?.id, !id.isEmpty else {
+                throw MIMApiError.failed(envelope.status, envelope.message ?? "媒体上传失败")
+            }
+            return id
+        }
+        return try await uploadMediaChunked(blob)
+    }
+
+    /// 下载媒体密文。
+    public func downloadMedia(_ id: String) async throws -> Data {
+        var request = URLRequest(url: url(for: "/media/\(id)"))
+        request.setValue("Bearer \(currentToken ?? "")", forHTTPHeaderField: "Authorization")
+        request.setValue(deviceId, forHTTPHeaderField: "X-Device-Id")
+        let (data, response) = try await rawSend(request)
+        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            throw MIMApiError.transport("媒体下载失败")
+        }
+        return data
+    }
+
+    /// 分片上传（>8MB）：init → 逐片 PUT → complete。
+    private func uploadMediaChunked(_ blob: Data) async throws -> String {
+        struct InitRequest: Encodable {
+            let size: Int64
+            let chunkSize: Int
+        }
+        let chunkSize = 1024 * 1024
+        let initEnvelope: MIMEnvelope<ChunkInitAck> = try await send(
+            method: "POST", path: "/media/upload/init",
+            body: InitRequest(size: Int64(blob.count), chunkSize: chunkSize)
+        )
+        guard initEnvelope.status == 200, let uploadId = initEnvelope.data?.uploadId else {
+            throw MIMApiError.failed(initEnvelope.status, initEnvelope.message ?? "无法开始分片上传")
+        }
+        var offset = 0
+        var index = 0
+        while offset < blob.count {
+            let end = min(offset + chunkSize, blob.count)
+            var request = URLRequest(url: url(for: "/media/upload/\(uploadId)/\(index)"))
+            request.httpMethod = "PUT"
+            request.setValue("Bearer \(currentToken ?? "")", forHTTPHeaderField: "Authorization")
+            request.setValue(deviceId, forHTTPHeaderField: "X-Device-Id")
+            request.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+            request.httpBody = blob.subdata(in: offset..<end)
+            let (data, response) = try await rawSend(request)
+            guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+                let text = String(data: data, encoding: .utf8) ?? ""
+                throw MIMApiError.transport("分片 \(index) 上传失败：\(text.prefix(120))")
+            }
+            offset = end
+            index += 1
+        }
+        let done: MIMEnvelope<MediaUploadAck> = try await send(
+            method: "POST", path: "/media/upload/\(uploadId)/complete"
+        )
+        guard done.status == 200, let id = done.data?.id, !id.isEmpty else {
+            throw MIMApiError.failed(done.status, done.message ?? "合并分片失败")
+        }
+        return id
+    }
+
     /// 标记已读（账号级语义：同一逻辑消息在本人各设备上一起置已读）。
     ///
     /// 必须带 `clientMsgIds`——各设备副本的会话标签不同，只按 tags 只能命中自己那份。
