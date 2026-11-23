@@ -42,6 +42,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.junesoon.mim.app.domain.TwoFactorSetup
+import androidx.compose.foundation.focusable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 /**
  * 安全设置：开启 / 关闭二次验证，管理一次性恢复码。
@@ -71,10 +75,18 @@ fun SecurityScreen(
     var showRegenerate by remember { mutableStateOf(false) }
     var showBindEmail by remember { mutableStateOf(false) }
 
+    // 与设备页同样的处理：本页没有输入框，必须让根节点自己持有焦点，
+    // 否则 Esc 不会沿焦点路径送到这里（弹窗是独立窗口，会先消费自己的 Esc）。
+    val pageFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { pageFocus.requestFocus() }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MimPalette.Paper)
+            .focusRequester(pageFocus)
+            .focusable()
             .escapeBack { onBack() },
     ) {
         Row(

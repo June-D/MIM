@@ -36,6 +36,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.junesoon.mim.app.domain.FriendRequest
 import com.junesoon.mim.app.domain.UserSummary
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
 
 /**
  * 添加联系人：搜索用户 + 处理好友申请。
@@ -58,6 +60,12 @@ fun AddContactScreen(
     val incoming = requests.filter { it.incoming && it.pending }
     val outgoing = requests.filter { !it.incoming && it.pending }
 
+    // 进页面就把焦点放进输入框：既省一次点击，也让 Esc 能沿焦点路径送到根节点。
+    // （没有焦点所有者时 onPreviewKeyEvent 收不到按键，看起来就是「Esc 没反应」。）
+    val searchFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { searchFocus.requestFocus() }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -107,6 +115,7 @@ fun AddContactScreen(
                 value = keyword,
                 onValueChange = { keyword = it },
                 placeholder = "输入对方的用户名",
+                focusRequester = searchFocus,
                 onSubmit = { onSearch(keyword) },
                 modifier = Modifier.weight(1f),
             )
