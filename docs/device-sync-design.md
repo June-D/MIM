@@ -1,6 +1,7 @@
 # 多设备历史同步：设计稿（待评审）
 
-> 状态：**设计，未实施**。目标读者是接手这块的工程师。
+> 状态：**设计已确认，实施中**（第 1 步：签名导出 + 同步 DTO + 100022 事件已落地；
+> 转发、确认与接收端还原未做）。目标读者是接手这块的工程师。
 > 相关文档：[`security.md`](security.md)、[`sealed-sender-design.md`](sealed-sender-design.md)、
 > [`server-api.md`](server-api.md)。
 

@@ -175,6 +175,13 @@ class SecureBackend(
             TYPE_NEW_MESSAGE, TYPE_READ_RECEIPT, TYPE_RECALLED -> PushEvent.NewData
             TYPE_FRIEND_REQUEST, TYPE_FRIEND_ACCEPTED, TYPE_FRIEND_REJECTED ->
                 PushEvent.FriendsChanged
+            TYPE_HISTORY_SYNC -> {
+                // 只带设备 id：转不转发由用户决定，服务端不替用户做决定。
+                val device = runCatching {
+                    envelope.data?.jsonObject?.get("deviceId")?.jsonPrimitive?.content
+                }.getOrNull()
+                device?.takeIf { it.isNotBlank() }?.let { PushEvent.SyncRequested(it) }
+            }
             TYPE_CONVERSATION_CLEARED -> {
                 val peer = runCatching {
                     envelope.data?.jsonObject?.get("peer")?.jsonPrimitive?.content
@@ -925,6 +932,10 @@ class SecureBackend(
         return cached
     }
 
+    override suspend fun requestHistorySync(token: String) {
+        postEnvelope<Boolean>("$server/message/sync/request", token)
+    }
+
     override suspend fun releaseUploadedMedia(token: String, mediaIds: List<String>) {
         for (id in mediaIds) {
             if (!MediaIds.isValid(id)) {
@@ -1401,6 +1412,7 @@ class SecureBackend(
         private const val TYPE_READ_RECEIPT = 100012
         private const val TYPE_RECALLED = 100014
         private const val TYPE_CONVERSATION_CLEARED = 100019
+        private const val TYPE_HISTORY_SYNC = 100022
         private const val TYPE_FRIEND_REQUEST = 100016
         private const val TYPE_FRIEND_ACCEPTED = 100017
         private const val TYPE_FRIEND_REJECTED = 100018

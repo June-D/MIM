@@ -504,6 +504,12 @@
   加入悬停/按下态与手型光标、图标 tooltip、行悬停露出「⋯」、消息分组与时间下移、
   「回到最新」浮动按钮、⌘/Ctrl+K 搜索、密码显隐、统一 40dp 紧凑搜索框。
 
+- 多设备同步第一步（尚未在界面开放）：Rust 内核新增身份密钥签名/验签导出
+  （`signWithIdentity` / `verifyWithIdentity`），客户端补齐同步副本 DTO 字段
+  （`syncOriginalFrom/To/Device`、`syncSignature`、`syncFromDevice`）并接住
+  WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
+  设计见 `docs/device-sync-design.md`。
+
 - 传输与运维补强：客户端拒绝非回环地址的明文 http（`MIM_ALLOW_INSECURE=1`
   显式放行，本机回环仍可 http），地址被拒时停在说明页而不是静默降级；
   新增 `tools/backup.sh`（数据库 + 媒体密文 + 校验和 + 恢复说明，实测 14 表 /

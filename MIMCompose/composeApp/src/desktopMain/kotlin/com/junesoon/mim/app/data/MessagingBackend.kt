@@ -69,6 +69,14 @@ interface MessagingBackend {
     fun mediaBytes(message: ChatMessage): ByteArray? = null
 
     /**
+     * 请本账号的其他设备把历史转发过来。
+     *
+     * 服务端只是转发这条请求（WS 100022），能不能拿到取决于对方设备上的
+     * 用户是否同意——这是这个功能的安全边界。
+     */
+    suspend fun requestHistorySync(token: String) = Unit
+
+    /**
      * 释放本机上传过、已经不再引用的媒体密文。
      *
      * 服务端只看得到密文、看不到引用关系，所以由发送方主动告知；
@@ -244,6 +252,14 @@ sealed interface PushEvent {
 
     /** 对方清除了与我们的会话。 */
     data class Cleared(val peer: String) : PushEvent
+
+    /**
+     * 同账号的另一台设备请求历史同步（WS 100022）。
+     *
+     * 只带请求方的设备 id：要不要转发、转多少，由本机用户决定，
+     * 服务端无权替用户把历史交出去。
+     */
+    data class SyncRequested(val deviceId: String) : PushEvent
 }
 
 /** 启用二次验证的结果。 */

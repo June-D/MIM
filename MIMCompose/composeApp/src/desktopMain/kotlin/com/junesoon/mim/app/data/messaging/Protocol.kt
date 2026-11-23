@@ -106,6 +106,12 @@ data class CipherMessageDto(
     val readFlag: Boolean? = null,
     val recalled: Boolean? = null,
     val fromMe: Boolean? = null,
+    /** 同步副本的来源设备；普通消息为 null。 */
+    val syncFromDevice: String? = null,
+    val syncOriginalFrom: String? = null,
+    val syncOriginalTo: String? = null,
+    val syncOriginalDevice: String? = null,
+    val syncSignature: String? = null,
 )
 
 @Serializable
@@ -130,6 +136,17 @@ data class CipherMessageOut(
     val sessionId: String,
     /** 一次性撤回凭证；服务端只存哈希。 */
     val recallToken: String? = null,
+    /**
+     * 多设备同步副本的原消息归属。普通消息留空。
+     *
+     * <p>服务端按这四项 + 签名校验后才落库；缺任何一项都会被拒，
+     * 所以「归属」不是客户端可选的装饰，而是这条副本合法性的组成部分。
+     */
+    val syncOriginalFrom: String? = null,
+    val syncOriginalTo: String? = null,
+    val syncOriginalDevice: String? = null,
+    /** 转发设备用身份私钥对「归属 + 内容」的签名（Base64）。 */
+    val syncSignature: String? = null,
 )
 
 @Serializable

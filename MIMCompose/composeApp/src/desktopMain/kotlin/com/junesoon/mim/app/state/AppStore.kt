@@ -1126,6 +1126,11 @@ class AppStore(
                             refreshContacts(current, force = true)
                             refreshUnread(current, force = true)
                         }
+                        is PushEvent.SyncRequested -> {
+                            // 多设备同步尚未在界面上开放（设计见 docs/device-sync-design.md）。
+                            // 这里先接住事件、不静默丢弃未知类型；转发与确认弹窗在下一提交接入。
+                            Unit
+                        }
                         is PushEvent.Cleared -> {
                             // 对方清除了会话：本机缓存与「我上传的密文」一起释放。
                             val released = ownMediaIds(event.peer)
