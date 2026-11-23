@@ -7,6 +7,7 @@ iOS 客户端。目标：SwiftUI 壳 + Rust 协议核心（C ABI，不走 JNI）
 ## 目录
 
 ```
+MIMiOSApp/                      SwiftUI 应用（XcodeGen：project.yml → .xcodeproj）
 MIMKit/                         Swift Package（macOS 13 / iOS 16）
   Package.swift                 systemLibrary(MIMCoreABI) + library(MIMKit) + 冒烟程序
   Sources/MIMCoreABI/           mim_core.h 的副本 + module.modulemap
@@ -20,7 +21,29 @@ MIMKit/                         Swift Package（macOS 13 / iOS 16）
   tools-sync-header.sh          从 MIMCoreRust/include 同步头文件
 ```
 
-## 怎么跑
+## 怎么跑 App
+
+```bash
+# 1) 只做一次：把命令行工具指向 Xcode，并接受许可（都需要你的密码）
+sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+sudo xcodebuild -license accept
+
+# 2) 生成 C ABI 的 xcframework（iOS 不能用 dylib）
+MIMCoreRust/tools/build-ios.sh --check     # 先确认 iOS SDK 就位
+MIMCoreRust/tools/build-ios.sh
+
+# 3) 生成并打开工程
+cd MIMiOS/MIMiOSApp && xcodegen generate && open MIMiOSApp.xcodeproj
+```
+
+`project.yml` 是工程源，`.xcodeproj` 是生成物（已在 .gitignore 里）——pbxproj 是
+机器生成的巨型 plist，提交进仓库只会带来无意义的合并冲突。
+
+> Package.swift 目前给 **macOS 验证**用 dylib；iOS 需要把 `MIMCoreABI` 换成
+> `binaryTarget(path: "../MimCore.xcframework")`，等 xcframework 产出后再切，
+> 以免 macOS 侧因为找不到产物而编不过。
+
+## 怎么跑库（不需要 Xcode）
 
 ```bash
 # 1) 先有 Rust 动态库（macOS 上验证用）

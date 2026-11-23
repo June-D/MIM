@@ -1,0 +1,39 @@
+# XcodeGen 工程描述：`xcodegen generate` 生成 MIMiOSApp.xcodeproj。
+#
+# 为什么用 XcodeGen 而不是把 .xcodeproj 提交进仓库：pbxproj 是机器生成的
+# 巨型 plist，手工合并冲突几乎是灾难；这份 YAML 才是可读、可 review 的源。
+name: MIMiOSApp
+options:
+  bundleIdPrefix: ai.mim
+  deploymentTarget:
+    iOS: "16.0"
+  createIntermediateGroups: true
+
+packages:
+  MIMKit:
+    path: ../MIMKit
+
+targets:
+  MIMiOSApp:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    dependencies:
+      - package: MIMKit
+        product: MIMKit
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: MiM
+        CFBundleShortVersionString: "0.1.0"
+        UILaunchScreen: {}
+        # 模拟器要连本机服务端（http://127.0.0.1:8080）；
+        # 真机请改用 https，客户端会拒绝非回环的明文地址。
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.mim.app
+        SWIFT_VERSION: "5.9"
+        TARGETED_DEVICE_FAMILY: "1,2"

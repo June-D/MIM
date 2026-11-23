@@ -42,3 +42,5 @@ MIMiOS/**/.build/
 MIMiOS/**/DerivedData/
 MIMiOS/**/*.xcuserstate
 MIMiOS/**/xcuserdata/
+# XcodeGen 生成物：project.yml 才是源
+MIMiOS/MIMiOSApp/MIMiOSApp.xcodeproj/
