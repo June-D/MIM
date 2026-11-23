@@ -43,6 +43,15 @@ MIMCompose/    Compose 桌面客户端（JVM 17）：传输、缓存、UI 语义
 - `docs/architecture.md`：目录结构
 - `docs/handoff.md` / `docs/changelog.md`：阶段结论与变更记录
 
+## 开发环境提示
+
+- **用 VS Code 看 Kotlin 代码请打开 `MIMCompose/` 子目录**。Gradle 工程根在那里；
+  打开仓库根 `MIM` 时 Kotlin 扩展找不到 `settings.gradle.kts`，拿不到 classpath，
+  同包引用（如 `escapeBack`）与 `kotlin.test.*` 会被标成未解析——那是误报，
+  以 `cd MIMCompose && ./gradlew :composeApp:desktopTest` 的结果为准。
+- Gradle 需要 JDK 17：本机默认 `java` 升到 25 后 Gradle 8.10 会解析不了版本号，
+  用 `JAVA_HOME=/Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home`。
+
 ## 当前边界
 
 已完成：注册/登录/二次验证（登录与开启管理）/记住账号、找回邮箱绑定与更换、

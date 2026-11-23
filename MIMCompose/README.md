@@ -86,6 +86,16 @@ MIMCompose/
   （之前写死 `Dimension(880, 620)`，在 2x 屏上只有 440dp 宽会把两栏挤塌）。
 - 搜索框统一为 40dp 紧凑样式（聚焦才提亮边框），登录表单仍用带 label 的大输入框。
 
+## 在 IDE / 编辑器里看代码
+
+Gradle 工程根是 **`MIMCompose/`**：
+
+- VS Code：请直接打开这个目录（`MIMCompose/.vscode/settings.json` 已排除 build 产物）。
+  打开仓库根 `MIM` 时 Kotlin 扩展找不到 `settings.gradle.kts`，拿不到 classpath，
+  同包引用与 `kotlin.test.*` 会被标成「未解析」——**这是误报**，以
+  `./gradlew :composeApp:desktopTest` 的结果为准。
+- IntelliJ IDEA：直接 Import 本目录的 `build.gradle.kts`，两个源集都会自动识别。
+
 ## 运行
 
 ```bash
