@@ -95,8 +95,8 @@ func chatSmoke(_ arguments: [String]) async {
         // 3) A → B：首条消息（X3DH + 证书信封）
         let sessionA = MessagingSession(client: clientA, bundle: bundleA)
         let hello = "你好，来自 Swift \(suffix)"
-        let delivered = try await sessionA.sendText(to: userB, text: hello)
-        check(delivered >= 1, "A 已投递到 \(delivered) 台设备")
+        let sentHello = try await sessionA.sendText(to: userB, text: hello)
+        check(!sentHello.clientMsgId.isEmpty, "A 已发出（clientMsgId=\(sentHello.clientMsgId.prefix(8))…）")
 
         // 4) B 收到并解密
         let sessionB = MessagingSession(client: clientB, bundle: bundleB)
@@ -151,8 +151,8 @@ func sendOnce(_ arguments: [String]) async {
         let bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
         try await client.publishKeys(password: password, deviceName: "CLI \(user)", bundle: bundle)
         let session = MessagingSession(client: client, bundle: bundle)
-        let delivered = try await session.sendText(to: peer, text: text)
-        check(true, "\(user) → \(peer) 已投递到 \(delivered) 台设备：\(text)")
+        let sent = try await session.sendText(to: peer, text: text)
+        check(true, "\(user) → \(peer) 已发出：\(text)（\(sent.clientMsgId.prefix(8))…）")
         print("SEND_OK")
     } catch {
         FileHandle.standardError.write(Data("✗ 发送失败：\(error)\n".utf8))
@@ -277,8 +277,8 @@ func sendImageOnce(_ arguments: [String]) async {
         )
         let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
         let session = MessagingSession(client: client, bundle: bundle)
-        let delivered = try await session.sendText(to: peer, text: json)
-        check(true, "图片消息已投递到 \(delivered) 台设备")
+        _ = try await session.sendText(to: peer, text: json)
+        check(true, "图片消息已发出")
         print("IMAGE_OK")
     } catch {
         FileHandle.standardError.write(Data("✗ 发送图片失败：\(error)\n".utf8))
@@ -323,8 +323,8 @@ func sendMediaOnce(_ arguments: [String]) async {
         )
         let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
         let session = MessagingSession(client: client, bundle: bundle)
-        let delivered = try await session.sendText(to: peer, text: json)
-        check(true, "\(kind) 已投递到 \(delivered) 台设备（\(name)，\(plain.count) 字节）")
+        _ = try await session.sendText(to: peer, text: json)
+        check(true, "\(kind) 已发出（\(name)，\(plain.count) 字节）")
         print("MEDIA_OK")
     } catch {
         FileHandle.standardError.write(Data("✗ 发送附件失败：\(error)\n".utf8))

@@ -147,6 +147,44 @@ extension MIMClient {
         return id
     }
 
+    /// 撤回自己发出的一条消息（按 clientMsgId，撤掉所有设备副本）。
+    ///
+    /// `recallToken` 是发送时生成的一次性凭证，服务端只存它的哈希——
+    /// 没有它撤不掉，也不能撤回别人的消息。
+    public func recallMessage(clientMsgId: String, recallToken: String,
+                              tags: [String]) async throws {
+        struct Request: Encodable {
+            let recallToken: String
+            let tags: [String]
+        }
+        let envelope: MIMEnvelope<IgnoredPayload> = try await send(
+            method: "POST", path: "/message/recall/\(clientMsgId)",
+            body: Request(recallToken: recallToken, tags: tags)
+        )
+        guard envelope.status == 200 else {
+            throw MIMApiError.failed(envelope.status, envelope.message ?? "撤回失败")
+        }
+    }
+
+    /// 清除与某人的会话（单方）。
+    ///
+    /// `forBoth` 为 true 时对方那边也会消失——这需要服务端按标签抹密文，
+    /// 而 iOS 侧没有会话标签，所以客户端只用单方清除，不假装支持双向。
+    public func clearConversation(peer: String, tags: [String]) async throws {
+        struct Request: Encodable {
+            let peer: String
+            let forBoth: Bool
+            let tags: [String]
+        }
+        let envelope: MIMEnvelope<IgnoredPayload> = try await send(
+            method: "POST", path: "/message/clear",
+            body: Request(peer: peer, forBoth: false, tags: tags)
+        )
+        guard envelope.status == 200 else {
+            throw MIMApiError.failed(envelope.status, envelope.message ?? "清除会话失败")
+        }
+    }
+
     /// 标记已读（账号级语义：同一逻辑消息在本人各设备上一起置已读）。
     ///
     /// 必须带 `clientMsgIds`——各设备副本的会话标签不同，只按 tags 只能命中自己那份。

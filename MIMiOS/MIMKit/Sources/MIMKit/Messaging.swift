@@ -7,6 +7,12 @@ import Foundation
 /// 与其去猜它的内部结构，不如自己维护一张小表。
 public final class MessagingSession {
 
+    public struct Sent: Sendable {
+        public let clientMsgId: String
+        /// 一次性撤回凭证：只在本机保存，服务端只存哈希。
+        public let recallToken: String
+    }
+
     public struct Received: Sendable {
         public let peer: String
         public let text: String
@@ -51,14 +57,28 @@ public final class MessagingSession {
     /// 当前会话索引（调用方应与 store 一起落盘）。
     public private(set) var sessions: [String: SessionRef]
 
-    /// 发出文本，返回实际投递的设备数。
+    /// 与某人所有设备会话的标签（撤回、清除都要按标签定位）。
+    ///
+    /// 服务端对撤回强制要求 tags：没有标签它无法确定要动哪段密文。
+    public func tags(for peer: String) -> [String] {
+        let prefix = "\(peer)|"
+        let collected = sessions
+            .filter { $0.key.hasPrefix(prefix) }
+            .map(\.value.tag)
+            .filter { !$0.isEmpty }
+        return Array(Set(collected))
+    }
+
+    /// 发出文本，返回逻辑消息 id 与撤回凭证（调用方要存下来才能撤回）。
     @discardableResult
-    public func sendText(to peer: String, text: String) async throws -> Int {
+    public func sendText(to peer: String, text: String) async throws -> Sent {
         let keys = try await client.peerDevices(peer)
         guard !keys.isEmpty else {
             throw MIMApiError.failed(0, "对方还没有可用设备")
         }
         let clientMsgId = UUID().uuidString.lowercased()
+        // 撤回凭证：32 字节随机数的十六进制，只在本机保存。
+        let recallToken = (0..<32).map { _ in String(format: "%02x", Int.random(in: 0...255)) }.joined()
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var copies: [OutgoingCopy] = []
         var certificate: SenderCertificate?
@@ -83,7 +103,8 @@ public final class MessagingSession {
                     messageNumber: sealed.wire.n,
                     clientTime: now,
                     sealed: true,
-                    sessionId: existing.sessionId
+                    sessionId: existing.sessionId,
+                    recallToken: recallToken
                 ))
                 continue
             }
@@ -134,12 +155,13 @@ public final class MessagingSession {
                 recipientSignedPreKeyId: composed.recipientSignedPreKeyId,
                 clientTime: now,
                 sealed: true,
-                sessionId: composed.sessionId
+                sessionId: composed.sessionId,
+                recallToken: recallToken
             ))
         }
 
         try await client.sendReplicas(copies)
-        return copies.count
+        return Sent(clientMsgId: clientMsgId, recallToken: recallToken)
     }
 
     /// 拉取未投递消息并解密。

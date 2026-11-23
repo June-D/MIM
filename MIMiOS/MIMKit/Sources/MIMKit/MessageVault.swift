@@ -28,6 +28,8 @@ public final class MessageVault {
         public var mediaKey: String?
         /// 语音时长（毫秒）；非语音为 nil。
         public var mediaDurationMs: Int64?
+        /// 撤回凭证（仅自己发出的消息有）。
+        public var recallToken: String?
         public var syncedFrom: String?
 
         public init(
@@ -36,7 +38,7 @@ public final class MessageVault {
             mediaId: String? = nil, mediaMime: String? = nil,
             mediaName: String? = nil, mediaSize: Int? = nil,
             mediaKey: String? = nil, mediaDurationMs: Int64? = nil,
-            syncedFrom: String? = nil
+            recallToken: String? = nil, syncedFrom: String? = nil
         ) {
             self.id = id
             self.peer = peer
@@ -51,6 +53,7 @@ public final class MessageVault {
             self.mediaSize = mediaSize
             self.mediaKey = mediaKey
             self.mediaDurationMs = mediaDurationMs
+            self.recallToken = recallToken
             self.syncedFrom = syncedFrom
         }
     }

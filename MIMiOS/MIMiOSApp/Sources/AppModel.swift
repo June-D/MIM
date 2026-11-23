@@ -170,6 +170,18 @@ final class AppModel: ObservableObject {
                 draft = text
                 await sendDraft()
             }
+            // 联调：发完立刻撤回，验证「撤回」这条链路（弹窗无法自动化）。
+            if ProcessInfo.processInfo.environment["MIM_DEMO_RECALL"] == "1" {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                if let last = snapshot.messages.last(where: { $0.fromMe && !$0.recalled }) {
+                    await recall(last)
+                }
+            }
+            // 联调：发完立刻清除会话。
+            if ProcessInfo.processInfo.environment["MIM_DEMO_CLEAR"] == "1" {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await clearCurrentConversation()
+            }
             #endif
             startPush()
             startPolling()
@@ -254,12 +266,14 @@ final class AppModel: ObservableObject {
         draft = ""
         guard let token else { return }
         do {
-            try await session.sendText(to: peer, text: text)
+            let sent = try await session.sendText(to: peer, text: text)
             append(MessageVault.StoredMessage(
-                id: UUID().uuidString.lowercased(),
+                // 用服务端返回的 clientMsgId：撤回、已读回执都按它对齐。
+                id: sent.clientMsgId,
                 peer: peer, text: text,
                 epochMs: Int64(Date().timeIntervalSince1970 * 1000),
-                fromMe: true
+                fromMe: true,
+                recallToken: sent.recallToken
             ))
             persist()
         } catch {
@@ -314,13 +328,13 @@ final class AppModel: ObservableObject {
                 )
             )
             let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
-            try await session.sendText(to: peer, text: json)
+            let sent = try await session.sendText(to: peer, text: json)
             vault.saveMedia(mediaId, blob: encrypted.blob)
             if kind == "image", let image = UIImage(data: data) {
                 loadedImages[mediaId] = image
             }
             append(MessageVault.StoredMessage(
-                id: UUID().uuidString.lowercased(),
+                id: sent.clientMsgId,
                 peer: peer,
                 text: payload.text,
                 epochMs: Int64(Date().timeIntervalSince1970 * 1000),
@@ -414,6 +428,60 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - 撤回与清除
+
+    /// 撤回自己发出的一条消息。
+    ///
+    /// 服务端按 clientMsgId 撤掉所有设备副本，并给对端推 100014；
+    /// 本机立刻把气泡改成「已撤回」，不等推送回来。
+    func recall(_ message: MessageVault.StoredMessage) async {
+        guard message.fromMe, !message.recalled else { return }
+        guard let token = message.recallToken, let client else {
+            // 旧版本发出的消息没存撤回凭证：明确告诉用户，而不是点了没反应。
+            error = "这条消息没有撤回凭证（升级前发出的），无法撤回"
+            return
+        }
+        do {
+            try await client.recallMessage(
+                clientMsgId: message.id, recallToken: token,
+                tags: session?.tags(for: message.peer) ?? []
+            )
+            if let index = snapshot.messages.firstIndex(where: { $0.id == message.id }) {
+                snapshot.messages[index].recalled = true
+                snapshot.messages[index].text = "已撤回"
+            }
+            reloadMessages()
+            refreshConversations()
+            persist()
+        } catch {
+            self.error = "撤回失败：\(error)"
+        }
+    }
+
+    /// 清除与当前联系人的会话（单方）。
+    ///
+    /// 只做单方：双向清除需要按会话标签抹掉服务端密文，而 iOS 没有标签。
+    /// 服务端仍会记一个「清除点」，对端之后发来的消息不受影响。
+    func clearCurrentConversation() async {
+        guard let peer = activePeer, let client else { return }
+        do {
+            try await client.clearConversation(
+                peer: peer, tags: session?.tags(for: peer) ?? []
+            )
+            snapshot.messages.removeAll { $0.peer == peer }
+            var readUpTo = snapshot.readUpTo ?? [:]
+            readUpTo.removeValue(forKey: peer)
+            snapshot.readUpTo = readUpTo
+            messages = []
+            refreshConversations()
+            persist()
+            closeChat()
+            notice = "已清除与 \(peer) 的会话"
+        } catch {
+            self.error = "清除会话失败：\(error)"
+        }
+    }
+
     /// 解出某条消息的图片（先查缓存，再查本地密文，最后从服务端下载）。
     func loadImage(for message: MessageVault.StoredMessage) async {
         guard let id = message.mediaId, let key = message.mediaKey else { return }
@@ -461,6 +529,16 @@ final class AppModel: ObservableObject {
                         mediaKey: payload.media.key,
                         mediaDurationMs: payload.media.durationMs
                     ))
+                    continue
+                }
+                if item.recalled,
+                   let index = snapshot.messages.firstIndex(where: { $0.id == item.clientMsgId }) {
+                    // 撤回是对「已存在的那条」的修改，不能当成新消息追加。
+                    snapshot.messages[index].recalled = true
+                    snapshot.messages[index].text = "已撤回"
+                    reloadMessages()
+                    refreshConversations()
+                    persist()
                     continue
                 }
                 append(MessageVault.StoredMessage(

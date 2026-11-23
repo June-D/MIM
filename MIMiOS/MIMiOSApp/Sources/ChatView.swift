@@ -8,12 +8,24 @@ struct ChatView: View {
     @FocusState private var inputFocused: Bool
     @State private var pickerItem: PhotosPickerItem?
     @State private var showFileImporter = false
+    @State private var showClearConfirm = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             transcript
+            // 错误必须显示在聊天页：发送/撤回失败时用户在气泡上等反馈，
+            // 只写到列表页的错误条等于没提示。
+            if let error = model.error {
+                Text(error)
+                    .font(.footnote)
+                    .foregroundStyle(.red)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.red.opacity(0.08))
+            }
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
             guard case .success(let url) = result else { return }
@@ -51,10 +63,27 @@ struct ChatView: View {
                     .foregroundStyle(.secondary)
             }
             Spacer()
+            Menu {
+                Button(role: .destructive) {
+                    showClearConfirm = true
+                } label: {
+                    Label("清除会话", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .font(.title3)
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .background(.bar)
+        .confirmationDialog("清除后本机将看不到这段对话", isPresented: $showClearConfirm,
+                            titleVisibility: .visible) {
+            Button("清除会话", role: .destructive) {
+                Task { await model.clearCurrentConversation() }
+            }
+            Button("取消", role: .cancel) {}
+        }
     }
 
     private var transcript: some View {
@@ -155,6 +184,7 @@ struct ChatView: View {
 }
 
 private struct MessageBubble: View {
+    @EnvironmentObject private var model: AppModel
     let message: MessageVault.StoredMessage
     /// 对方已读（仅对我方消息有意义）。
     let readByThem: Bool
@@ -197,6 +227,22 @@ private struct MessageBubble: View {
                 .foregroundStyle(.secondary)
             }
             if !message.fromMe { Spacer(minLength: 40) }
+        }
+        .contextMenu {
+            if !message.recalled && !message.text.isEmpty && message.kind == "text" {
+                Button {
+                    UIPasteboard.general.string = message.text
+                } label: {
+                    Label("复制", systemImage: "doc.on.doc")
+                }
+            }
+            if message.fromMe && !message.recalled {
+                Button(role: .destructive) {
+                    Task { await model.recall(message) }
+                } label: {
+                    Label("撤回", systemImage: "arrow.uturn.backward")
+                }
+            }
         }
     }
 
