@@ -504,6 +504,11 @@
   加入悬停/按下态与手型光标、图标 tooltip、行悬停露出「⋯」、消息分组与时间下移、
   「回到最新」浮动按钮、⌘/Ctrl+K 搜索、密码显隐、统一 40dp 紧凑搜索框。
 
+- 多设备同步：协议链路打通（界面仍未开放）。A 设备把最近 50 条 / 30 天内的
+  文本历史重新加密给本账号的另一台设备，接收端用来源设备公钥验签后按信封里的
+  `originalFrom/To` 还原归属。过程中发现并修掉一个服务端缺陷：`syncOne` 没有
+  复制 `session_id`，导致副本永远解不开（真机 e2e 才暴露出来）。
+
 - 多设备同步第一步（尚未在界面开放）：Rust 内核新增身份密钥签名/验签导出
   （`signWithIdentity` / `verifyWithIdentity`），客户端补齐同步副本 DTO 字段
   （`syncOriginalFrom/To/Device`、`syncSignature`、`syncFromDevice`）并接住

@@ -341,6 +341,10 @@ fun ChatScreen(
                         if (message.id == firstUnreadId) {
                             UnreadSeparator()
                         }
+                        // 同步来的那一段单独标出来：用户要知道这些不是在本机产生的。
+                        if (message.syncedFrom != null && previous?.syncedFrom == null) {
+                            SyncSeparator(count = messages.count { it.syncedFrom != null })
+                        }
                         // 同一人、同一分钟内的连续消息算一组：组内贴紧，组间留白。
                         val grouped = !newDay && previous != null &&
                             previous.fromMe == message.fromMe &&
@@ -1119,6 +1123,24 @@ private fun DaySeparator(label: String) {
                 color = MimPalette.InkSoft,
             )
         }
+    }
+}
+
+/** 同步分界：说明这一段是从本账号另一台设备同步来的。 */
+@Composable
+private fun SyncSeparator(count: Int) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MimPalette.Brass.copy(alpha = 0.4f))
+        Text(
+            "以下 $count 条来自另一台设备",
+            style = MaterialTheme.typography.labelSmall,
+            color = MimPalette.Brass,
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MimPalette.Brass.copy(alpha = 0.4f))
     }
 }
 

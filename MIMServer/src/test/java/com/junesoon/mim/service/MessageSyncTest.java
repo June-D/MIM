@@ -135,6 +135,9 @@ class MessageSyncTest {
         assertEquals("bob-1", copy.getSyncOriginalDevice());
         assertEquals("dummy-signature", copy.getSyncSignature());
         assertEquals(wrap("carol").getCiphertext(), copy.getCiphertext());
+        // sessionId 由客户端生成、服务端不理解，但接收设备靠它路由密文；
+        // 漏掉这一列，副本会永远解不开（真实 e2e 就是这么发现漏的）。
+        assertEquals("session-01", copy.getSessionId());
     }
 
     @Test
@@ -217,6 +220,7 @@ class MessageSyncTest {
         message.setSyncOriginalTo("alice");
         message.setSyncOriginalDevice("bob-1");
         message.setSyncSignature("dummy-signature");
+        message.setSessionId("session-01");
         message.setRecipientSignedPreKeyId(1);
         return message;
     }

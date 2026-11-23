@@ -43,6 +43,7 @@ import com.junesoon.mim.app.data.messaging.ReadRequest
 import com.junesoon.mim.app.data.messaging.RecallRequest
 import com.junesoon.mim.app.data.messaging.SessionMeta
 import com.junesoon.mim.app.data.messaging.StatusEnvelope
+import com.junesoon.mim.app.data.messaging.SyncPayloadDto
 import com.junesoon.mim.app.data.messaging.StoreJson
 import com.junesoon.mim.app.data.messaging.StoreResponseJson
 import com.junesoon.mim.app.data.messaging.WireJson
@@ -936,6 +937,164 @@ class SecureBackend(
         postEnvelope<Boolean>("$server/message/sync/request", token)
     }
 
+    override suspend fun syncToDevice(token: String, deviceId: String, limit: Int): Int {
+        val self = cachedUsername
+        if (deviceId.isBlank() || deviceId == cachedDeviceId || self.isBlank()) {
+            return 0
+        }
+        val cutoff = System.currentTimeMillis() - SYNC_MAX_AGE_MS
+        // 只转发本机有明文的文本消息：媒体走引用不搬密文；自己发出的密文棘轮解不开，
+        // 所以「我说过的话」也只能靠本机留存的 text。
+        val candidates = messages
+            .asSequence()
+            .filter { it.payload == null && !it.pending && it.epochMs >= cutoff && it.text.isNotBlank() }
+            .sortedByDescending { it.epochMs }
+            .take(limit)
+            .toList()
+        if (candidates.isEmpty()) {
+            return 0
+        }
+
+        var workingStore = storeJson
+        val replicas = mutableListOf<CipherMessageOut>()
+        for (cached in candidates) {
+            val tag = anyTag(workingStore, cached.contactId) ?: continue
+            val from = if (cached.fromMe) self else cached.contactId
+            val to = if (cached.fromMe) cached.contactId else self
+            val envelope = SyncPayloadDto(
+                clientMsgId = cached.id,
+                tag = tag,
+                from = from,
+                to = to,
+                device = cachedDeviceId,
+                clientTime = cached.epochMs,
+                text = cached.text,
+            )
+            // 归属由本设备身份私钥签名：服务端不验签，接收端用已固定的公钥验。
+            val canonical = syncCanonical(cached.id, tag, from, to, cachedDeviceId)
+            val signature = runCatching {
+                MimCoreNative.signWithIdentity(
+                    bundle.identity.privateKey.toByteArray(Charsets.UTF_8),
+                    canonical.toByteArray(Charsets.UTF_8),
+                ).toString(Charsets.UTF_8)
+            }.getOrNull() ?: continue
+
+            val existing = findSession(workingStore, self, deviceId)
+            if (existing != null) {
+                val composed = call(MimCoreNative::composeSealed) { json ->
+                    json.encodeToString(
+                        ComposeSealedRequestJson.serializer(),
+                        ComposeSealedRequestJson(
+                            jsonOf(workingStore),
+                            existing.sessionId,
+                            JsonCodec.encode(envelope),
+                            null,
+                        ),
+                    )
+                }.let { JsonCodec.decode<ComposeSealedResponseJson>(it) }
+                workingStore = composed.store.toString()
+                replicas += CipherMessageOut(
+                    clientMsgId = cached.id,
+                    conversationTag = tag,
+                    toUsername = self,
+                    targetDeviceId = deviceId,
+                    alg = ALGORITHM,
+                    iv = composed.wire.iv,
+                    ciphertext = composed.wire.ciphertext,
+                    ratchetPublic = composed.wire.dh,
+                    previousChainLength = composed.wire.pn,
+                    messageNumber = composed.wire.n,
+                    clientTime = cached.epochMs,
+                    sessionId = existing.sessionId,
+                    syncOriginalFrom = from,
+                    syncOriginalTo = to,
+                    syncOriginalDevice = cachedDeviceId,
+                    syncSignature = signature,
+                )
+            } else {
+                val preKey = preKeyBundle(self, deviceId, token) ?: return 0
+                val cert = fetchCertificate(token)
+                val composed = call(MimCoreNative::composeFirstMessage) { json ->
+                    json.encodeToString(
+                        ComposeRequestJson.serializer(),
+                        ComposeRequestJson(
+                            identity_private = bundle.identity.privateKey,
+                            identity_public = bundle.identity.publicKey,
+                            peer_identity_public = Codec.base64ToHex(preKey.identityPublicKey),
+                            peer_signed_pre_key_id = preKey.signedPreKeyId,
+                            peer_signed_pre_key_public = Codec.base64ToHex(preKey.signedPreKeyPublic),
+                            peer_one_time_pre_key_id = preKey.oneTimePreKeyId,
+                            peer_one_time_pre_key_public = preKey.oneTimePreKeyPublic
+                                ?.let(Codec::base64ToHex),
+                            plaintext = JsonCodec.encode(envelope),
+                            conversation_tag = null,
+                            session_id = UUID.randomUUID().toString(),
+                            certificate = cert,
+                        ),
+                    )
+                }.let { JsonCodec.decode<ComposeResponseJson>(it) }
+                val inserted = call(MimCoreNative::sessionStoreInsert) { json ->
+                    json.encodeToString(
+                        InsertRequestJson.serializer(),
+                        InsertRequestJson(
+                            store = jsonOf(workingStore),
+                            session_id = composed.session_id,
+                            // 与本账号另一台设备的会话：peer 记自己，靠 device 区分。
+                            peer = self,
+                            device_id = deviceId,
+                            state = composed.state,
+                            tags = listOf(composed.conversation_tag),
+                        ),
+                    )
+                }.let { JsonCodec.decode<StoreResponseJson>(it) }
+                workingStore = inserted.store.toString()
+                replicas += CipherMessageOut(
+                    clientMsgId = cached.id,
+                    conversationTag = tag,
+                    toUsername = self,
+                    targetDeviceId = deviceId,
+                    alg = composed.alg,
+                    iv = composed.wire.iv,
+                    ciphertext = composed.wire.ciphertext,
+                    ratchetPublic = composed.wire.dh,
+                    previousChainLength = composed.wire.pn,
+                    messageNumber = composed.wire.n,
+                    senderIdentityKey = composed.sender_identity_key,
+                    senderEphemeralKey = composed.sender_ephemeral_key,
+                    senderUsedOneTimePreKey = composed.used_one_time_pre_key,
+                    consumedOneTimePreKeyId = composed.consumed_one_time_pre_key_id,
+                    recipientSignedPreKeyId = composed.recipient_signed_pre_key_id,
+                    clientTime = cached.epochMs,
+                    sessionId = composed.session_id,
+                    syncOriginalFrom = from,
+                    syncOriginalTo = to,
+                    syncOriginalDevice = cachedDeviceId,
+                    syncSignature = signature,
+                )
+            }
+        }
+        if (replicas.isEmpty()) {
+            return 0
+        }
+        storeJson = workingStore
+        vault.saveStore(workingStore)
+        val saved = runCatching {
+            postList<List<CipherMessageOut>, List<CipherMessageDto>>(
+                "$server/message/sync", token, replicas,
+            )
+        }.getOrNull() ?: return 0
+        return saved.count { it.id != null }
+    }
+
+    /** 与接收端逐字节一致的规范化串；改字段顺序等于破坏兼容。 */
+    private fun syncCanonical(
+        clientMsgId: String,
+        tag: String,
+        from: String,
+        to: String,
+        device: String,
+    ): String = "$clientMsgId|$tag|$from|$to|$device"
+
     override suspend fun releaseUploadedMedia(token: String, mediaIds: List<String>) {
         for (id in mediaIds) {
             if (!MediaIds.isValid(id)) {
@@ -1112,6 +1271,11 @@ class SecureBackend(
         token: String,
         into: MutableList<IncomingMessage>,
     ) {
+        // 同步副本：外层是发给本设备的密文，归属在信封里，必须验签后才采信。
+        if (raw.syncFromDevice != null && plaintext.startsWith(SYNC_PREFIX)) {
+            rememberSynced(raw, plaintext, token, into)
+            return
+        }
         val id = raw.clientMsgId ?: UUID.randomUUID().toString()
         raw.id?.let { serverIds[peer] = maxOf(serverIds[peer] ?: 0L, it) }
         // 已屏蔽：棘轮必须继续前进，否则后面的消息解不开；明文直接丢弃。
@@ -1157,6 +1321,78 @@ class SecureBackend(
         into += IncomingMessage(peer, message)
     }
 
+    /**
+     * 收下一条同步副本：解信封 → 用来源设备公钥验签 → 按信封归属入库。
+     *
+     * <p>验签失败一律丢弃：宁可少一条历史，也不能采信一个服务端能伪造的归属。
+     */
+    private suspend fun rememberSynced(
+        raw: CipherMessageDto,
+        plaintext: String,
+        token: String,
+        into: MutableList<IncomingMessage>,
+    ) {
+        val sourceDevice = raw.syncFromDevice ?: return
+        val payload = runCatching { JsonCodec.decode<SyncPayloadDto>(plaintext) }.getOrNull() ?: return
+        if (!verifySynced(sourceDevice, payload, raw.syncSignature, token)) {
+            return
+        }
+        val self = cachedUsername
+        val contact = if (payload.from == self) payload.to else payload.from
+        if (contact.isBlank() || contact == self || contact in blockedPeers) {
+            return
+        }
+        val id = payload.clientMsgId.ifBlank { raw.clientMsgId ?: return }
+        if (messages.any { it.id == id && it.contactId == contact }) {
+            return
+        }
+        val message = ChatMessage(
+            id = id,
+            fromMe = payload.from == self,
+            text = payload.text,
+            time = nowTime(),
+            epochMs = payload.clientTime,
+            syncedFrom = sourceDevice,
+        )
+        cache(
+            contactId = contact,
+            message = message,
+            epochMs = payload.clientTime,
+            serverId = raw.id,
+            syncedFrom = sourceDevice,
+        )
+        into += IncomingMessage(contact, message)
+    }
+
+    /** 规范化串必须与发送端逐字节一致；换了字段顺序就等于换协议。 */
+    private suspend fun verifySynced(
+        sourceDevice: String,
+        payload: SyncPayloadDto,
+        signature: String?,
+        token: String,
+    ): Boolean {
+        if (signature.isNullOrBlank()) {
+            return false
+        }
+        val publicKey = runCatching { peerIdentityKeys(token, cachedUsername) }
+            .getOrDefault(emptyList())
+            .firstOrNull { it.deviceId == sourceDevice }
+            ?.publicKeyBase64 ?: return false
+        val publicDer = runCatching {
+            java.util.Base64.getDecoder().decode(publicKey)
+        }.getOrNull() ?: return false
+        val canonical = syncCanonical(
+            payload.clientMsgId, payload.tag, payload.from, payload.to, payload.device,
+        )
+        return runCatching {
+            MimCoreNative.verifyWithIdentity(
+                publicDer,
+                canonical.toByteArray(Charsets.UTF_8),
+                signature.toByteArray(Charsets.UTF_8),
+            )
+        }.getOrDefault(false)
+    }
+
     private fun parsePayload(raw: String): MediaPayload? =
         if (!raw.startsWith(MEDIA_PREFIX)) {
             null
@@ -1194,6 +1430,7 @@ class SecureBackend(
         recallToken: String? = null,
         payload: String? = null,
         serverId: Long? = null,
+        syncedFrom: String? = null,
     ) {
         if (messages.any { it.id == message.id }) {
             return
@@ -1211,6 +1448,7 @@ class SecureBackend(
             pending = message.pending,
             payload = payload,
             serverId = serverId,
+            syncedFrom = syncedFrom,
         )
     }
 
@@ -1413,6 +1651,12 @@ class SecureBackend(
         private const val TYPE_RECALLED = 100014
         private const val TYPE_CONVERSATION_CLEARED = 100019
         private const val TYPE_HISTORY_SYNC = 100022
+
+        /** 同步信封前缀：与媒体载荷一样靠前缀区分「这是什么」，不靠猜。 */
+        private const val SYNC_PREFIX = "{\"v\":1,\"kind\":\"sync\""
+
+        /** 只转发最近 30 天，更早的不再搬（见 docs/device-sync-design.md）。 */
+        private const val SYNC_MAX_AGE_MS = 30L * 24 * 60 * 60 * 1000
         private const val TYPE_FRIEND_REQUEST = 100016
         private const val TYPE_FRIEND_ACCEPTED = 100017
         private const val TYPE_FRIEND_REJECTED = 100018

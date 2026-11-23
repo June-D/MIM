@@ -289,6 +289,26 @@ data class BindEmailRequest(
     val email: String,
 )
 
+/**
+ * 同步副本的内层明文：告诉接收设备「这条原本是谁发给谁的」。
+ *
+ * <p>外层密文只保证「发给某台设备」，归属在这层；接收端解出来后必须用
+ * 来源设备身份公钥验 [CipherMessageOut.syncSignature] 才采信。
+ */
+@Serializable
+data class SyncPayloadDto(
+    val v: Int = 1,
+    val kind: String = "sync",
+    val clientMsgId: String,
+    /** 原消息的会话标签：服务端按它找原消息，签名也覆盖它。 */
+    val tag: String,
+    val from: String,
+    val to: String,
+    val device: String,
+    val clientTime: Long,
+    val text: String,
+)
+
 /** `GET /user/info` 只回给账号本人。 */
 @Serializable
 data class UserInfoDto(

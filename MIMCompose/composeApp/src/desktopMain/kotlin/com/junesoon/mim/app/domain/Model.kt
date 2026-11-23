@@ -51,6 +51,8 @@ data class ChatMessage(
     val kind: String = "text",
     /** 图片或语音的媒体引用；密钥来自端到端密文，服务端拿不到。 */
     val media: MediaAttachment? = null,
+    /** 这条消息来自哪台设备的同步（null 表示本机原生消息）。 */
+    val syncedFrom: String? = null,
 )
 
 /**

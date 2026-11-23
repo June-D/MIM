@@ -77,6 +77,14 @@ interface MessagingBackend {
     suspend fun requestHistorySync(token: String) = Unit
 
     /**
+     * 把本机留存的最近历史重新加密给本账号的另一台设备，返回实际提交条数。
+     *
+     * 只能转发本机有明文的消息（棘轮解不开自己发出的密文），且只发最近
+     * [limit] 条 / 30 天内的文本消息；调用前必须已获得用户对该设备的批准。
+     */
+    suspend fun syncToDevice(token: String, deviceId: String, limit: Int = 50): Int = 0
+
+    /**
      * 释放本机上传过、已经不再引用的媒体密文。
      *
      * 服务端只看得到密文、看不到引用关系，所以由发送方主动告知；

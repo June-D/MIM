@@ -917,6 +917,9 @@ public class MessageServiceImpl implements MessageService {
             record.setSenderUsedOneTimePreKey(replica.getSenderUsedOneTimePreKey());
             record.setConsumedOneTimePreKeyId(replica.getConsumedOneTimePreKeyId());
             record.setRecipientSignedPreKeyId(replica.getRecipientSignedPreKeyId());
+            // 会话 id 由客户端生成，服务端不理解也不应该猜；但接收设备靠它路由密文，
+            // 少了这个字段副本就永远解不开。
+            record.setSessionId(replica.getSessionId());
             record.setPadding(Boolean.TRUE.equals(replica.getPadding()));
             record.setSyncOriginalFrom(replica.getSyncOriginalFrom());
             record.setSyncOriginalTo(replica.getSyncOriginalTo());

@@ -239,6 +239,8 @@ data class CachedMessage(
      * 没有 id 的老数据按清除时间兜底。
      */
     val serverId: Long? = null,
+    /** 同步副本的来源设备；普通消息为 null。 */
+    val syncedFrom: String? = null,
 )
 
 /** 离线发送队列条目：密文已组装，重试只重发，不重新推进棘轮。 */
