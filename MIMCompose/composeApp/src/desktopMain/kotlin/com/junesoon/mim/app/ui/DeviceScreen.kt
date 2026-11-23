@@ -30,6 +30,11 @@ import com.junesoon.mim.app.domain.DeviceInfo
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import androidx.compose.foundation.focusable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 /**
  * 设备管理：查看本账号设备，注销其它设备。
@@ -47,10 +52,18 @@ fun DeviceScreen(
     notice: String? = null,
     error: String? = null,
 ) {
+    // Esc 绑在本页根节点上：它必须先成为焦点所有者，按键才会沿焦点路径
+    // 送到这里。本页没有输入框，拿到焦点是安全的；换页时焦点自然还给新页面。
+    val pageFocus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        runCatching { pageFocus.requestFocus() }
+    }
     Column(
         modifier = Modifier
             .fillMaxSize()
             .background(MimPalette.Paper)
+            .focusRequester(pageFocus)
+            .focusable()
             .escapeBack { onBack() },
     ) {
         Row(
