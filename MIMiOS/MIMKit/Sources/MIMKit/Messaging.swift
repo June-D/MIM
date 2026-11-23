@@ -145,6 +145,7 @@ public final class MessagingSession {
     /// 拉取未投递消息并解密。
     public func receive() async throws -> [Received] {
         let copies = try await client.undelivered()
+        guard !copies.isEmpty else { return [] }
         var received: [Received] = []
         for copy in copies {
             guard let sessionId = copy.sessionId else { continue }
@@ -197,6 +198,10 @@ public final class MessagingSession {
                 peer: peer, text: opened.plaintext, clientMsgId: copy.clientMsgId ?? "",
                 recalled: false, sessionId: sessionId
             ))
+        }
+        // 处理完再确认：先 ack 后处理的话，解密失败的消息就再也拉不到了。
+        if let maxId = copies.compactMap({ $0.id }).max() {
+            try? await client.markDelivered(beforeId: maxId)
         }
         return received
     }

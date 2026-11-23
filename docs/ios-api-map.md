@@ -131,7 +131,11 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
    `invalidArgument`——这个错误不带任何细节，只能靠对照结构体排查。
 5. **查询串必须单独设置**：把 `?deviceId=…` 塞进 `URLComponents.path` 会被转义成
    `%3F`，服务端收到的用户名变成 `xxx?deviceId=yyy`，报「用户名不合法」。
-6. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
+6. **`GET /message/undelivered` 不会自动置已投递**：必须再调
+   `POST /message/delivered?beforeId=<最大 id>`。漏了这一步的表现很隐蔽——
+   消息不丢，但每轮轮询都会再收到一次，界面重复、时间戳不停刷新。
+   另外 `beforeId` 是**查询参数**，不是请求体。
+7. **`data` 的形状不统一**：`POST /device` 返回对象、`POST /key` 返回对象、
    `POST /prekey/one-time` 返回数字、某些接口是 null。只关心 `status` 的请求
    用 `MIMEnvelope<IgnoredPayload>` 吞掉 `data`，别为类型匹配反复改结构体。
 
@@ -148,7 +152,8 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
 | | `POST /key/bundle` / `GET /key/{username}` | 上传/拉取预密钥包 |
 | | `GET /user/devices` / `DELETE /user/device/{id}` | 设备列表与注销 |
 | M2 文本 | `POST /message` | 发送密文副本（**路径是 `/message`，不是 `/message/send`**） |
-| | `GET /message/undelivered` | 拉未投递（拉过即标记已投递） |
+| | `GET /message/undelivered` | 拉未投递（**拉取不会置已投递**） |
+| | `POST /message/delivered?beforeId=` | 确认收到；不调用会重复下发同一条 |
 | | `GET /message/history/{peer}?tags=…` | 历史 |
 | | `POST /cert/sender` | 为本设备签发发送者证书（`/cert` 是 404） |
 | | `POST /message/read` | 已读（带 `clientMsgIds` 才能跨设备副本） |

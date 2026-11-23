@@ -521,6 +521,12 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS M2 界面完成：会话列表 + 聊天页（气泡、输入区、3 秒轮询），本地库整体加密落盘
+  （`mim_state_encrypt`，密钥在 Keychain，磁盘上 `grep` 不到明文），
+  发送/接收/持久化在 iPhone 17 模拟器上实测通过。
+  修复一个隐蔽缺陷：`GET /message/undelivered` 不会自动置已投递，必须补调
+  `POST /message/delivered?beforeId=`，否则同一密文每轮重复下发。
+
 - iOS M2 协议核心打通（`swift run MIMKitSmoke --chat`）：两个临时账号注册 →
   发钥 → A 发首条消息（X3DH + 证书信封）→ B 解密 → B 回信（双棘轮）→ A 解密，
   全部走 Swift + 真服务端。踩到并修掉 6 个契约问题：`/cert/sender` 而非 `/cert`、

@@ -55,6 +55,19 @@ extension MIMClient {
         return envelope.data ?? []
     }
 
+    /// 确认收到：把本设备 `beforeId` 之前的消息标记为已投递。
+    ///
+    /// **必须调用**。服务端拉取不会自动置已投递，不确认的话同一条密文每轮都会
+    /// 再下发一次——界面上表现为消息重复、时间戳不断刷新。
+    public func markDelivered(beforeId: Int64) async throws {
+        let envelope: MIMEnvelope<IgnoredPayload> = try await send(
+            method: "POST", path: "/message/delivered?beforeId=\(beforeId)"
+        )
+        guard envelope.status == 200 else {
+            throw MIMApiError.failed(envelope.status, envelope.message ?? "确认投递失败")
+        }
+    }
+
     /// 会话历史（服务端只存密文；能解开的靠本地会话状态与会话内密钥）。
     public func history(peer: String, tags: [String], limit: Int = 50) async throws -> [IncomingCopy] {
         guard !tags.isEmpty else { return [] }

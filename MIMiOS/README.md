@@ -92,6 +92,23 @@ swift test
 MIM_KEYCHAIN_TESTS=1 swift test
 ```
 
+## M2 已跑通（模拟器实测）
+
+```
+会话列表                聊天页
+composebob  19:39       干净环境下的第一条  19:38   ← 对方发来（左、灰）
+这条由 iPhone 发出       这条由 iPhone 发出   19:39   ← 本机发出（右、蓝）
+```
+
+- 登录 → 发布密钥 → 会话列表 → 聊天页 → 发送 / 接收（3 秒轮询 `/message/undelivered`）；
+- 本地库 `Library/Application Support/MIMLocal/messages.bin`：会话状态 + 会话索引 +
+  聊天记录三样整体用 `mim_state_encrypt` 加密（AES-256-GCM，密钥 32 字节在 Keychain，
+  每次加密换新 nonce）。文件头是 `MIM-STATE-1`，`grep` 不到任何明文——
+  重启后历史仍在，且磁盘上看不到聊天内容；
+- 收到消息后**必须** `POST /message/delivered?beforeId=`：服务端拉取不会自动置已投递，
+  不确认的话同一密文每轮都会再下发，界面上表现为消息重复、时间戳不断刷新
+  （我第一版就是这样，加了 ack 才干净）。
+
 ## 模拟器实测（2026-11-23）
 
 iPhone 17 / iOS 27.2 模拟器上跑通：登录 → 发布密钥 → 设备列表。

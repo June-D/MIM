@@ -21,8 +21,10 @@ struct RootView: View {
         NavigationStack {
             if model.token == nil {
                 LoginView()
+            } else if model.activePeer != nil {
+                ChatView()
             } else {
-                DeviceListView()
+                ConversationListView()
             }
         }
     }

@@ -127,6 +127,44 @@ func chatSmoke(_ arguments: [String]) async {
     }
 }
 
+/// `--send <url> <user> <pass> <peer> <text>`：用某个账号给对端发一条消息。
+///
+/// 会为这次发送注册一个**新设备**（独立的设备 id），因此不会覆盖该账号
+/// 已有设备的预密钥——用来在命令行驱动真机/模拟器做收发验证。
+func sendOnce(_ arguments: [String]) async {
+    guard arguments.count >= 7, let url = URL(string: arguments[2]) else {
+        FileHandle.standardError.write(
+            Data("用法：MIMKitSmoke --send <url> <user> <pass> <peer> <text>\n".utf8)
+        )
+        exit(2)
+    }
+    let user = arguments[3], password = arguments[4]
+    let peer = arguments[5]
+    let text = arguments[6...].joined(separator: " ")
+
+    do {
+        let client = MIMClient(
+            baseURL: url,
+            deviceId: "cli-\(user)-\(Int(Date().timeIntervalSince1970))"
+        )
+        _ = try await client.login(username: user, password: password)
+        let bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        try await client.publishKeys(password: password, deviceName: "CLI \(user)", bundle: bundle)
+        let session = MessagingSession(client: client, bundle: bundle)
+        let delivered = try await session.sendText(to: peer, text: text)
+        check(true, "\(user) → \(peer) 已投递到 \(delivered) 台设备：\(text)")
+        print("SEND_OK")
+    } catch {
+        FileHandle.standardError.write(Data("✗ 发送失败：\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--send" {
+    await sendOnce(CommandLine.arguments)
+    exit(0)
+}
+
 if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--chat" {
     await chatSmoke(CommandLine.arguments)
     exit(0)

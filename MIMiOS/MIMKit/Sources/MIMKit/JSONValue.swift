@@ -4,7 +4,7 @@ import Foundation
 ///
 /// 用来透传会话存储（`SessionStore`）：Swift 不需要理解它内部结构，
 /// 只要原样存、原样传回 Rust。不理解的东西就不要解析，避免结构一改就崩。
-public enum JSONValue: Codable, Equatable {
+public enum JSONValue: Codable, Equatable, Sendable {
     case null
     case bool(Bool)
     case number(Double)
