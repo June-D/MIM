@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -98,15 +99,25 @@ fun AuthScreen(
         modifier = Modifier.fillMaxSize().background(MimPalette.Paper),
     ) {
         BrandPanel(modifier = Modifier.weight(0.44f).fillMaxHeight())
-        Box(
-            modifier = Modifier.weight(0.56f).fillMaxHeight().padding(32.dp),
-            contentAlignment = Alignment.Center,
+        BoxWithConstraints(
+            modifier = Modifier.weight(0.56f).fillMaxHeight(),
         ) {
+            // 矮窗口（小屏最大化、或者用户手动拉矮）里表单比可视区域高：
+            // 必须让整块内容能滚动，否则登录按钮会被窗口底边切掉。
+            // 高窗口仍保持垂直居中，只是把「居中」换成固定布局的等效 padding。
+            val compact = maxHeight < 720.dp
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 32.dp, vertical = if (compact) 16.dp else 24.dp),
+                verticalArrangement = if (compact) Arrangement.Top else Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
             Column(
                 modifier = Modifier
                     .widthIn(max = 392.dp)
-                    .fillMaxWidth()
-                    .verticalScroll(rememberScrollState()),
+                    .fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(14.dp),
             ) {
                 if (mode != AuthMode.Recover) {
@@ -292,6 +303,7 @@ fun AuthScreen(
                 }
 
                 Feedback(localError ?: error, notice)
+            }
             }
         }
     }
