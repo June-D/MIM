@@ -31,10 +31,19 @@ if ! xcode-select -p 2>/dev/null | grep -q "Xcode.app"; then
     echo "装好后执行：sudo xcode-select -s /Applications/Xcode.app/Contents/Developer" >&2
     exit 1
 fi
+# Xcode 装了但许可没接受时，xcrun / ld 都会失败，而且报错埋在链接器输出里，
+# 很难一眼看出跟「许可」有关。这里先探一次，给出可执行的修复命令。
+if xcodebuild -version 2>&1 | grep -q "license agreements"; then
+    echo "Xcode 许可协议未接受，先执行：sudo xcodebuild -license accept" >&2
+    exit 1
+fi
+
 SDK_SIM="$(xcrun --sdk iphonesimulator --show-sdk-path 2>/dev/null || true)"
 SDK_DEV="$(xcrun --sdk iphoneos --show-sdk-path 2>/dev/null || true)"
 if [[ -z "$SDK_SIM" || -z "$SDK_DEV" ]]; then
-    echo "找不到 iOS SDK：请在 Xcode 里安装 iOS 平台组件。" >&2
+    echo "找不到 iOS SDK。两种可能：" >&2
+    echo "  1) Xcode 许可未接受：sudo xcodebuild -license accept" >&2
+    echo "  2) 未安装 iOS 平台组件：xcodebuild -downloadPlatform iOS" >&2
     exit 1
 fi
 

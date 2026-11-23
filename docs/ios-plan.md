@@ -44,6 +44,11 @@ Swift 通过 `mim_core.h` 调用；密钥只经过内存，落盘交给 Keychain
   所以 M0 剩下的只是「把它装进 App 并在模拟器里跑起来」
 
 **M1 登录与本地保险库（2~3 天）**
+
+> 库层已提前完成：`MIMiOS/MIMKit` 里 `MimCore`（ABI 封装）、`Keychain`、
+> `MIMClient`（登录/设备）都已可编译，`swift run MIMKitSmoke` 通过。
+> M1 剩下的只是 SwiftUI 界面与流程串联。
+
 - 登录（账号密码 + 设备名 + 二次验证码）、令牌存 Keychain
 - 身份密钥包生成后存 Keychain（`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`），
   消息与会话缓存用 CryptoKit AES-GCM 落沙盒，密钥同样在 Keychain

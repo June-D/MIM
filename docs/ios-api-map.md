@@ -38,7 +38,32 @@ SWIFT_ABI_OK
 头文件导入、指针传递、`mim_bytes_free` 归还、JSON 字段名，一个都没绕开。
 iOS 上只是换 target 与链接方式。
 
-## 3. C ABI 清单（Swift 侧 `import MimCore`）
+## 3. Swift 封装已落地：`MIMiOS/MIMKit`
+
+桥接层不再是示例代码，已经是一个可编译的 Swift Package：
+
+| 文件 | 内容 |
+|---|---|
+| `Sources/MIMKit/MimCore.swift` | C ABI 封装：`makeKeyBundle` / `composeFirstMessage` / `openFirstMessage` / `sign` / `verify` |
+| `Sources/MIMKit/Models.swift` | 与 `src/messaging.rs` 逐字对应的 DTO |
+| `Sources/MIMKit/Keychain.swift` | Keychain 读写（`AfterFirstUnlockThisDeviceOnly`）+ `deleteAll()` |
+| `Sources/MIMKit/MIMClient.swift` | 登录 / 设备列表 / 注销；统一信封与错误码（40102、40001） |
+| `Sources/MIMKitSmoke/` | 不依赖 XCTest 的冒烟程序，`swift run MIMKitSmoke` |
+
+冒烟输出（macOS，无需 Xcode）：
+
+```
+MIMKit 冒烟（core mim-core-rust 0.1.0）
+· 生成 alice 密钥包
+· 组装首条消息（tag 一致）
+· 对端解出明文：iOS 第一条消息
+· 证书归属还原为 alice-iphone
+· 身份签名往返
+· 篡改后验签失败
+MIMKIT_SMOKE_OK
+```
+
+## 4. C ABI 清单（Swift 侧 `import MIMCoreABI`）
 
 | 函数 | 用途 | iOS 何时调 |
 |---|---|---|
@@ -63,7 +88,7 @@ iOS 上只是换 target 与链接方式。
 - 返回 0 成功，非 0 是 `MIM_ERR_*`；**参数错与密码学失败分开**（1 vs 2/4/5），不要都当「失败」处理；
 - 消息与状态都是 UTF-8 JSON，加字段不破坏 ABI。
 
-## 4. HTTP 接口（按 M1→M3 的调用顺序）
+## 5. HTTP 接口（按 M1→M3 的调用顺序）
 
 | 阶段 | 接口 | 说明 |
 |---|---|---|
@@ -83,7 +108,7 @@ iOS 上只是换 target 与链接方式。
 | 其它 | `GET /user/avatar/{username}` / `POST /user/avatar` | 头像（非端到端加密） |
 | | `POST /message/sync` / `POST /message/sync/request` | 多设备历史同步 |
 
-## 5. WebSocket 推送类型
+## 6. WebSocket 推送类型
 
 | 类型 | 含义 | iOS 侧动作 |
 |---|---|---|
@@ -94,7 +119,7 @@ iOS 上只是换 target 与链接方式。
 | `100022` | 另一台设备请求历史 | 弹确认框（显示设备 id + 指纹） |
 | `100024` | 另一台设备已读 | 清该会话红点 + 重拉未读 |
 
-## 6. 三条时序（照这个顺序写，少走弯路）
+## 7. 三条时序（照这个顺序写，少走弯路）
 
 1. **首次登录**：`login/token` → `key_bundle_generate` → `POST /key/bundle` →
    Keychain 存私钥 → 若本机无历史则 `POST /message/sync/request`。
@@ -104,7 +129,7 @@ iOS 上只是换 target 与链接方式。
    `syncFromDevice == null` 时，若 `sessionId` 未知走 `open_first_message`，
    否则走 `open_sealed` → 验签/归属 → 入库。
 
-## 7. iOS 侧要自己实现的部分
+## 8. iOS 侧要自己实现的部分
 
 - **Keychain**：身份私钥、设备标识、本地状态密钥（`kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly`）；
 - **网络**：`URLSession` + `URLSessionWebSocketTask`（wss）；
@@ -112,7 +137,7 @@ iOS 上只是换 target 与链接方式。
 - **分片上传**：与服务端一致的长度校验（末片是余数）；
 - **后台推送**：APNs（需 Apple 开发者账号签发 `.p8`，服务端要加通道；MVP 可先不做）。
 
-## 8. 已知缺口（诚实清单）
+## 9. 已知缺口（诚实清单）
 
 | 缺口 | 影响 | 什么时候补 |
 |---|---|---|
@@ -120,7 +145,7 @@ iOS 上只是换 target 与链接方式。
 | C ABI 无「批量补一次性预密钥」 | 预密钥耗尽后需重新生成整包 | M2 之后再评估 |
 | 本地状态加密依赖调用方提供 nonce | iOS 侧必须每次新生成（12 字节），否则复用 nonce 会毁掉 GCM 安全性 | M1 就注意 |
 
-> 第 8 节第 3 条不是小问题：`mim_state_encrypt` 把 nonce 交给调用方，
+> 第 9 节第 3 条不是小问题：`mim_state_encrypt` 把 nonce 交给调用方，
 > 是为了让平台密钥不出 Keychain；代价是**每次加密都必须换新 nonce**。
 > Swift 侧建议把它封装成「只能通过 `mim_random_bytes` 取 nonce」的 API，
 > 从类型上避免手写常量。

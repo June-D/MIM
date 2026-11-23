@@ -36,3 +36,9 @@ MIMServer/sql/fx_falsework_db.sql
 
 # ---------- 服务端运行时落盘（加密媒体密文，仅本机） ----------
 MIMServer/data/
+
+# Swift Package Manager / Xcode
+MIMiOS/**/.build/
+MIMiOS/**/DerivedData/
+MIMiOS/**/*.xcuserstate
+MIMiOS/**/xcuserdata/

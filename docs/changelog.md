@@ -521,6 +521,14 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS 库层落地：新增 `MIMiOS/MIMKit` Swift Package——`MimCore`（C ABI 封装：
+  密钥包 / 首条消息 / 签名验签）、`Models`（与 Rust DTO 逐字对应）、
+  `Keychain`（AfterFirstUnlockThisDeviceOnly + deleteAll）、
+  `MIMClient`（登录 / 设备 / 注销，统一信封与错误码）。不依赖 XCTest 的
+  `swift run MIMKitSmoke` 在 macOS 上跑通全链路；`ContractTests` 钉住
+  `identity_private`、`peer_signed_pre_key_id`、`certificate.device_id` 等字段名。
+  `tools-sync-header.sh --check` 防止包内头文件与 Rust 侧漂移。
+
 - Swift 桥接实测：`tools/swift_abi_smoke.sh` 用 macOS 自带 swiftc 直接调 C ABI，
   跑通「密钥包生成 → 组装首条消息 → 对端解出明文 → 身份签名 + 篡改被拒 →
   非法输入返回错误码」。这段 Swift（`tools/swift/abi_smoke.swift`）就是 iOS 侧

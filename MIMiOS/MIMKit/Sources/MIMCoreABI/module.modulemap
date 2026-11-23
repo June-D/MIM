@@ -1,0 +1,9 @@
+// 把 Rust 的 C ABI 暴露成 Swift 模块 MIMCoreABI。
+//
+// 头文件是 MIMCoreRust/include/mim_core.h 的副本（tools/sync-header.sh 同步），
+// 这样 SwiftPM 不依赖仓库外的相对路径；链接由 Package.swift 的 unsafeFlags 提供。
+module MIMCoreABI {
+    header "include/mim_core.h"
+    link "mim_core_rust"
+    export *
+}
