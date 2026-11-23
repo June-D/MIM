@@ -165,6 +165,9 @@ Vault/AWS/GCP 取，别写进仓库）；服务端对 `/recover/email` 已限流
 
 ## TLS
 
+> 完整部署流程（含反向代理、systemd、验证命令、升级回滚）见 [`deploy.md`](deploy.md)；
+> 本节只讲 TLS 本身的配置项与取舍。
+
 传输层加密保护的是口令、JWT 与元数据（谁和谁在通信）。没有 TLS 时，
 中间人可直接窃取 JWT 冒充身份，E2EE 也就形同虚设。
 

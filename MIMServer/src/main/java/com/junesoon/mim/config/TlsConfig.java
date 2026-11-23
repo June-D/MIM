@@ -2,6 +2,8 @@ package com.junesoon.mim.config;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.catalina.connector.Connector;
+import org.apache.tomcat.util.net.SSLHostConfig;
+import org.apache.tomcat.util.net.SSLHostConfigCertificate;
 import org.springframework.boot.web.embedded.tomcat.TomcatServletWebServerFactory;
 import org.springframework.boot.web.server.WebServerFactoryCustomizer;
 import org.springframework.context.annotation.Bean;
@@ -23,6 +25,11 @@ public class TlsConfig {
 
     /**
      * 由 {@link TlsProperties} 决定是否追加一个 SSL 连接器。
+     *
+     * <p>必须走 {@link SSLHostConfig} 而不是给 Connector 塞 keystore 属性：
+     * 只用 {@code connector.setProperty("keystoreFile", ...)} 时 Tomcat 10
+     * 找不到 {@code _default_} 的 SSLHostConfig，启动直接抛
+     * {@code IllegalArgumentException: No SSLHostConfig element was found}。
      */
     @Bean
     public WebServerFactoryCustomizer<TomcatServletWebServerFactory> sslConnectorCustomizer(
@@ -41,19 +48,31 @@ public class TlsConfig {
             connector.setPort(tlsProperties.getPort());
             connector.setSecure(true);
             connector.setScheme("https");
+            // 这一行决定端点是否真的走 SSL：只加 SSLHostConfig 而不设它，
+            // 8443 会变成「明文 HTTP 端口」，客户端握手直接被当成非法请求头。
             connector.setProperty("SSLEnabled", "true");
-            connector.setProperty("keystoreFile", tlsProperties.getKeystore());
-            connector.setProperty("keystorePass", tlsProperties.getKeystorePassword());
-            connector.setProperty("keystoreType", tlsProperties.getKeystoreType());
-            connector.setProperty("keyAlias", tlsProperties.getKeyAlias());
-            connector.setProperty("clientAuth", String.valueOf(tlsProperties.isClientAuth()));
-            // sslEnabledProtocols 接受逗号分隔的列表；sslProtocol 只接受单值，混用会导致
-            // "TLSv1.2,TLSv1.3 SSLContext not available"
-            connector.setProperty("sslEnabledProtocols",
-                String.join(",", tlsProperties.getProtocols()));
+
+            SSLHostConfig hostConfig = new SSLHostConfig();
+            hostConfig.setHostName("_default_");
+            // 只放开配置里声明的协议：TLS 1.0/1.1 已在规范里废弃。
+            hostConfig.setProtocols(String.join(",", tlsProperties.getProtocols()));
+            if (tlsProperties.isClientAuth()) {
+                hostConfig.setCertificateVerification("required");
+            }
+
+            SSLHostConfigCertificate certificate = new SSLHostConfigCertificate(
+                hostConfig, SSLHostConfigCertificate.Type.UNDEFINED);
+            certificate.setCertificateKeystoreFile(tlsProperties.getKeystore());
+            certificate.setCertificateKeystorePassword(tlsProperties.getKeystorePassword());
+            certificate.setCertificateKeystoreType(tlsProperties.getKeystoreType());
+            certificate.setCertificateKeyAlias(tlsProperties.getKeyAlias());
+            hostConfig.addCertificate(certificate);
+
+            connector.addSslHostConfig(hostConfig);
             factory.addAdditionalTomcatConnectors(connector);
-            log.info("TLS 已启用：https://0.0.0.0:{}（keystore={}）",
-                tlsProperties.getPort(), tlsProperties.getKeystore());
+            log.info("TLS 已启用：https://0.0.0.0:{}（keystore={}，协议={}）",
+                tlsProperties.getPort(), tlsProperties.getKeystore(),
+                String.join("/", tlsProperties.getProtocols()));
         };
     }
 }

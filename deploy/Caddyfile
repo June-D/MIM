@@ -1,0 +1,21 @@
+# Caddy 反向代理示例（自动申请并续期证书）
+# 用法：caddy run --config Caddyfile
+#
+# 关键点：
+# 1) Caddy 默认透传 Upgrade/Connection，WebSocket 不需要额外配置；
+# 2) 必须带 X-Forwarded-Proto，且服务端要设 MIM_FORWARD_HEADERS=framework；
+# 3) 服务端应设 MIM_BIND_ADDRESS=127.0.0.1，避免有人直连 8080 伪造转发头。
+mim.example.com {
+    encode zstd gzip
+    # 单个密文附件上限约 15MB，留出余量
+    request_body {
+        max_size 24MB
+    }
+    reverse_proxy 127.0.0.1:8080 {
+        # 推送是长连接，别让它被过早掐断
+        transport http {
+            read_timeout 1h
+        }
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

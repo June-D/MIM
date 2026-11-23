@@ -113,8 +113,7 @@ MIMServer（Java）──────────► 鉴权、设备登记、预
 
 1. **移动端**：Android / iOS 工程、Keystore / Keychain、后台推送与断线重连。
 2. **附件进阶**：单文件上限 8MB、不分片；大文件需要分片上传与断点续传。
-3. **部署与运维**：TLS/WSS、限流、备份、密钥轮换、开源版部署文档（完成度达标后再写）。
-4. **多设备同步进阶**：现在只补最近 50 条 / 30 天文本；全量搬迁、媒体引用同步、
+3. **多设备同步进阶**：现在只补最近 50 条 / 30 天文本；全量搬迁、媒体引用同步、
    跨设备已读同步都还没做（设计见 `docs/device-sync-design.md` 第 10 节）。
 
 ### 八、给所有参与者（含 AI Agent）的红线
@@ -208,6 +207,7 @@ tools/backup.sh ./backups
 | [`docs/security.md`](docs/security.md) | 加密方案、棘轮、TOFU、安全性质与已知局限 |
 | [`docs/sealed-sender-design.md`](docs/sealed-sender-design.md) | 发送者证书与匿名提交的设计与实现差异 |
 | [`docs/device-sync-design.md`](docs/device-sync-design.md) | 多设备历史同步：设备信任模型、流程与分期（未实施） |
+| [`docs/deploy.md`](docs/deploy.md) | **从零部署**：拓扑选择、配置、验证、备份恢复、升级回滚、排障 |
 | [`docs/operations.md`](docs/operations.md) | 运行、建库、TLS、多实例、限流、密钥轮换、自测 |
 | [`docs/server-api.md`](docs/server-api.md) | HTTP 接口与 WebSocket 通知类型 |
 | [`docs/architecture.md`](docs/architecture.md) | 目录结构与模块职责 |

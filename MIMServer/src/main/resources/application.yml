@@ -109,3 +109,6 @@ server:
   # PlaintextRejectionFilter 会把所有请求挡成 403。
   # 代价是信任 X-Forwarded-*，务必保证应用端口（8080）只对代理开放。
   forward-headers-strategy: ${MIM_FORWARD_HEADERS:NATIVE}
+  # 监听地址。代理终结 TLS 时设为 127.0.0.1，只让本机代理能访问应用端口：
+  # 否则外部客户端可以直接连 8080 并自带 X-Forwarded-Proto: https 绕过明文拒绝。
+  address: ${MIM_BIND_ADDRESS:0.0.0.0}

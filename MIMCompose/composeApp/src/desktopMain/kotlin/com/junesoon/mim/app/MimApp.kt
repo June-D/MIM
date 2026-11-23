@@ -50,6 +50,7 @@ import com.junesoon.mim.app.ui.ChatScreen
 import com.junesoon.mim.app.ui.ContactsScreen
 import com.junesoon.mim.app.ui.DeviceScreen
 import com.junesoon.mim.app.ui.MimIcon
+import com.junesoon.mim.app.data.UiPrefs
 import com.junesoon.mim.app.ui.MediaTools
 import com.junesoon.mim.app.ui.MimEmptyState
 import com.junesoon.mim.app.ui.MimPalette
@@ -67,8 +68,17 @@ import kotlinx.coroutines.delay
  */
 @Composable
 fun MimApp() {
-    // 外观：默认跟随系统，也可以在「更多」里手动切换（仅本机、不持久化）。
-    var themeMode by remember { mutableStateOf(ThemeMode.System) }
+    // 外观：默认跟随系统，也可以在「更多」里手动切换；选择记在本机 ui.prefs。
+    var themeMode by remember {
+        mutableStateOf(
+            runCatching { ThemeMode.valueOf(UiPrefs.theme() ?: "") }
+                .getOrDefault(ThemeMode.System),
+        )
+    }
+    val cycleTheme: () -> Unit = {
+        themeMode = themeMode.next()
+        runCatching { UiPrefs.saveTheme(themeMode.name) }
+    }
     val darkTheme = when (themeMode) {
         ThemeMode.System -> isSystemInDarkTheme()
         ThemeMode.Light -> false
@@ -159,7 +169,7 @@ fun MimApp() {
                     store = store,
                     selectedId = null,
                     themeMode = themeMode,
-                    onCycleTheme = { themeMode = themeMode.next() },
+                    onCycleTheme = cycleTheme,
                 )
 
                 is Screen.Chat -> ConversationWorkspace(
@@ -167,7 +177,7 @@ fun MimApp() {
                     store = store,
                     selectedId = screen.contactId,
                     themeMode = themeMode,
-                    onCycleTheme = { themeMode = themeMode.next() },
+                    onCycleTheme = cycleTheme,
                 )
 
                 Screen.Search -> SearchScreen(

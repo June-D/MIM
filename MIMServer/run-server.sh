@@ -59,8 +59,14 @@ PID=$!
 echo "服务端启动中（pid=${PID}，日志 ${LOG}）…"
 
 for _ in $(seq 1 40); do
-    if [[ "$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:8080/user/info || true)" == "401" ]]; then
+    CODE="$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://127.0.0.1:8080/user/info || true)"
+    # 401 = 明文端口正常；403 = 已开 TLS 且按配置拒绝明文（也是「起来了」）。
+    if [[ "$CODE" == "401" ]]; then
         echo "服务端已就绪：http://127.0.0.1:8080"
+        exit 0
+    fi
+    if [[ "$CODE" == "403" ]]; then
+        echo "服务端已就绪：明文端口按要求返回 403，请改用 https://127.0.0.1:${MIM_TLS_PORT:-8443}"
         exit 0
     fi
     sleep 2
