@@ -31,7 +31,20 @@ Swift 通过 `mim_core.h` 调用；密钥只经过内存，落盘交给 Keychain
 
 ## 3. 里程碑
 
-**M0 环境与骨架（1 天，取决于 Xcode 是否装好）**
+**M0 环境与骨架 —— 已完成（2026-11-23）**
+
+实际结果：
+- Xcode 27.2 + iOS 27.2 SDK 就位；`xcodebuild -runFirstLaunch` 装好了系统组件
+  （缺它时 xcodebuild 会报 `IDESimulatorFoundation` 插件加载失败）；
+- `MIMCoreRust/tools/build-ios.sh` 产出 `MIMiOS/MIMKit/MimCore.xcframework`
+  （设备 arm64 + 模拟器 arm64）；静态库必须自带 modulemap，否则 SwiftPM 报
+  "Unable to resolve module dependency"；
+- `MIMiOS/MIMiOSApp/build.sh` 编译链接成功：`** BUILD SUCCEEDED **`
+  （`Debug-iphoneos/MIMiOSApp.app`，arm64，未签名）；
+- 尚未「跑起来」：**没有 iOS 模拟器运行时**（`simctl list runtimes` 为空），
+  需要 `xcodebuild -downloadPlatform iOS`（约 7GB）；或接真机并选签名 Team。
+
+原始计划（供对照）：
 
 > Swift 侧要调的接口已盘点完毕，见 [`ios-api-map.md`](ios-api-map.md)；
 > C ABI 现有 22 个导出（含首条消息与身份签名），`cargo test --test ffi_abi_test` 可验。

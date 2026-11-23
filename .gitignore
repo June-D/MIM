@@ -44,3 +44,6 @@ MIMiOS/**/*.xcuserstate
 MIMiOS/**/xcuserdata/
 # XcodeGen 生成物：project.yml 才是源
 MIMiOS/MIMiOSApp/MIMiOSApp.xcodeproj/
+
+# iOS 产物：由 MIMCoreRust/tools/build-ios.sh 生成
+MIMiOS/MIMKit/MimCore.xcframework/

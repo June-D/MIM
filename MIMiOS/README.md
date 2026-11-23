@@ -21,7 +21,7 @@ MIMKit/                         Swift Package（macOS 13 / iOS 16）
   tools-sync-header.sh          从 MIMCoreRust/include 同步头文件
 ```
 
-## 怎么跑 App
+## 怎么跑 App（已验证到编译链接）
 
 ```bash
 # 1) 只做一次：把命令行工具指向 Xcode，并接受许可（都需要你的密码）
@@ -32,16 +32,38 @@ sudo xcodebuild -license accept
 MIMCoreRust/tools/build-ios.sh --check     # 先确认 iOS SDK 就位
 MIMCoreRust/tools/build-ios.sh
 
-# 3) 生成并打开工程
-cd MIMiOS/MIMiOSApp && xcodegen generate && open MIMiOSApp.xcodeproj
+# 3) 生成工程并构建（脚本会设好 MIM_USE_IOS_FRAMEWORK=1）
+cd MIMiOS/MIMiOSApp && xcodegen generate
+./build.sh                      # 设备架构（arm64），不签名 → BUILD SUCCEEDED
+./build.sh simulator            # 模拟器（需要先下载模拟器运行时）
+
+# 4) 在 Xcode 里跑起来（选 Team 后可装真机）
+open MIMiOSApp.xcodeproj
 ```
 
 `project.yml` 是工程源，`.xcodeproj` 是生成物（已在 .gitignore 里）——pbxproj 是
 机器生成的巨型 plist，提交进仓库只会带来无意义的合并冲突。
 
-> Package.swift 目前给 **macOS 验证**用 dylib；iOS 需要把 `MIMCoreABI` 换成
-> `binaryTarget(path: "../MimCore.xcframework")`，等 xcframework 产出后再切，
-> 以免 macOS 侧因为找不到产物而编不过。
+`Package.swift` 用环境变量切换两套链接方式：
+
+- **macOS**：dylib（`swift run MIMKitSmoke` 不需要 Xcode，日常验证走这条）；
+- **iOS**：`MIM_USE_IOS_FRAMEWORK=1` 时改用 `binaryTarget(MimCore.xcframework)`。
+
+不用无条件 `binaryTarget` 的原因：SwiftPM 加载清单时就会校验路径，产物不存在会
+**连 macOS 也编不了**，等于丢掉「没有 Xcode 也能验库层」这条性质。
+
+两个已踩过的坑：
+
+1. `binaryTarget` 路径必须在包内（`../` 会被拒绝），所以 xcframework 产出到包根目录，
+   已 gitignore；
+2. 静态库 xcframework 必须自带 `module.modulemap`（模块名 `MIMCoreABI`），
+   否则 `import MIMCoreABI` 报 "Unable to resolve module dependency"。
+
+### 还缺什么才能「跑起来」
+
+- **模拟器**：`xcodebuild -downloadPlatform iOS`（约 7GB，`simctl list runtimes` 现在为空）；
+- **真机**：Xcode 里选 Team（免费 Apple ID 也行，证书 7 天过期）；
+- xcframework 目前只有 arm64 slice，Intel Mac 需补 `x86_64-apple-ios`。
 
 ## 怎么跑库（不需要 Xcode）
 

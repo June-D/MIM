@@ -13,7 +13,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUST_DIR="$ROOT/MIMCoreRust"
-OUT="$RUST_DIR/target/ios"
+OUT="$ROOT/MIMiOS/MIMKit"
 LIB="libmim_core_rust.a"
 CHECK_ONLY=0
 
@@ -71,13 +71,28 @@ echo "编译 aarch64-apple-ios-sim（模拟器）…"
 cargo build --release --target aarch64-apple-ios-sim
 
 # 4) 打 xcframework：设备库 + 模拟器库各一个 slice
-rm -rf "$OUT"
+# 输出到 Swift Package 内部：SwiftPM 的 binaryTarget 不接受包外的相对路径（../）。
+rm -rf "$OUT/MimCore.xcframework"
 mkdir -p "$OUT"
+
+# 静态库的 xcframework 必须自带 modulemap，否则 SwiftPM 报
+# "Unable to resolve module dependency"。模块名要与 Swift 侧
+# `import MIMCoreABI` 一致，所以这里固定写 MIMCoreABI。
+HDRS="$(mktemp -d)"
+cp include/mim_core.h "$HDRS/"
+cat > "$HDRS/module.modulemap" <<'MAP'
+module MIMCoreABI {
+    header "mim_core.h"
+    export *
+}
+MAP
+
 xcrun xcodebuild -create-xcframework \
     -library "target/aarch64-apple-ios/release/$LIB" \
-    -headers include \
+    -headers "$HDRS" \
     -library "target/aarch64-apple-ios-sim/release/$LIB" \
-    -headers include \
+    -headers "$HDRS" \
     -output "$OUT/MimCore.xcframework"
+rm -rf "$HDRS"
 
-echo "完成：$OUT/MimCore.xcframework"
+echo "完成：$OUT/MimCore.xcframework（已在 .gitignore 里，不入库）"

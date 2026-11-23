@@ -521,6 +521,12 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS M0 完成：`build-ios.sh` 产出 xcframework（设备 + 模拟器 arm64），
+  `xcodegen` 生成工程，`MIMiOSApp/build.sh` 编译链接成功（arm64、未签名）。
+  过程中解决三个真实障碍：`xcodebuild -runFirstLaunch` 缺失导致插件加载失败、
+  `binaryTarget` 路径必须在包内、静态库 xcframework 必须自带 modulemap。
+  剩余：模拟器运行时未下载（约 7GB），或接真机签名。
+
 - iOS 库层落地：新增 `MIMiOS/MIMKit` Swift Package——`MimCore`（C ABI 封装：
   密钥包 / 首条消息 / 签名验签）、`Models`（与 Rust DTO 逐字对应）、
   `Keychain`（AfterFirstUnlockThisDeviceOnly + deleteAll）、
