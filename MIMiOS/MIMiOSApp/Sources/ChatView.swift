@@ -7,12 +7,21 @@ struct ChatView: View {
     @EnvironmentObject private var model: AppModel
     @FocusState private var inputFocused: Bool
     @State private var pickerItem: PhotosPickerItem?
+    @State private var showFileImporter = false
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Divider()
             transcript
+        }
+        .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
+            guard case .success(let url) = result else { return }
+            // 沙盒外的文件要先取得访问权限，否则读出来是空。
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else { return }
+            Task { await model.sendFile(data: data, name: url.lastPathComponent) }
         }
         .onChange(of: pickerItem) { item in
             guard let item else { return }
@@ -100,7 +109,31 @@ struct ChatView: View {
                 Image(systemName: "photo.on.rectangle")
                     .font(.title3)
             }
-            .disabled(model.busy)
+            .disabled(model.busy || model.recording)
+
+            Button {
+                showFileImporter = true
+            } label: {
+                Image(systemName: "paperclip").font(.title3)
+            }
+            .disabled(model.busy || model.recording)
+
+            if model.recording {
+                Button {
+                    Task { await model.stopRecordingAndSend() }
+                } label: {
+                    Label("停止并发送", systemImage: "stop.circle.fill")
+                        .font(.subheadline)
+                        .foregroundStyle(.red)
+                }
+            } else {
+                Button {
+                    Task { await model.startRecording() }
+                } label: {
+                    Image(systemName: "mic").font(.title3)
+                }
+                .disabled(model.busy)
+            }
             TextField("输入消息", text: $model.draft, axis: .vertical)
                 .lineLimit(1...4)
                 .textFieldStyle(.roundedBorder)
@@ -132,9 +165,13 @@ private struct MessageBubble: View {
             VStack(alignment: message.fromMe ? .trailing : .leading, spacing: 4) {
                 if message.kind == "image", let mediaId = message.mediaId {
                     ImageBubble(mediaId: mediaId, message: message)
+                } else if message.kind == "file" {
+                    FileBubble(message: message)
+                } else if message.kind == "voice" {
+                    VoiceBubble(message: message)
                 }
-                // 图片没有配文时不再画一行「[图片]」占位：气泡本身就是图片。
-                if !(message.kind == "image" && message.text.isEmpty) {
+                // 图片/文件/语音没有配文时不再画一行占位：气泡本身就是附件。
+                if !(["image", "file", "voice"].contains(message.kind) && message.text.isEmpty) {
                     Text(messageDisplayText)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
@@ -200,5 +237,63 @@ private struct ImageBubble: View {
                     .task { await model.loadImage(for: message) }
             }
         }
+    }
+}
+
+
+/// 文件气泡：名字 + 大小，点一下用系统面板导出/打开。
+private struct FileBubble: View {
+    let message: MessageVault.StoredMessage
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "doc.fill").font(.title3)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(message.mediaName ?? "文件").lineLimit(1)
+                Text(Self.sizeText(message.mediaSize ?? 0))
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(Color(uiColor: .secondarySystemBackground),
+                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    static func sizeText(_ bytes: Int) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+    }
+}
+
+/// 语音气泡：时长 + 播放按钮。
+private struct VoiceBubble: View {
+    @EnvironmentObject private var model: AppModel
+    let message: MessageVault.StoredMessage
+
+    var body: some View {
+        Button {
+            Task { await model.toggleVoice(message) }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: model.playingVoiceId == message.mediaId
+                      ? "stop.circle.fill" : "play.circle.fill")
+                    .font(.title3)
+                Text(Self.durationText(message))
+                    .font(.subheadline.monospacedDigit())
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color(uiColor: .secondarySystemBackground),
+                        in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 时长没记录时（早版本发的）按大小粗略估一下，别显示成 0:00。
+    static func durationText(_ message: MessageVault.StoredMessage) -> String {
+        let ms = message.mediaDurationMs ?? 0
+        let seconds = ms > 0 ? Int(ms / 1000) : max(1, (message.mediaSize ?? 0) / 4000)
+        return String(format: "%d:%02d", seconds / 60, seconds % 60)
     }
 }

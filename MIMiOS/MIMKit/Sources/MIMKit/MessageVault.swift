@@ -26,6 +26,8 @@ public final class MessageVault {
         public var mediaSize: Int?
         /// Base64 的一次性媒体密钥（用来解密本地/服务端密文）。
         public var mediaKey: String?
+        /// 语音时长（毫秒）；非语音为 nil。
+        public var mediaDurationMs: Int64?
         public var syncedFrom: String?
 
         public init(
@@ -33,7 +35,8 @@ public final class MessageVault {
             fromMe: Bool, kind: String = "text", recalled: Bool = false,
             mediaId: String? = nil, mediaMime: String? = nil,
             mediaName: String? = nil, mediaSize: Int? = nil,
-            mediaKey: String? = nil, syncedFrom: String? = nil
+            mediaKey: String? = nil, mediaDurationMs: Int64? = nil,
+            syncedFrom: String? = nil
         ) {
             self.id = id
             self.peer = peer
@@ -47,6 +50,7 @@ public final class MessageVault {
             self.mediaName = mediaName
             self.mediaSize = mediaSize
             self.mediaKey = mediaKey
+            self.mediaDurationMs = mediaDurationMs
             self.syncedFrom = syncedFrom
         }
     }

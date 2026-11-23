@@ -286,6 +286,57 @@ func sendImageOnce(_ arguments: [String]) async {
     }
 }
 
+/// `--send-media <url> <user> <pass> <peer> <kind> <path> <mime> <name> [时长ms]`
+///
+/// 通用附件发送：kind 取 file / voice（image 用 --send-image）。
+/// 用来在命令行驱动真机/模拟器验证「文件、语音」这两类气泡。
+func sendMediaOnce(_ arguments: [String]) async {
+    guard arguments.count >= 10, let url = URL(string: arguments[2]) else {
+        FileHandle.standardError.write(Data(
+            "用法：MIMKitSmoke --send-media <url> <user> <pass> <peer> <kind> <path> <mime> <name> [ms]\n".utf8
+        ))
+        exit(2)
+    }
+    let user = arguments[3], password = arguments[4]
+    let peer = arguments[5], kind = arguments[6]
+    let path = arguments[7], mime = arguments[8], name = arguments[9]
+    let durationMs = arguments.count > 10 ? Int64(arguments[10]) : nil
+    do {
+        let plain = try Data(contentsOf: URL(fileURLWithPath: path))
+        let client = MIMClient(
+            baseURL: url,
+            deviceId: "cli-\(kind)-\(Int(Date().timeIntervalSince1970))"
+        )
+        _ = try await client.login(username: user, password: password)
+        let bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 5)
+        try await client.publishKeys(password: password, deviceName: "CLI \(kind)", bundle: bundle)
+
+        let encrypted = try MediaCrypto.encrypt(plain)
+        let mediaId = try await client.uploadMedia(encrypted.blob)
+        let payload = MediaPayload(
+            kind: kind, text: "",
+            media: MediaRef(
+                id: mediaId, key: encrypted.keyBase64, size: plain.count,
+                mime: mime, name: name,
+                width: nil, height: nil, durationMs: durationMs
+            )
+        )
+        let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
+        let session = MessagingSession(client: client, bundle: bundle)
+        let delivered = try await session.sendText(to: peer, text: json)
+        check(true, "\(kind) 已投递到 \(delivered) 台设备（\(name)，\(plain.count) 字节）")
+        print("MEDIA_OK")
+    } catch {
+        FileHandle.standardError.write(Data("✗ 发送附件失败：\(error)\n".utf8))
+        exit(1)
+    }
+}
+
+if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--send-media" {
+    await sendMediaOnce(CommandLine.arguments)
+    exit(0)
+}
+
 if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--send-image" {
     await sendImageOnce(CommandLine.arguments)
     exit(0)

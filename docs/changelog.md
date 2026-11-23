@@ -521,6 +521,11 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS M3 收尾：任意文件（`.fileImporter` + security-scoped 访问）与语音
+  （`AVAudioRecorder` 录 m4a、`AVAudioPlayer` 播放，解密到临时文件播完即删）
+  都已接入，与图片共用同一条「加密 → `POST /media` → 消息带引用」的路径。
+  语音录制依赖麦克风权限弹窗，无法脚本化验证；播放链路与气泡状态已实测。
+
 - iOS M3 图片：相册选图 → 一次性密钥加密（`MIM-STATE-1`）→ `POST /media`
   （>8MB 自动分片）→ 消息正文带 `{id,key,size,mime}` 引用；接收端按 id 取密文解密显示，
   本地只缓存密文。与桌面端格式互通（双向实测：App 发、命令行收；命令行发、App 显示）。

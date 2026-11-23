@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import CryptoKit
 import UIKit
+import AVFoundation
 import MIMKit
 
 /// 一段会话在列表里的摘要。
@@ -49,6 +50,10 @@ final class AppModel: ObservableObject {
     @Published private(set) var pushConnected = false
     /// 已解密并解码好的图片（key 是媒体 id）。只在内存里，不落盘明文。
     @Published private(set) var loadedImages: [String: UIImage] = [:]
+    /// 正在播放的语音媒体 id（用于按钮状态）。
+    @Published private(set) var playingVoiceId: String?
+    /// 正在录音。
+    @Published private(set) var recording = false
     /// 最近一条推送的类型，排查用（DEBUG 下显示在聊天页副标题）。
     @Published private(set) var lastPush = "-"
 
@@ -58,6 +63,9 @@ final class AppModel: ObservableObject {
     private var vault: MessageVault?
     private var snapshot = MessageVault.Snapshot()
     private var pollTask: Task<Void, Never>?
+    private var player: AVAudioPlayer?
+    private let playerDelegate = PlayerDelegate()
+    private let recorder = AudioRecorder()
     private var pushTask: Task<Void, Never>?
 
     private static let identityAccount = "identity-bundle"
@@ -138,6 +146,20 @@ final class AppModel: ObservableObject {
                activePeer != nil {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 await sendImage(Self.demoImage(), name: "demo.png")
+            }
+            // 联调：应用内发一个文件，验证 sendFile 路径（文档选择器无法自动化）。
+            if ProcessInfo.processInfo.environment["MIM_DEMO_SEND_FILE"] == "1",
+               activePeer != nil {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                let bytes = Data((0..<24_000).map { UInt8($0 % 251) })
+                await sendFile(data: bytes, name: "季度预算.xlsx")
+            }
+            // 联调：自动播放最后一条语音，验证解密与 AVAudioPlayer 初始化。
+            if ProcessInfo.processInfo.environment["MIM_DEMO_PLAY_VOICE"] == "1" {
+                try? await Task.sleep(nanoseconds: 4_000_000_000)
+                if let voice = snapshot.messages.last(where: { $0.kind == "voice" }) {
+                    await toggleVoice(voice)
+                }
             }
             // 截图/联调时用环境变量触发一次发送，验证「App → 服务端」这条路径。
             if let text = ProcessInfo.processInfo.environment["MIM_DEMO_SEND_TEXT"],
@@ -252,6 +274,25 @@ final class AppModel: ObservableObject {
     ///
     /// 媒体本身走 `POST /media`（服务端只见密文），消息里只带 id + 一次性密钥。
     func sendImage(_ data: Data, name: String? = nil) async {
+        await sendMedia(kind: "image", data: data, mime: "image/jpeg",
+                        name: name, durationMs: nil)
+    }
+
+    /// 发送任意文件（文档选择器选出来的东西）。
+    func sendFile(data: Data, name: String) async {
+        await sendMedia(kind: "file", data: data, mime: mimeOf(name),
+                        name: name, durationMs: nil)
+    }
+
+    /// 发送语音（已录好的 m4a 字节）。
+    func sendVoice(data: Data, durationMs: Int64) async {
+        await sendMedia(kind: "voice", data: data, mime: "audio/mp4",
+                        name: "voice.m4a", durationMs: durationMs)
+    }
+
+    /// 图片 / 文件 / 语音共用的发送路径：加密 → 上传 → 消息带引用。
+    func sendMedia(kind: String, data: Data, mime: String, name: String?,
+                   durationMs: Int64?) async {
         guard let peer = activePeer, let session, let vault else { return }
         busy = true
         defer { busy = false }
@@ -259,23 +300,23 @@ final class AppModel: ObservableObject {
             let encrypted = try MediaCrypto.encrypt(data)
             let mediaId = try await uploadBlob(encrypted.blob)
             let payload = MediaPayload(
-                kind: "image",
+                kind: kind,
                 text: "",
                 media: MediaRef(
                     id: mediaId,
                     key: encrypted.keyBase64,
                     size: data.count,
-                    mime: "image/jpeg",
+                    mime: mime,
                     name: name,
                     width: nil,
                     height: nil,
-                    durationMs: nil
+                    durationMs: durationMs
                 )
             )
             let json = String(decoding: try JSONEncoder().encode(payload), as: UTF8.self)
             try await session.sendText(to: peer, text: json)
             vault.saveMedia(mediaId, blob: encrypted.blob)
-            if let image = UIImage(data: data) {
+            if kind == "image", let image = UIImage(data: data) {
                 loadedImages[mediaId] = image
             }
             append(MessageVault.StoredMessage(
@@ -284,16 +325,92 @@ final class AppModel: ObservableObject {
                 text: payload.text,
                 epochMs: Int64(Date().timeIntervalSince1970 * 1000),
                 fromMe: true,
-                kind: "image",
+                kind: kind,
                 mediaId: mediaId,
-                mediaMime: "image/jpeg",
+                mediaMime: mime,
                 mediaName: name,
                 mediaSize: data.count,
-                mediaKey: encrypted.keyBase64
+                mediaKey: encrypted.keyBase64,
+                mediaDurationMs: durationMs
             ))
             persist()
         } catch {
-            self.error = "发送图片失败：\(error)"
+            self.error = "发送附件失败：\(error)"
+        }
+    }
+
+    // MARK: - 语音
+
+    /// 开始录音（首次会申请麦克风权限）。
+    func startRecording() async {
+        guard !recording else { return }
+        let granted = await AudioRecorder.requestPermission()
+        guard granted else {
+            error = "没有麦克风权限。到「设置 → MiM → 麦克风」里打开后重试。"
+            return
+        }
+        do {
+            try recorder.start()
+            recording = true
+        } catch {
+            self.error = "无法开始录音：\(error)"
+        }
+    }
+
+    /// 停止并发送。
+    func stopRecordingAndSend() async {
+        guard recording else { return }
+        recording = false
+        guard let result = recorder.stop() else { return }
+        await sendVoice(data: result.data, durationMs: result.durationMs)
+    }
+
+    func cancelRecording() {
+        recording = false
+        recorder.cancel()
+    }
+
+    /// 播放/停止某条语音。
+    ///
+    /// 解密后的字节写到临时文件再交给 `AVAudioPlayer`：它不从 Data 播放，
+    /// 而我们又不想把明文长期落在沙盒里，所以用完即删。
+    func toggleVoice(_ message: MessageVault.StoredMessage) async {
+        guard let id = message.mediaId, let key = message.mediaKey else { return }
+        if playingVoiceId == id {
+            player?.stop()
+            player = nil
+            playingVoiceId = nil
+            return
+        }
+        guard let vault else { return }
+        var blob = vault.loadMedia(id)
+        if blob == nil, let client {
+            blob = try? await client.downloadMedia(id)
+            if let blob { vault.saveMedia(id, blob: blob) }
+        }
+        guard let blob,
+              let plain = try? MediaCrypto.decrypt(blob: blob, keyBase64: key) else {
+            error = "语音已过期或被清理"
+            return
+        }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("play-\(id).m4a")
+        do {
+            try plain.write(to: url)
+            player = try AVAudioPlayer(contentsOf: url)
+            // 播完要把状态复位，否则按钮一直停在「停止」——看起来像卡住了。
+            playerDelegate.onFinish = { [weak self] in
+                Task { @MainActor in
+                    self?.playingVoiceId = nil
+                    self?.player = nil
+                }
+            }
+            player?.delegate = playerDelegate
+            player?.prepareToPlay()
+            player?.play()
+            playingVoiceId = id
+        } catch {
+            self.error = "无法播放：\(error)"
         }
     }
 
@@ -341,7 +458,8 @@ final class AppModel: ObservableObject {
                         mediaMime: payload.media.mime,
                         mediaName: payload.media.name,
                         mediaSize: payload.media.size,
-                        mediaKey: payload.media.key
+                        mediaKey: payload.media.key,
+                        mediaDurationMs: payload.media.durationMs
                     ))
                     continue
                 }
@@ -533,11 +651,28 @@ final class AppModel: ObservableObject {
             snapshot.messages[index].mediaMime = payload.media.mime
             snapshot.messages[index].mediaName = payload.media.name
             snapshot.messages[index].mediaSize = payload.media.size
+            snapshot.messages[index].mediaDurationMs = payload.media.durationMs
             changed = true
         }
         if changed {
             refreshConversations()
             persist()
+        }
+    }
+
+    /// 按扩展名推断 MIME；认不出来就交给服务端当二进制处理。
+    func mimeOf(_ name: String) -> String {
+        switch (name as NSString).pathExtension.lowercased() {
+        case "jpg", "jpeg": return "image/jpeg"
+        case "png": return "image/png"
+        case "gif": return "image/gif"
+        case "pdf": return "application/pdf"
+        case "zip": return "application/zip"
+        case "txt", "md": return "text/plain"
+        case "m4a": return "audio/mp4"
+        case "mp3": return "audio/mpeg"
+        case "mp4", "mov": return "video/mp4"
+        default: return "application/octet-stream"
         }
     }
 
@@ -585,6 +720,16 @@ final class AppModel: ObservableObject {
             .joined()
             .chunked(every: 4)
             .joined(separator: " ")
+    }
+}
+
+/// `AVAudioPlayerDelegate` 要求 NSObject，而 AppModel 是 ObservableObject，
+/// 所以用一个小对象转发回调，避免把 AppModel 变成 NSObject 子类。
+final class PlayerDelegate: NSObject, AVAudioPlayerDelegate {
+    var onFinish: (() -> Void)?
+
+    func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
+        onFinish?()
     }
 }
 
