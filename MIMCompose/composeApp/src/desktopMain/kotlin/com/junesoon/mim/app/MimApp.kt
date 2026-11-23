@@ -316,6 +316,17 @@ private fun ConversationWorkspace(
             onOpenSecurity = store::openSecurity,
             onLogout = store::logout,
             onTogglePin = store::togglePin,
+            avatars = state.avatars,
+            onPickAvatar = {
+                // 选图与重编码都在 UI 线程：弹系统对话框只能是同步的。
+                // 失败必须有反馈，否则用户看到的就是「点了没反应」。
+                runCatching { MediaTools.pickAvatarPng() }
+                    .onSuccess { png -> if (png != null) store.uploadAvatar(png) }
+                    .onFailure { error ->
+                        store.reportError(error.message ?: "无法读取这张图片")
+                    }
+            },
+            onRemoveAvatar = store::removeAvatar,
             selectedId = selectedId,
             modifier = Modifier.width(312.dp),
             themeLabel = themeMode.label,

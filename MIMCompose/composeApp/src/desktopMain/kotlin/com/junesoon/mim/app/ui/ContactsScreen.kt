@@ -71,8 +71,10 @@ fun ContactsScreen(
     onCycleTheme: () -> Unit = {},
     /** 已加载的头像字节（key 是用户名）；没有条目就显示首字母。 */
     avatars: Map<String, ByteArray> = emptyMap(),
-    onPickAvatar: () -> Unit = {},
-    onRemoveAvatar: () -> Unit = {},
+    // 不给默认值：这两个回调没接线时界面看起来「点了没反应」，
+    // 让编译器在调用点就拦住，比运行期发现好得多。
+    onPickAvatar: () -> Unit,
+    onRemoveAvatar: () -> Unit,
     /** 分栏布局里当前打开的会话；用于高亮选中行。 */
     selectedId: String? = null,
     modifier: Modifier = Modifier,
