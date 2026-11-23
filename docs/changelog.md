@@ -521,6 +521,11 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- Swift 桥接实测：`tools/swift_abi_smoke.sh` 用 macOS 自带 swiftc 直接调 C ABI，
+  跑通「密钥包生成 → 组装首条消息 → 对端解出明文 → 身份签名 + 篡改被拒 →
+  非法输入返回错误码」。这段 Swift（`tools/swift/abi_smoke.swift`）就是 iOS 侧
+  要写的桥接层，装好 Xcode 后可直接搬进工程。
+
 - iOS 准备工作（不需要 Xcode 就能做的那部分）：C ABI 补齐首条消息与身份签名
   四个导出（`mim_compose_first_message` / `mim_open_first_message` /
   `mim_sign_with_identity` / `mim_verify_with_identity`）——此前只有 JNI 有，

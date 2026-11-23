@@ -38,8 +38,10 @@ Swift 通过 `mim_core.h` 调用；密钥只经过内存，落盘交给 Keychain
 
 - 装 Xcode（App Store）+ 命令行工具指向它：`sudo xcode-select -s /Applications/Xcode.app`
 - `MIMCoreRust/tools/build-ios.sh` 产出 `MimCore.xcframework`（device + simulator 双架构）
-- 新建 SwiftUI 工程 `MIMiOS`，链接 xcframework，跑通一次 `mim_random_bytes` /
-  `mim_key_bundle_generate` 的调用（证明 ABI 通）
+- 新建 SwiftUI 工程 `MIMiOS`，链接 xcframework；
+- ABI 已提前验证过：`tools/swift_abi_smoke.sh` 在 macOS 上用 Swift 跑通了
+  密钥包生成 → 组装首条消息 → 对端解出明文 → 签名 + 篡改被拒（见 `ios-api-map.md`），
+  所以 M0 剩下的只是「把它装进 App 并在模拟器里跑起来」
 
 **M1 登录与本地保险库（2~3 天）**
 - 登录（账号密码 + 设备名 + 二次验证码）、令牌存 Keychain
