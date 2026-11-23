@@ -18,6 +18,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 /**
  * 头像：有真实图片就显示图片，没有就按名字稳定推导配色与首字母。
@@ -42,7 +44,11 @@ fun Avatar(
     modifier: Modifier = Modifier,
 ) {
     val palette = AvatarPalettes[stableIndex(name)]
-    Box(modifier = modifier.size(size)) {
+    Box(
+        modifier = modifier
+            .size(size)
+            .semantics { contentDescription = name },
+    ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()

@@ -47,7 +47,12 @@ fun DeviceScreen(
     notice: String? = null,
     error: String? = null,
 ) {
-    Column(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MimPalette.Paper)
+            .escapeBack { onBack() },
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

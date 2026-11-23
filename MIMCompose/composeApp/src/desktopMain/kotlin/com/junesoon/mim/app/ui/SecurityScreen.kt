@@ -71,7 +71,12 @@ fun SecurityScreen(
     var showRegenerate by remember { mutableStateOf(false) }
     var showBindEmail by remember { mutableStateOf(false) }
 
-    Column(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MimPalette.Paper)
+            .escapeBack { onBack() },
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

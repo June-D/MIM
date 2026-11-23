@@ -29,6 +29,10 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 
 /**
  * 桌面端交互基线：悬停反馈、手型光标、按下态。
@@ -137,6 +141,11 @@ fun MimIconAction(
             modifier = Modifier
                 .clip(CircleShape)
                 .mimHoverable(shape = CircleShape, onClick = onClick)
+                // 图标本身对读屏是空的，用 tooltip 当无障碍名称。
+                .semantics {
+                    if (tooltip != null) contentDescription = tooltip
+                    role = Role.Button
+                }
                 .padding(7.dp),
             contentAlignment = Alignment.Center,
         ) {

@@ -45,6 +45,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.junesoon.mim.app.domain.Contact
 import com.junesoon.mim.app.domain.sortedForList
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.selected
+import com.junesoon.mim.app.domain.nextCursor
 
 /**
  * 联系人与会话列表。
@@ -91,6 +106,22 @@ fun ContactsScreen(
         }
     }
     val visible = matched.sortedForList()
+
+    // 键盘导航：列表拿到焦点后 ↑↓ 移动、Enter 打开。
+    // 搜索框获得焦点时方向键归它自己（列表不抢焦点，靠点击或 Ctrl+K 切走）。
+    var cursor by remember { mutableStateOf(-1) }
+    val listState = rememberLazyListState()
+    val listFocus = remember { FocusRequester() }
+    LaunchedEffect(visible.size) {
+        if (cursor >= visible.size) {
+            cursor = visible.lastIndex
+        }
+    }
+    LaunchedEffect(cursor) {
+        if (cursor in visible.indices) {
+            listState.animateScrollToItem(cursor)
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize().background(MimPalette.Card)) {
         Row(
@@ -242,16 +273,45 @@ fun ContactsScreen(
                 )
             }
             else -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .focusRequester(listFocus)
+                    .focusable()
+                    .onKeyEvent { event ->
+                        if (event.type != KeyEventType.KeyDown) {
+                            return@onKeyEvent false
+                        }
+                        when (event.key) {
+                            Key.DirectionDown -> {
+                                cursor = nextCursor(cursor, visible.size, 1)
+                                true
+                            }
+                            Key.DirectionUp -> {
+                                cursor = nextCursor(cursor, visible.size, -1)
+                                true
+                            }
+                            Key.Enter, Key.NumPadEnter -> {
+                                val target = visible.getOrNull(cursor) ?: return@onKeyEvent false
+                                onOpenChat(target.id)
+                                true
+                            }
+                            else -> false
+                        }
+                    },
                 contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp),
             ) {
-                items(visible, key = { it.id }) { contact ->
+                itemsIndexed(visible, key = { _, contact -> contact.id }) { index, contact ->
                     ContactRow(
                         contact = contact,
                         image = rememberAvatar(avatars[contact.id]),
                         selected = contact.id == selectedId,
-                        onClick = { onOpenChat(contact.id) },
+                        keyboardFocused = index == cursor,
+                        onClick = {
+                            cursor = index
+                            onOpenChat(contact.id)
+                        },
                         onTogglePin = { onTogglePin(contact.id) },
                     )
                 }
@@ -266,6 +326,7 @@ private fun ContactRow(
     contact: Contact,
     image: androidx.compose.ui.graphics.ImageBitmap?,
     selected: Boolean,
+    keyboardFocused: Boolean,
     onClick: () -> Unit,
     onTogglePin: () -> Unit,
 ) {
@@ -277,7 +338,7 @@ private fun ContactRow(
     val background = when {
         selected && hovered -> MimPalette.Pressed
         selected -> MimPalette.Selected
-        hovered -> MimPalette.Hover
+        hovered || keyboardFocused -> MimPalette.Hover
         else -> Color.Transparent
     }
     Box {
@@ -288,7 +349,17 @@ private fun ContactRow(
                 .background(background, shape)
                 .hoverable(interaction)
                 .pointerHoverIcon(PointerIcon.Hand)
-                .combinedClickable(
+                .semantics {
+                // 读屏软件只念得到这个摘要，图标与颜色它看不见。
+                contentDescription = buildString {
+                    append(contact.name)
+                    if (contact.unread > 0) append("，${contact.unread} 条未读")
+                    if (contact.blocked) append("，已屏蔽")
+                    if (contact.pinned) append("，已置顶")
+                }
+                this.selected = selected
+            }
+            .combinedClickable(
                     interactionSource = interaction,
                     indication = null,
                     onClick = onClick,

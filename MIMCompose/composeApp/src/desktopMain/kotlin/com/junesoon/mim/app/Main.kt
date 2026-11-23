@@ -24,7 +24,13 @@ fun main() = application {
             position = WindowPosition(Alignment.Center),
         ),
     ) {
-        window.minimumSize = Dimension(880, 620)
+        // 最小尺寸按 dp 换算成物理像素：直接写 Dimension(880, 620) 在 2x 屏上
+        // 只有 440dp 宽，两栏会被挤塌。
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        window.minimumSize = Dimension(
+            with(density) { 880.dp.roundToPx() },
+            with(density) { 620.dp.roundToPx() },
+        )
         MimApp()
     }
 }

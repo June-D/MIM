@@ -58,7 +58,12 @@ fun AddContactScreen(
     val incoming = requests.filter { it.incoming && it.pending }
     val outgoing = requests.filter { !it.incoming && it.pending }
 
-    Column(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MimPalette.Paper)
+            .escapeBack { onBack() },
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()

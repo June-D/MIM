@@ -82,6 +82,10 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 
 /**
  * 聊天页。
@@ -174,7 +178,13 @@ fun ChatScreen(
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(MimPalette.Paper)) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MimPalette.Paper)
+            // 图片查看器是页内浮层：它在的时候 Esc 归它，不要顺手把会话也关了。
+            .escapeBack(enabled = viewerImage == null && showBack) { onBack() },
+    ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -515,6 +525,10 @@ fun ChatScreen(
                 Box(
                     modifier = Modifier
                         .size(40.dp)
+                        .semantics {
+                            contentDescription = if (draft.text.isBlank()) "发送（未输入内容）" else "发送消息"
+                            role = Role.Button
+                        }
                         .clip(CircleShape)
                         .background(
                             if (draft.text.isBlank()) MimPalette.LineSoft else MimPalette.TealFill,
@@ -1091,7 +1105,11 @@ private fun ComposerIcon(
                 .size(36.dp)
                 .clip(CircleShape)
                 .background(if (active) MimPalette.DangerSoft else MimPalette.Paper)
-                .mimHoverable(shape = CircleShape, enabled = enabled, onClick = onClick),
+                .mimHoverable(shape = CircleShape, enabled = enabled, onClick = onClick)
+                .semantics {
+                    if (tooltip != null) contentDescription = tooltip
+                    role = Role.Button
+                },
             contentAlignment = Alignment.Center,
         ) {
             MimIcon(
