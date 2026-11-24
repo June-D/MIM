@@ -75,13 +75,15 @@ if ! port_open 6379; then
 fi
 
 # 3) 邮件通道（阿里云邮件推送等）：凭据放 ~/.mim/smtp.env，不进仓库
-SMTP_ENV="${MIM_SMTP_ENV:-$HOME/.mim/smtp.env}"
-if [[ -f "$SMTP_ENV" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "$SMTP_ENV"
-    set +a
-fi
+# 凭据与通道开关都放 ~/.mim/*.env，不进仓库
+for env_file in "${MIM_SMTP_ENV:-$HOME/.mim/smtp.env}" "${MIM_PUSH_ENV:-$HOME/.mim/push.env}"; do
+    if [[ -f "$env_file" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        . "$env_file"
+        set +a
+    fi
+done
 
 # 4) 服务端：TLS + 数据目录 + 稳定密钥
 if ! port_open "$TLS_PORT"; then
