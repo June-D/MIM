@@ -1875,7 +1875,7 @@ class SecureBackend(
         /** 同步信封前缀：与媒体载荷一样靠前缀区分「这是什么」，不靠猜。 */
         private const val SYNC_PREFIX = "{\"v\":1,\"kind\":\"sync\""
 
-        /** 只转发最近 30 天，更早的不再搬（见 docs/device-sync-design.md）。 */
+        /** 只转发最近 30 天，更早的不再搬（见 docs/architecture.md）。 */
         private const val SYNC_MAX_AGE_MS = 30L * 24 * 60 * 60 * 1000
         private const val TYPE_FRIEND_REQUEST = 100016
         private const val TYPE_FRIEND_ACCEPTED = 100017

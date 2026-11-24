@@ -34,14 +34,11 @@ MIMCompose/    Compose 桌面客户端（JVM 17）：传输、缓存、UI 语义
 
 ## 文档
 
-- `README.md`：产品基调、快速开始、架构、验证基线、文档索引
-- `docs/security.md`：加密方案与安全性质
-- `docs/sealed-sender-design.md`：发送者证书与匿名提交设计
-- `docs/device-sync-design.md`：多设备历史同步设计（未实施，含设备信任模型与分期）
-- `docs/operations.md`：运行、建库、TLS、多实例、限流、密钥轮换
-- `docs/server-api.md`：HTTP 与 WebSocket 契约索引
-- `docs/architecture.md`：目录结构
-- `docs/handoff.md` / `docs/changelog.md`：阶段结论与变更记录
+- `README.md`：总览、快速开始、能力矩阵
+- `docs/architecture.md`：模块职责、密钥体系、加密方案与安全边界
+- `docs/protocol.md`：HTTP 接口、WebSocket 编号、媒体与同步格式
+- `docs/deploy.md`：部署、运维、备份、证书、故障速查
+- `docs/clients.md`：桌面端与 iOS 的构建、签名、差异
 
 ## 开发环境提示
 
@@ -54,13 +51,12 @@ MIMCompose/    Compose 桌面客户端（JVM 17）：传输、缓存、UI 语义
 
 ## 当前边界
 
-已完成：注册/登录/二次验证（登录与开启管理）/记住账号、找回邮箱绑定与更换、
-好友申请与备注、屏蔽、双向移除、
-一对一文本 / 图片 / 语音 / 任意文件（媒体端到端加密，服务端只存密文，单文件 ≤8MB）、
-撤回、已读、未读、清除（含离线设备按清除点对账）、离线队列、WebSocket 推送、
-设备管理、安全码与变更提醒、本机登录保护（连续 3 次密码错误自毁本地数据）、
-本地消息搜索、会话置顶、未读定位。
+已完成：注册/登录/二次验证（含恢复码、邮箱找回、修改密码）、好友体系（申请/同意/
+备注/删除/搜索/在线状态）、一对一文本 / 图片 / 语音 / 任意文件（端到端加密，服务端只存
+密文，>8MB 自动分片）、撤回、未读已读、单方清除、离线队列、WebSocket 推送、
+多设备历史同步（30 天 / 50 条，收发两端）、设备管理与注销、头像、
+iOS 客户端（与桌面端功能对齐）、极光推送通道（服务端 + 客户端就绪）。
 端到端回归脚本位于 `MIMCore/src/test/e2e`（只依赖 mim-core 与 JDK）。
-未完成：移动端、自有设备历史同步、头像上传、部署文档。
+未完成：群聊、全量历史搬迁、APNs（需付费开发者账号）。
 
 [PROTOCOL]: Update this header on change, then check README.md

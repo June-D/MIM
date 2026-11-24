@@ -47,3 +47,7 @@ MIMiOS/MIMiOSApp/MIMiOSApp.xcodeproj/
 
 # iOS 产物：由 MIMCoreRust/tools/build-ios.sh 生成
 MIMiOS/MIMKit/MimCore.xcframework/
+
+# ---------- 本地工具 ----------
+.codegraph/
+.commandcode/
