@@ -54,6 +54,17 @@ export MIM_SENDER_CERT_ENABLED="${MIM_SENDER_CERT_ENABLED:-true}"
 export MIM_SENDER_TOKEN_ENABLED="${MIM_SENDER_TOKEN_ENABLED:-false}"
 export MIM_ANONYMOUS_SEND_ENABLED="${MIM_ANONYMOUS_SEND_ENABLED:-false}"
 
+# 稳定密钥：没有它时服务端会用「RSA 私钥的 SHA-256」当派生密钥，
+# 而 RSA 私钥一旦重新生成（例如 t_rsa_key 被清），所有已加密的 TOTP / 邮箱
+# 数据都会变成解不开的密文——症状是登录时永远报「二次验证码错误」。
+KEY_DIR="${MIM_KEY_DIR:-$HOME/.mim/keys}"
+if [[ -z "${MIM_EMAIL_KEY_FILE:-}" && -f "$KEY_DIR/email.key" ]]; then
+    export MIM_EMAIL_KEY_FILE="$KEY_DIR/email.key"
+fi
+if [[ -z "${MIM_MASTER_KEY_FILE:-}" && -f "$KEY_DIR/master.key" ]]; then
+    export MIM_MASTER_KEY_FILE="$KEY_DIR/master.key"
+fi
+
 nohup java -jar "$RUN_JAR" > "$LOG" 2>&1 &
 PID=$!
 echo "服务端启动中（pid=${PID}，日志 ${LOG}）…"

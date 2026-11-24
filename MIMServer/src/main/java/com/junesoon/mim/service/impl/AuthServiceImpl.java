@@ -67,8 +67,13 @@ public class AuthServiceImpl implements AuthService {
                 if (value.matches("\\d{6}")) {
                     String secret = emailCryptoService.decryptTotp(user.getUsername(),
                         user.getTotpSecret());
-                    if (!StringUtils.hasText(secret)
-                        || !totpVerifier.verifyAndConsume(user.getUsername(), secret, value)) {
+                    // 密钥解不开（服务端换了派生密钥）与「码错了」是完全不同的问题：
+                    // 前者用户怎么输都不会对，必须说清楚，否则只会被当成手误。
+                    if (!StringUtils.hasText(secret)) {
+                        throw new UserInvalidException(
+                            "二次验证密钥不可用（服务端加密密钥已更换），请用恢复码登录");
+                    }
+                    if (!totpVerifier.verifyAndConsume(user.getUsername(), secret, value)) {
                         throw new UserInvalidException("二次验证码错误或已被使用");
                     }
                 } else if (!recoveryCodeService.consume(user.getUsername(), value)) {
