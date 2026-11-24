@@ -37,6 +37,15 @@ final class AppModel: ObservableObject {
     @Published private(set) var deviceId: String = ""
     @Published private(set) var identityFingerprint = ""
     @Published private(set) var devices: [DeviceInfo] = []
+    /// 好友（通讯录）。会话能不能发消息由它决定：桌面端同样只允许和好友对话。
+    @Published private(set) var contacts: [ChatUser] = []
+    /// 好友申请（我收到与我发出的）。
+    @Published private(set) var friendRequests: [MIMKit.FriendRequest] = []
+    /// 搜索到的可添加用户。
+    @Published private(set) var searchResults: [UserSummary] = []
+    @Published private(set) var searching = false
+    /// 当前标签页：0 会话 / 1 通讯录 / 2 我。
+    @Published var selectedTab = 0
 
     /// 会话列表（按最后一条消息时间倒序）。
     @Published private(set) var conversations: [Conversation] = []
@@ -344,6 +353,7 @@ final class AppModel: ObservableObject {
         )
         refreshConversations()
         await loadAvatar(username)
+        await loadContacts()
         // 新设备本地没有历史：请其它设备转发最近的消息。
         // 只在「完全空库」时请求一次，避免每次启动都打扰另一台设备。
         if snapshot.messages.isEmpty {
@@ -396,7 +406,22 @@ final class AppModel: ObservableObject {
 
     // MARK: - 会话与消息
 
+    /// 打开会话。非好友不允许直接开聊——桌面端同样只能从通讯录进入对话，
+    /// 否则「加好友」这套流程形同虚设。
     func openChat(_ peer: String) {
+        guard isFriend(peer) || !contacts.isEmpty else {
+            // 通讯录还没加载完时先放行，避免启动阶段误拦。
+            openChatUnchecked(peer)
+            return
+        }
+        guard isFriend(peer) else {
+            error = "\(peer) 还不是你的好友，请先在通讯录里申请添加"
+            return
+        }
+        openChatUnchecked(peer)
+    }
+
+    private func openChatUnchecked(_ peer: String) {
         let trimmed = peer.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         activePeer = trimmed
@@ -600,6 +625,143 @@ final class AppModel: ObservableObject {
             playingVoiceId = id
         } catch {
             self.error = "无法播放：\(error)"
+        }
+    }
+
+    // MARK: - 好友
+
+    /// 待我处理的申请（界面红点与列表都用它）。
+    var inboundRequests: [MIMKit.FriendRequest] {
+        friendRequests.filter { $0.isInbound && $0.isPending }
+    }
+
+    func isFriend(_ username: String) -> Bool {
+        contacts.contains { $0.username == username }
+    }
+
+    /// 拉通讯录 + 申请列表。
+    func loadContacts() async {
+        guard let client else { return }
+        do {
+            async let contactsTask = client.contacts()
+            async let requestsTask = client.friendRequests()
+            let groups = try await contactsTask
+            contacts = groups.flatMap(\.users).sorted { $0.username < $1.username }
+            friendRequests = try await requestsTask
+            for user in contacts.prefix(30) where avatars[user.username] == nil {
+                Task { await loadAvatar(user.username) }
+            }
+        } catch {
+            if expireSessionIfNeeded(error) { return }
+            self.error = "读取通讯录失败：\(error)"
+        }
+    }
+
+    /// 搜索用户（空关键字不发请求）。
+    func search(_ keyword: String) async {
+        let trimmed = keyword.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty, let client else {
+            searchResults = []
+            return
+        }
+        searching = true
+        defer { searching = false }
+        do {
+            searchResults = try await client.searchUsers(trimmed)
+        } catch {
+            if expireSessionIfNeeded(error) { return }
+            self.error = "搜索失败：\(error)"
+        }
+    }
+
+    /// 发起好友申请。
+    func sendFriendRequest(to username: String) async {
+        guard let client else { return }
+        do {
+            try await client.requestFriend(username)
+            notice = "已向 \(username) 发送好友申请"
+            await loadContacts()
+        } catch {
+            if expireSessionIfNeeded(error) { return }
+            self.error = "发送申请失败：\(error)"
+        }
+    }
+
+    func acceptRequest(_ request: MIMKit.FriendRequest) async {
+        guard let client else { return }
+        do {
+            try await client.acceptFriendRequest(request.id)
+            notice = "已同意 \(request.username) 的好友申请"
+            await loadContacts()
+        } catch {
+            if expireSessionIfNeeded(error) { return }
+            self.error = "同意失败：\(error)"
+        }
+    }
+
+    func rejectRequest(_ request: MIMKit.FriendRequest) async {
+        guard let client else { return }
+        do {
+            try await client.rejectFriendRequest(request.id)
+            await loadContacts()
+        } catch {
+            if expireSessionIfNeeded(error) { return }
+            self.error = "拒绝失败：\(error)"
+        }
+    }
+
+    /// 删除好友（双向，服务端会同步移除双方的会话关系）。
+    func removeFriend(_ username: String) async {
+        guard let client else { return }
+        do {
+            try await client.removeContact(username)
+            await loadContacts()
+            notice = "已删除好友 \(username)"
+        } catch {
+            if expireSessionIfNeeded(error) { return }
+            self.error = "删除好友失败：\(error)"
+        }
+    }
+
+    // MARK: - 账号安全
+
+    /// 显示一条一次性提示（成功类反馈）。
+    func showNotice(_ text: String) {
+        notice = text
+    }
+
+    /// 统一的错误上报：会话失效时直接回登录页，其余显示带前缀的消息。
+    func report(_ error: Error, prefix: String) {
+        if expireSessionIfNeeded(error) { return }
+        self.error = "\(prefix)：\(error)"
+    }
+
+    func twoFactorStatus() async throws -> Bool {
+        guard let client else { return false }
+        return try await client.twoFactorStatus()
+    }
+
+    func setupTwoFactor() async throws -> MIMKit.TwoFactorSetup {
+        guard let client else { throw MIMApiError.transport("未登录") }
+        return try await client.setupTwoFactor()
+    }
+
+    func enableTwoFactor(code: String) async throws -> MIMKit.TwoFactorEnabled {
+        guard let client else { throw MIMApiError.transport("未登录") }
+        return try await client.enableTwoFactor(code: code)
+    }
+
+    func disableTwoFactor(password: String, code: String) async throws {
+        guard let client else { throw MIMApiError.transport("未登录") }
+        try await client.disableTwoFactor(password: password, code: code)
+    }
+
+    /// 修改密码：服务端会作废旧令牌并签发新的，这里立刻换上。
+    func changePassword(old: String, new: String) async throws {
+        guard let client else { throw MIMApiError.transport("未登录") }
+        if let newToken = try await client.changePassword(old: old, new: new), !newToken.isEmpty {
+            token = newToken
+            saveSession(token: newToken)
         }
     }
 
@@ -858,6 +1020,8 @@ final class AppModel: ObservableObject {
         switch event {
         case .connected, .disconnected:
             return
+        case .friendChanged:
+            await loadContacts()
         case .newData:
             await receiveOnce(silent: true)
         case .readReceipt(let peer):

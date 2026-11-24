@@ -15,6 +15,8 @@ public enum PushEvent: Sendable, Equatable {
     case cleared(peer: String)
     /// 同账号另一台设备读了消息。
     case readSync(peer: String)
+    /// 好友申请 / 被同意 / 被拒绝：都只需刷新通讯录与申请列表。
+    case friendChanged
     /// 同账号另一台设备请求历史同步。
     case syncRequested(deviceId: String)
 }
@@ -139,6 +141,10 @@ public final class MIMWebSocket: @unchecked Sendable {
 
     private static let typeNewMessage = 100010
     /// 已读回执是 **100012**（100011 是旧编号，保留兼容）。
+    /// 好友相关推送（申请 100016 / 同意 100017 / 拒绝 100018）。
+    private static let typeFriendRequest = 100016
+    private static let typeFriendAccepted = 100017
+    private static let typeFriendRejected = 100018
     private static let typeReadReceipt = 100012
     private static let typeReadReceiptLegacy = 100011
     private static let typeRecalled = 100014
@@ -161,6 +167,9 @@ public final class MIMWebSocket: @unchecked Sendable {
             return .newData
         case typeReadReceipt, typeReadReceiptLegacy:
             return .readReceipt(peer: peer())
+
+        case typeFriendRequest, typeFriendAccepted, typeFriendRejected:
+            return .friendChanged
         case typeCleared:
             return .cleared(peer: peer())
         case typeReadSync:

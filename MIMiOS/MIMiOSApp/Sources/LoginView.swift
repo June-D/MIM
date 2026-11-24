@@ -59,7 +59,9 @@ struct LoginView: View {
         }
         .task {
             #if DEBUG
-            if model.shouldAutoLogin {
+            // 恢复登录态成功时 token 已存在，这里不要再登录一次——
+            // 否则会建两条会话、发两遍演示消息（截图里就是两条重复气泡）。
+            if model.shouldAutoLogin, model.token == nil {
                 model.shouldAutoLogin = false
                 // 必须用「非结构化 Task」：登录成功会立刻把界面换成设备页，
                 // LoginView 消失时 SwiftUI 会取消 `.task` 里正在进行的工作，

@@ -24,13 +24,13 @@ struct ConversationListView: View {
                 Section {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("还没有会话").font(.headline)
-                        Text("输入对方用户名即可开始。消息端到端加密，服务端只转发密文。")
+                        Text("先在「通讯录」里添加好友，对方同意后即可开始加密对话。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                         Button {
                             showNewChat = true
                         } label: {
-                            Label("开始新对话", systemImage: "person.badge.plus")
+                            Label("添加好友", systemImage: "person.badge.plus")
                         }
                         .buttonStyle(.borderedProminent)
                         .padding(.top, 2)
@@ -103,21 +103,17 @@ struct ConversationListView: View {
                 Button {
                     showNewChat = true
                 } label: {
-                    Label("新对话（输入用户名）", systemImage: "person.badge.plus")
+                    Label("添加好友", systemImage: "person.badge.plus")
                 }
-                Button {
-                    showDevices = true
-                } label: {
-                    Label("我的设备", systemImage: "laptopcomputer.and.iphone")
-                }
-                Button("退出登录", role: .destructive) {
-                    model.logout()
-                }
+            } footer: {
+                Text("只能和好友对话。设备管理、身份与退出登录在「我」里。")
             }
 
             if let error = model.error {
                 Section { Text(error).font(.footnote).foregroundStyle(.red) }
             }
+            // 底部留白：悬浮标签栏会盖住最后一行。
+            Section { Color.clear.frame(height: 24) }
         }
         .navigationTitle("MiM")
         .refreshable { await model.refreshInbox() }
@@ -144,10 +140,7 @@ struct ConversationListView: View {
             }
         }
         .sheet(isPresented: $showNewChat) {
-            NewChatSheet()
-        }
-        .sheet(isPresented: $showDevices) {
-            NavigationStack { DeviceListView().environmentObject(model) }
+            NavigationStack { AddFriendView() }
         }
     }
 
