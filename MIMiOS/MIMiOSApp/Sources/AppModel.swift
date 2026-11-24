@@ -250,6 +250,20 @@ final class AppModel: ObservableObject {
     }
     #endif
 
+    /// 令牌失效（服务端 40101）：清掉登录态、回到登录页。
+    ///
+    /// 不做这件事的后果是**界面看起来正常但什么都发不出去**——请求全被 40101 拒，
+    /// 轮询每 20 秒失败一次，用户只会看到「点了没反应」。
+    private func expireSessionIfNeeded(_ error: Error) -> Bool {
+        guard case MIMApiError.failed(let status, _) = error, status == 40101 else {
+            return false
+        }
+        clearSavedSession()
+        logout()
+        self.error = "登录已过期，请重新登录"
+        return true
+    }
+
     /// 清掉错误提示（界面上有可点的关闭按钮）。
     func dismissError() {
         error = nil
@@ -432,8 +446,13 @@ final class AppModel: ObservableObject {
             ))
             persist()
         } catch {
-            self.error = "\(error)"
+            if expireSessionIfNeeded(error) {
+                draft = ""
+                return
+            }
+            // 失败时把草稿还回去，并明确告诉用户原因（否则看起来像「点了没反应」）。
             draft = text
+            self.error = "发送失败：\(error)"
         }
         _ = client
         _ = token
@@ -800,6 +819,7 @@ final class AppModel: ObservableObject {
                 markRead(peer: peer)
             }
         } catch {
+            if expireSessionIfNeeded(error) { return }
             if !silent { self.error = "\(error)" }
         }
     }
@@ -1151,10 +1171,12 @@ final class AppModel: ObservableObject {
         client: MIMClient, bundle: KeyBundle, password: String
     ) async throws {
         let keys = try await client.peerDevices(username)
-        guard let mine = keys.first(where: { $0.deviceId == client.deviceId }) else { return }
+        let mine = keys.first(where: { $0.deviceId == client.deviceId })
         let local = Self.fullFingerprint(ofHex: bundle.identity.publicKey)
-        let remote = (mine.fingerprint ?? "").uppercased()
-        guard !remote.isEmpty, remote != local else { return }
+        let remote = (mine?.fingerprint ?? "").uppercased()
+        // 三种情况都要重发：服务端没有这台设备、没有公钥、或指纹与本地不一致。
+        // 少发一次，对方就查不到���密钥，表现为「消息发不出去/对方收不到」。
+        guard remote != local else { return }
         try await client.publishKeys(
             password: password, deviceName: UIDevice.current.name, bundle: bundle
         )
