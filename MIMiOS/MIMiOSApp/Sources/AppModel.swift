@@ -63,6 +63,11 @@ final class AppModel: ObservableObject {
     /// 最近一条推送的类型，排查用（DEBUG 下显示在聊天页副标题）。
     @Published private(set) var lastPush = "-"
 
+    /// 按账号加后缀的 Keychain 键（设备标识 / 身份 / 已发布标记都要分账号）。
+    private static func account(_ base: String, _ username: String) -> String {
+        "\(base).\(username.lowercased())"
+    }
+
     private let keychain = Keychain()
     private var client: MIMClient?
     private var session: MessagingSession?
@@ -76,6 +81,11 @@ final class AppModel: ObservableObject {
     private let recorder = AudioRecorder()
     private var pushTask: Task<Void, Never>?
 
+    /// Keychain 里的键必须**按账号**区分。
+    ///
+    /// 之前是全局单键：在一台手机上先登录 A 再登录 B 时，B 会复用到 A 的
+    /// 「已发布公钥」标记，于是跳过 POST /device，服务端就回
+    /// 「设备未注册或已注销」——换账号必踩。
     private static let identityAccount = "identity-bundle"
     /// 登录态（令牌 + 账号 + 服务端地址）存 Keychain：
     /// 重开 App 不用重新登录；卸载重装后 Keychain 仍会保留，这也是我们想要的
@@ -106,6 +116,11 @@ final class AppModel: ObservableObject {
               let url = URL(string: server) else {
             return
         }
+        // 旧版 Keychain 是全局单键，只能安全地归给「上次登录的那个账号」——
+        // 换账号登录时若还去认领，会把别人的身份密钥当成自己的。
+        migrateLegacyKeychainIfNeeded(username: user)
+        // 设备标识按账号取值，必须先设好 username 再取，否则会拿到空账号的键。
+        self.username = user
         let client = MIMClient(
             baseURL: url, deviceId: loadDeviceId(),
             token: token, pinnedCertificate: Self.pinnedCertificate()
@@ -115,7 +130,6 @@ final class AppModel: ObservableObject {
         do {
             let devices = try await client.devices()
             self.serverURL = server
-            self.username = user
             self.client = client
             self.token = token
             self.deviceId = client.deviceId
@@ -124,6 +138,21 @@ final class AppModel: ObservableObject {
         } catch {
             // 令牌失效（服务端重启、过期、被吊销）就静默回到登录页，不打扰用户。
             clearSavedSession()
+        }
+    }
+
+    /// 把旧版「全局单键」的数据迁到当前账号名下（只做一次）。
+    ///
+    /// 不迁的话，老用户升级后会重新生成身份密钥（等于换了台设备），
+    /// 而另一账号登录时又会误用这个「全局」身份——两种情况都不对。
+    private func migrateLegacyKeychainIfNeeded(username: String) {
+        for base in [Self.identityAccount, Self.deviceIdAccount, Self.publishedAccount] {
+            let legacy = base
+            let scoped = Self.account(base, username)
+            guard keychain.get(account: scoped) == nil,
+                  let value = keychain.get(account: legacy) else { continue }
+            try? keychain.set(value, account: scoped)
+            keychain.delete(account: legacy)
         }
     }
 
@@ -144,12 +173,13 @@ final class AppModel: ObservableObject {
     var deviceID: String { deviceId }
 
     private func loadDeviceId() -> String {
-        if let data = keychain.get(account: Self.deviceIdAccount),
+        let scoped = Self.account(Self.deviceIdAccount, username)
+        if let data = keychain.get(account: scoped),
            let text = String(data: data, encoding: .utf8), !text.isEmpty {
             return text
         }
         let generated = UUID().uuidString.lowercased()
-        try? keychain.set(Data(generated.utf8), account: Self.deviceIdAccount)
+        try? keychain.set(Data(generated.utf8), account: scoped)
         return generated
     }
 
@@ -211,6 +241,14 @@ final class AppModel: ObservableObject {
     var totalUnread: Int {
         conversations.reduce(0) { $0 + $1.unread }
     }
+
+    #if DEBUG
+    /// 联调：强制退出登录态（验证「换账号」这条路径时用，界面上点退出太慢）。
+    func debugLogout() {
+        clearSavedSession()
+        logout()
+    }
+    #endif
 
     /// 清掉错误提示（界面上有可点的关闭按钮）。
     func dismissError() {
@@ -275,6 +313,9 @@ final class AppModel: ObservableObject {
     private func startSession(client: MIMClient) async throws {
         let bundle = try ensureIdentityBundle()
         self.bundle = bundle
+        // 登记设备与发布公钥是两件事：换账号时设备 id 变了，必须重新登记，
+        // 否则服务端回「设备未注册或已注销」。
+        try await client.registerDevice(deviceName: UIDevice.current.name)
         try await publishIfNeeded(client: client, bundle: bundle)
 
         vault = MessageVault(root: Self.vaultRoot(), account: username)
@@ -1077,20 +1118,21 @@ final class AppModel: ObservableObject {
             deviceName: UIDevice.current.name,
             bundle: bundle
         )
-        try? keychain.set(Data("1".utf8), account: Self.publishedAccount)
+        try? keychain.set(Data("1".utf8), account: Self.account(Self.publishedAccount, username))
     }
 
     /// 本机身份密钥包：首次登录生成并只写 Keychain。
     @discardableResult
     private func ensureIdentityBundle() throws -> KeyBundle {
         var bundle: KeyBundle
-        if let data = keychain.get(account: Self.identityAccount),
+        let account = Self.account(Self.identityAccount, username)
+        if let data = keychain.get(account: account),
            let stored = try? JSONDecoder().decode(KeyBundle.self, from: data) {
             bundle = stored
         } else {
             bundle = try MimCore.makeKeyBundle(oneTimePreKeys: 20)
             let data = try JSONEncoder().encode(bundle)
-            try keychain.set(data, account: Self.identityAccount)
+            try keychain.set(data, account: account)
         }
         identityFingerprint = Self.fingerprint(ofHex: bundle.identity.publicKey)
         return bundle

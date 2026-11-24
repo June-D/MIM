@@ -12,7 +12,7 @@ import Foundation
 /// 替换身份公钥。iOS 侧只在「首次发布」时调用，密码不落盘。
 extension MIMClient {
 
-    private struct DeviceRegisterRequest: Encodable {
+    struct DeviceRegisterRequest: Encodable {
         let deviceId: String
         let deviceName: String
     }
@@ -42,6 +42,17 @@ extension MIMClient {
         }
     }
 
+    /// 登记本设备（`POST /device`）。幂等，每次登录都可以调。
+    ///
+    /// 单独抽出来是因为它和「发布公钥」是两件事：换了账号但公钥已发布过时，
+    /// 设备登记仍然必须做——否则服务端会回「设备未注册或已注销」。
+    public func registerDevice(deviceName: String) async throws {
+        try await postVoid(
+            path: "/device",
+            body: DeviceRegisterRequest(deviceId: deviceId, deviceName: deviceName)
+        )
+    }
+
     /// 发布本机密钥包。幂等：同一把公钥重复上传服务端不会报错。
     public func publishKeys(
         password: String,
@@ -49,10 +60,7 @@ extension MIMClient {
         bundle: KeyBundle
     ) async throws {
         // 1) 设备登记：先登记再传钥，设备列表才会有这台机器。
-        try await postVoid(
-            path: "/device",
-            body: DeviceRegisterRequest(deviceId: deviceId, deviceName: deviceName)
-        )
+        try await registerDevice(deviceName: deviceName)
 
         // 2) 身份公钥：Rust 里是 hex，服务端要 Base64(SPKI)。
         try await postVoid(
