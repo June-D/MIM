@@ -521,6 +521,11 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- 点推送直接跳到对应会话：推送 extras 带 `conversation_tag`（随机串，不含用户名），
+  客户端用 `SessionIndex.peer(forTag:in:)` 在本地会话索引里反查出对端再打开；
+  新增 `UNUserNotificationCenterDelegate`（前台横幅 + 点击回调 + 冷启动补消费）。
+  新增 `SessionIndexTests` 3 项钉住反查逻辑（命中、未命中、键里含多个 "|"）。
+
 - 极光推送凭据接入并实测：AppKey/Master Secret 写入 `~/.mim/push.env`，
   服务端整条路径打通——制造一台「离线且带 registrationId」的设备后发消息，
   日志出现 `极光推送被拒绝：HTTP 400 {"code":1003,"registration_id invalid"}`，

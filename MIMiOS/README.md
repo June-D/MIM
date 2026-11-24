@@ -132,6 +132,7 @@ composebob  19:39       干净环境下的第一条  19:38   ← 对方发来（
 消息落库 → 目标设备没有 WS 连接 → 服务端调 POST https://api.jpush.cn/v3/push
         → 极光 → APNs → 手机通知栏
 App 启动 → JPUSHService 拿 registrationID → POST /device/push 存到该设备名下
+点通知 → userInfo 里的 conversation_tag → 本地会话索引反查对端 → 直接打开会话
 ```
 
 配置（都不入库）：
@@ -146,6 +147,10 @@ MIM_JPUSH_APNS_PRODUCTION=false
 iOS 侧：SwiftPM 引入 `jpush-sdk 6.3.0` + `jcore-sdk 5.6.0`，`AppKey` 从 Info.plist
 的 `JPushAppKey` 读，**留空则整体跳过**（没配推送的环境照样能编译运行）。
 
+> 点通知跳会话的关键取舍：服务端**不知道**是谁发的（没有 from 列），
+> 所以推送里带的是 `conversation_tag`——双方共享的随机串，只有接收方能在本地
+> 会话索引里反查出用户名。极光与服务端都看不出会话对象是谁。
+>
 > 两个坑：
 > ① JPush 的 SPM 包**不导出 Swift 模块**，`import JPush` 会报
 >    「Unable to resolve module dependency」，必须用桥接头

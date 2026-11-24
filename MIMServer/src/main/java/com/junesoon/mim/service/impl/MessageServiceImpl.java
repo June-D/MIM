@@ -374,10 +374,11 @@ public class MessageServiceImpl implements MessageService {
                 // 正文只有「你有新消息」，内容仍要客户端连上后自己拉取解密。
                 if (jPushService != null && !pushService.isDeviceOnline(record.getToUsername(),
                     record.getTargetDeviceId())) {
-                    // 服务端没有 from 列：发送者被写在密文里，这里拿不到。
-                    // 所以推送只带「有新消息」，客户端打开后自己解密就知道是谁。
+                    // 服务端没有 from 列（发送者在密文里），但知道这条属于哪个会话：
+                    // 带上 conversation_tag，客户端在本地索引里反查出对方是谁。
                     jPushService.notifyNewMessage(
-                        record.getToUsername(), record.getTargetDeviceId(), null, 1);
+                        record.getToUsername(), record.getTargetDeviceId(),
+                        record.getConversationTag(), 1);
                 }
             } catch (Exception e) {
                 // 推送失败不影响已落库的事实，客户端通过 /undelivered 补齐

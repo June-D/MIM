@@ -262,9 +262,45 @@ final class AppModel: ObservableObject {
             Task { try? await self?.client?.reportPushRegistration(registrationId) }
         }
         // 模拟器上 registrationID 为空（resCode 1011），真机才会拿到。
+        // 点通知 → 打开对应会话
+        AppDelegate.onNotificationTap = { [weak self] info in
+            Task { @MainActor in await self?.openConversation(fromPush: info) }
+        }
+        // 冷启动：通知先到、回调后挂，补消费一次
+        if let pending = AppDelegate.pendingTap {
+            AppDelegate.pendingTap = nil
+            Task { @MainActor in await openConversation(fromPush: pending) }
+        }
+
         let existing = JPUSHService.registrationID()
         guard !existing.isEmpty else { return }
         Task { try? await client.reportPushRegistration(existing) }
+    }
+
+    /// 根据推送里的 `conversation_tag` 反查会话对象并打开。
+    ///
+    /// 为什么服务端不直接给用户名：它没有 from 列（发送者写在密文里），
+    /// 也不知道「这个标签对应谁」——只有本机的会话索引知道。
+    /// 标签是双方共享的随机串，不含任何身份信息。
+    func openConversation(fromPush info: [AnyHashable: Any]) async {
+        guard token != nil else { return }
+        // 先拉一次增量，保证打开时能看到那条新消息。
+        await receiveOnce(silent: true)
+
+        // 极光把自定义 extras 平铺进 userInfo；也兼容包一层的情况。
+        let extras = (info["extras"] as? [AnyHashable: Any]) ?? info
+        guard let tag = extras["tag"] as? String, !tag.isEmpty else { return }
+        let peer = session?.sessions.first { $0.value.tag == tag }?
+            .key.split(separator: "|").first.map(String.init)
+        #if DEBUG
+        let all = session?.sessions ?? [:]
+        let empty = all.values.filter { $0.tag.isEmpty }.count
+        notice = peer == nil
+            ? "未命中：索引 \(all.count) 条，空标签 \(empty) 条"
+            : "推送跳转：\(peer!)"
+        #endif
+        guard let peer, !peer.isEmpty else { return }
+        openChat(peer)
     }
 
     #if DEBUG
@@ -300,6 +336,11 @@ final class AppModel: ObservableObject {
     /// 全部包在 `#if DEBUG` 里——发布版不存在这些路径，也就没有「凭据能从环境变量注入」
     /// 这种奇怪的攻击面。
     private func runDemoHooks() async {
+        // 联调：模拟「点了推送通知」，验证 tag → 会话的反查与跳转。
+        if let tag = ProcessInfo.processInfo.environment["MIM_DEMO_PUSH_TAG"], !tag.isEmpty {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            await openConversation(fromPush: ["tag": tag])
+        }
     if let peer = autoOpenPeer {
         autoOpenPeer = nil
         openChat(peer)

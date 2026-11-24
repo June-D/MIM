@@ -78,9 +78,13 @@ public class JPushService {
     /**
      * 异步通知某台设备有新消息。
      *
-     * @param peer 会话对象（对方用户名），客户端据此直接打开对应会话
+     * <p>把 {@code conversationTag} 一起带过去：客户端用它在本地的会话索引里反查
+     * 出「是跟谁在聊」，从而直接打开对应会话。标签是双方共享的随机串，
+     * **不含用户名**——服务端与极光都看不出会话对象是谁。
+     *
+     * @param tag 该消息所属会话的标签（可为 null）
      */
-    public void notifyNewMessage(String username, String deviceId, String peer, int unread) {
+    public void notifyNewMessage(String username, String deviceId, String tag, int unread) {
         if (!isConfigured()) {
             return;
         }
@@ -95,8 +99,8 @@ public class JPushService {
                 }
                 Map<String, Object> extras = new LinkedHashMap<>();
                 extras.put("type", "message");
-                if (StringUtils.hasText(peer)) {
-                    extras.put("peer", peer);
+                if (StringUtils.hasText(tag)) {
+                    extras.put("tag", tag);
                 }
                 String body = unread > 1 ? "你有 " + unread + " 条新消息" : "你有一条新消息";
                 send(List.of(ids.get(0)), "MIM", body, extras);
@@ -150,9 +154,10 @@ public class JPushService {
         HttpResponse<String> response =
             httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         if (response.statusCode() / 100 != 2) {
-            log.warn("极光推送被拒绝：HTTP {} {}", response.statusCode(), response.body());
+            log.warn("极光推送被拒绝：HTTP {} {} extras={}",
+                response.statusCode(), response.body(), extras);
         } else {
-            log.info("极光推送已提交：{}", response.body());
+            log.info("极光推送已提交：{} extras={}", response.body(), extras);
         }
     }
 }

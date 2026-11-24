@@ -9,7 +9,7 @@ import UserNotifications
 ///
 /// 注意：JPush 6.x 的 SwiftPM 包**没有导出 Swift 模块**，靠 `Sources/MIMiOS-Bridging-Header.h`
 /// 引入 `JPUSHService.h`——所以这里不需要 `import JPush`。
-final class AppDelegate: NSObject, UIApplicationDelegate {
+final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 
     /// 拿到 registrationID 后交给 AppModel 上报服务端。
     ///
@@ -17,12 +17,22 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     /// 而且它不该知道网络层怎么实现。
     static var onRegistration: ((String) -> Void)?
 
+    /// 用户点开通知：把 extras 交给 AppModel，由它反查出会话并打开。
+    static var onNotificationTap: (([AnyHashable: Any]) -> Void)?
+
+    /// 冷启动时通知先到、AppModel 还没准备好，先存下来等它挂上回调再消费。
+    static var pendingTap: [AnyHashable: Any]?
+
     func application(
         _ application: UIApplication,
         didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil
     ) -> Bool {
         // AppKey 从 Info.plist 读（project.yml 的 JPushAppKey）。留空就整体跳过，
         // 没配推送的环境照样能编译、启动、收发消息。
+        // 通知的点击/前台展示由我们自己的 delegate 处理：
+        // 极光那几个回调在 Swift 下签名对不上（见下方注释），而系统这套是标准 API。
+        UNUserNotificationCenter.current().delegate = self
+
         guard let appKey = Bundle.main.object(forInfoDictionaryKey: "JPushAppKey") as? String,
               !appKey.isEmpty else {
             return true
@@ -73,5 +83,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     ) {
         // 模拟器、或证书没配好都会走到这里；不影响 App 其它功能。
         print("[push] 注册 APNs 失败：\(error.localizedDescription)")
+    }
+
+    // MARK: - 通知交互
+
+    /// 前台也展示横幅：否则用户在聊天列表页时会以为没收到提醒。
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .badge])
+    }
+
+    /// 点开通知：取出 extras（含 `tag`），让 AppModel 打开对应会话。
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let info = response.notification.request.content.userInfo
+        if let handler = Self.onNotificationTap {
+            handler(info)
+        } else {
+            Self.pendingTap = info
+        }
+        completionHandler()
     }
 }
