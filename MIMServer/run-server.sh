@@ -15,7 +15,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SERVER_DIR="$ROOT/MIMServer"
 RUN_JAR="/tmp/mim-server.jar"
-LOG="/tmp/mim-server.log"
+# 日志放持久目录；/tmp 下的名字保留成软链，老的排查习惯不失效。
+DATA_DIR="${MIM_DATA_DIR:-$HOME/MIM-data}"
+mkdir -p "$DATA_DIR/logs" 2>/dev/null || true
+LOG="${MIM_LOG_FILE:-$DATA_DIR/logs/server.log}"
+ln -sf "$LOG" /tmp/mim-server.log 2>/dev/null || true
 REBUILD=0
 
 for arg in "$@"; do
@@ -50,6 +54,11 @@ export MIM_DB_USERNAME="${MIM_DB_USERNAME:-root}"
 export MIM_DB_PASSWORD="${MIM_DB_PASSWORD:-}"
 export MIM_REDIS_HOST="${MIM_REDIS_HOST:-127.0.0.1}"
 export MIM_REDIS_PORT="${MIM_REDIS_PORT:-6379}"
+# 媒体密文与 TLS 证书都放持久目录：放 /tmp 会随重启消失（已经因此丢过一次库）。
+export MIM_MEDIA_DIR="${MIM_MEDIA_DIR:-$DATA_DIR/media}"
+export MIM_TLS_KEYSTORE="${MIM_TLS_KEYSTORE:-$DATA_DIR/tls/mim-tls.p12}"
+export MIM_TLS_KEYSTORE_PASSWORD="${MIM_TLS_KEYSTORE_PASSWORD:-changeit}"
+
 export MIM_SENDER_CERT_ENABLED="${MIM_SENDER_CERT_ENABLED:-true}"
 export MIM_SENDER_TOKEN_ENABLED="${MIM_SENDER_TOKEN_ENABLED:-false}"
 export MIM_ANONYMOUS_SEND_ENABLED="${MIM_ANONYMOUS_SEND_ENABLED:-false}"

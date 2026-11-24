@@ -132,6 +132,18 @@ MIMServer（Java）──────────► 鉴权、设备登记、预
 
 ## 快速开始
 
+```bash
+./start.sh          # MySQL → Redis → 服务端（TLS），已在跑的会跳过
+./start.sh --status # 只看状态
+./start.sh --stop   # 全部停掉
+```
+
+数据一律放 `~/MIM-data/`（`mysql/` 数据库、`tls/` 证书、`media/` 媒体密文、
+`logs/` 日志），**不再放 /tmp**——之前放 /tmp 被清理过一次，导致 `t_rsa_key`
+数据文件丢失、RSA 私钥重新生成，进而所有已加密的二次验证密钥全部失效。
+
+## 其它
+
 前提：JDK 17（服务端与 PC 客户端）、MySQL 8、Redis 5+、Rust 工具链。
 不再需要 JDK 8 或 JavaFX；移动端尚未交付。
 

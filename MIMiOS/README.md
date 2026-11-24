@@ -28,7 +28,9 @@ MIMKit/                         Swift Package（macOS 13 / iOS 16）
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
 sudo xcodebuild -license accept
 
-# 2) 生成 C ABI 的 xcframework（iOS 不能用 dylib）
+# 2) 起服务端（一条命令：MySQL + Redis + TLS 服务端）
+./start.sh
+# 2b) 生成 C ABI 的 xcframework（iOS 不能用 dylib）
 MIMCoreRust/tools/build-ios.sh --check     # 先确认 iOS SDK 就位
 MIMCoreRust/tools/build-ios.sh
 

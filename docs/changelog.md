@@ -521,6 +521,11 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- 运维：数据迁出 /tmp。`./start.sh` 一条命令拉起 MySQL + Redis + TLS 服务端，
+  数据放 `~/MIM-data/{mysql,tls,media,logs}`，派生密钥放 `~/.mim/keys`。
+  起因是 /tmp 被清理导致 `t_rsa_key` 丢失、RSA 私钥重生，连带二次验证密钥全废。
+  已实测：停→启一轮后登录正常、媒体密文写入新目录、App 会话自动恢复。
+
 - 服务端：修复「二次验证码永远错误」的运维陷阱。TOTP 密钥用「主密钥」加密，而未配置
   `MIM_EMAIL_KEY` 时主密钥 = SHA-256(RSA 私钥)——RSA 私钥一旦重新生成（此前
   `t_rsa_key` 的数据文件随 /tmp 一起丢失被重建），所有已存 TOTP 密钥就永久解不开，
