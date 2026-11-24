@@ -521,6 +521,13 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- 极光推送凭据接入并实测：AppKey/Master Secret 写入 `~/.mim/push.env`，
+  服务端整条路径打通——制造一台「离线且带 registrationId」的设备后发消息，
+  日志出现 `极光推送被拒绝：HTTP 400 {"code":1003,"registration_id invalid"}`，
+  说明**鉴权通过、请求确实发出了**（1003 只是因为我用的是假 id）。
+  iOS 侧 AppKey 已写入 Info.plist；真机仍未拿到 registrationID，
+  因为缺 `aps-environment`（免费账号开不了 Push 能力）。
+
 - 极光推送（JPush）接入：服务端在目标设备没有长连接时调 `POST /v3/push` 叫醒
   （正文只有「你有新消息」，内容仍是密文，服务端不知道发送者）；设备表新增
   `push_registration`，新增 `POST /device/push` 由客户端上报 registrationId。

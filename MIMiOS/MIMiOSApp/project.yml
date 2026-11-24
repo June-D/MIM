@@ -48,7 +48,7 @@ targets:
         NSMicrophoneUsageDescription: 录制语音消息。录音只在本机加密后上传，服务端只能看到密文。
         # 极光 AppKey（控制台 → 应用设置）。留空时 App 跳过推送初始化，
         # 不影响其它功能——这样没配推送的环境也能正常编译运行。
-        JPushAppKey: ""
+        JPushAppKey: "65bd2d093593b28a1c578f12"
         # 模拟器要连本机服务端（http://127.0.0.1:8080）；
         # 真机请改用 https，客户端会拒绝非回环的明文地址。
         NSAppTransportSecurity:
