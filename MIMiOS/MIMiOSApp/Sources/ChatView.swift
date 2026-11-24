@@ -70,7 +70,7 @@ struct ChatView: View {
                 size: 32
             )
             VStack(alignment: .leading, spacing: 2) {
-                Text(model.activePeer ?? "").font(.headline)
+                Text(model.displayName(for: model.activePeer ?? "")).font(.headline)
                 Text("端到端加密")
                     .font(.caption2)
                     .foregroundStyle(.secondary)

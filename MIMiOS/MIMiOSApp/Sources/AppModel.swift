@@ -732,6 +732,38 @@ final class AppModel: ObservableObject {
         friendRequests.filter { $0.isInbound && $0.isPending }
     }
 
+    /// 显示名：备注 > 昵称 > 用户名。会话列表、聊天头部、搜索结果统一用它。
+    func displayName(for username: String) -> String {
+        contacts.first { $0.username == username }?.displayName ?? username
+    }
+
+    /// 改好友备注（传空串即清除）。
+    func renameFriend(_ username: String, label: String) async {
+        guard let client else { return }
+        do {
+            try await client.renameContact(username, label: label.trimmingCharacters(in: .whitespaces))
+            await loadContacts()
+            showNotice(label.isEmpty ? "已清除备注" : "备注已改为「\(label)」")
+        } catch {
+            if expireSessionIfNeeded(error) { return }
+            self.error = "设置备注失败：\(error)"
+        }
+    }
+
+    /// 本地搜索聊天记录。
+    ///
+    /// 只搜本机已解密的消息（服务端只有密文，不可能参与搜索），
+    /// 所以「能搜到什么」取决于这台设备收到过什么——这是端到端加密的必然结果。
+    func searchMessages(_ keyword: String, limit: Int = 50) -> [MessageVault.StoredMessage] {
+        let trimmed = keyword.trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 1 else { return [] }
+        return snapshot.messages
+            .filter { !$0.recalled && $0.text.localizedCaseInsensitiveContains(trimmed) }
+            .sorted { $0.epochMs > $1.epochMs }
+            .prefix(limit)
+            .map { $0 }
+    }
+
     func isFriend(_ username: String) -> Bool {
         contacts.contains { $0.username == username }
     }

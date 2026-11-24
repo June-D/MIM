@@ -7,9 +7,15 @@ struct ConversationListView: View {
     @State private var showDevices = false
     /// 待确认清除的会话（列表长按 → 清除）。
     @State private var pendingClear: String?
+    /// 搜索关键词：非空时列表切换成「聊天记录搜索结果」。
+    @State private var query = ""
 
     var body: some View {
         List {
+            if !query.isEmpty {
+                searchResults
+            }
+
             if !model.pushConnected {
                 // 长连接断开时给个明确提示：否则用户会以为「对方没回」。
                 HStack(spacing: 6) {
@@ -52,7 +58,7 @@ struct ConversationListView: View {
                             )
                             VStack(alignment: .leading, spacing: 4) {
                                 HStack {
-                                    Text(conversation.id).font(.headline)
+                                    Text(model.displayName(for: conversation.id)).font(.headline)
                                     Spacer()
                                     Text(ChatTime.list(conversation.lastEpochMs))
                                         .font(.caption)
@@ -116,6 +122,16 @@ struct ConversationListView: View {
             Section { Color.clear.frame(height: 24) }
         }
         .navigationTitle("MiM")
+        .task {
+            #if DEBUG
+            // 联调：预置搜索词，便于截图/自动化验证（手打不了）。
+            if query.isEmpty, let preset = ProcessInfo.processInfo.environment["MIM_DEMO_SEARCH"] {
+                query = preset
+            }
+            #endif
+        }
+        .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
+                    prompt: "搜索聊天记录")
         .refreshable { await model.refreshInbox() }
         .confirmationDialog("清除后本机将看不到这段对话", isPresented: Binding(
             get: { pendingClear != nil },
@@ -141,6 +157,43 @@ struct ConversationListView: View {
         }
         .sheet(isPresented: $showNewChat) {
             NavigationStack { AddFriendView() }
+        }
+    }
+
+    /// 本地搜索结果：只搜本机解密过的消息——服务端只有密文，参与不了搜索。
+    @ViewBuilder
+    private var searchResults: some View {
+        let hits = model.searchMessages(query)
+        if hits.isEmpty {
+            Section {
+                Text("没有匹配的聊天记录")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        } else {
+            Section("聊天记录（\(hits.count)）") {
+                ForEach(hits, id: \.id) { message in
+                    Button {
+                        query = ""
+                        model.openChat(message.peer)
+                    } label: {
+                        VStack(alignment: .leading, spacing: 3) {
+                            HStack {
+                                Text(model.displayName(for: message.peer))
+                                    .font(.subheadline.weight(.medium))
+                                Spacer()
+                                Text(ChatTime.list(message.epochMs))
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            Text(message.text)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(2)
+                        }
+                        .padding(.vertical, 2)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
         }
     }
 

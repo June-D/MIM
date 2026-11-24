@@ -8,6 +8,9 @@ struct ContactsView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showAddFriend = false
     @State private var pendingRemove: String?
+    /// 正在改备注的好友（非 nil 时弹输入框）。
+    @State private var renaming: String?
+    @State private var renameText = ""
 
     var body: some View {
         List {
@@ -82,10 +85,28 @@ struct ContactsView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            renaming = user.username
+                            renameText = user.labelName ?? ""
+                        } label: {
+                            Label("设置备注", systemImage: "pencil")
+                        }
+                        Button(role: .destructive) {
+                            pendingRemove = user.username
+                        } label: {
+                            Label("删除好友", systemImage: "person.badge.minus")
+                        }
+                    }
                     .swipeActions(edge: .trailing) {
                         Button("删除", role: .destructive) {
                             pendingRemove = user.username
                         }
+                        Button("备注") {
+                            renaming = user.username
+                            renameText = user.labelName ?? ""
+                        }
+                        .tint(.indigo)
                     }
                 }
             }
@@ -110,6 +131,22 @@ struct ContactsView: View {
         .refreshable { await model.loadContacts() }
         .sheet(isPresented: $showAddFriend) {
             NavigationStack { AddFriendView() }
+        }
+        .alert("设置备注", isPresented: Binding(
+            get: { renaming != nil },
+            set: { if !$0 { renaming = nil } }
+        )) {
+            TextField("备注名（留空即清除）", text: $renameText)
+            Button("保存") {
+                if let peer = renaming {
+                    let label = renameText
+                    Task { await model.renameFriend(peer, label: label) }
+                }
+                renaming = nil
+            }
+            Button("取消", role: .cancel) { renaming = nil }
+        } message: {
+            Text("备注只在本机可见，不会同步给对方。")
         }
         .confirmationDialog("删除后双方都不再是好友", isPresented: Binding(
             get: { pendingRemove != nil },
