@@ -8,6 +8,8 @@ import jakarta.mail.Session;
 import jakarta.mail.Transport;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.mail.internet.MimeMessage;
+import jakarta.mail.internet.MimeMultipart;
+import jakarta.mail.internet.MimeBodyPart;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -57,7 +59,18 @@ public class EmailSender {
             && StringUtils.hasText(password);
     }
 
+    /** 纯文本邮件。 */
     public void send(String to, String subject, String body) {
+        send(to, subject, body, null);
+    }
+
+    /**
+     * 发送邮件：同时带纯文本与 HTML 两个版本（multipart/alternative）。
+     *
+     * <p>两个版本都给是有原因的：纯文本让不支持 HTML 的客户端（以及部分反垃圾网关）
+     * 也能读，HTML 决定收件箱里看起来像不像正经通知。只发 HTML 容易被判为营销邮件。
+     */
+    public void send(String to, String subject, String text, String html) {
         if (!isConfigured()) {
             throw new IllegalStateException("邮件服务未配置");
         }
@@ -94,7 +107,18 @@ public class EmailSender {
             message.setFrom(new InternetAddress(sender, fromName, "UTF-8"));
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
             message.setSubject(subject, "UTF-8");
-            message.setText(body, "UTF-8");
+            if (StringUtils.hasText(html)) {
+                MimeMultipart multipart = new MimeMultipart("alternative");
+                MimeBodyPart textPart = new MimeBodyPart();
+                textPart.setText(text == null ? "" : text, "UTF-8");
+                MimeBodyPart htmlPart = new MimeBodyPart();
+                htmlPart.setContent(html, "text/html; charset=UTF-8");
+                multipart.addBodyPart(textPart);
+                multipart.addBodyPart(htmlPart);
+                message.setContent(multipart);
+            } else {
+                message.setText(text == null ? "" : text, "UTF-8");
+            }
             Transport.send(message);
         } catch (Exception e) {
             log.warn("发送找回密码邮件失败：{}", e.getMessage());

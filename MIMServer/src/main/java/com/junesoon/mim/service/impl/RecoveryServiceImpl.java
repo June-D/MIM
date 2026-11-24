@@ -9,6 +9,7 @@ import com.junesoon.mim.service.RecoveryCodeService;
 import com.junesoon.mim.service.RecoveryService;
 import com.junesoon.mim.utils.EmailCryptoService;
 import com.junesoon.mim.utils.EmailSender;
+import com.junesoon.mim.utils.MailTemplates;
 import com.junesoon.mim.utils.ValidationUtil;
 import com.junesoon.mim.websocket.SessionRegistry;
 import java.security.SecureRandom;
@@ -112,9 +113,7 @@ public class RecoveryServiceImpl implements RecoveryService {
                 CODE_TTL_SECONDS, TimeUnit.SECONDS);
             redisTemplate.delete(ATTEMPT_PREFIX + username);
             emailSender.send(email, "MIM 密码找回验证码",
-                "你的 MIM 密码找回验证码是：" + code + "\n\n"
-                    + "10 分钟内有效。如果这不是你本人操作，请忽略本邮件。\n"
-                    + "请不要把验证码告诉任何人。");
+                MailTemplates.recoveryText(code), MailTemplates.recoveryHtml(code));
             log.info("已向用户 {} 的绑定邮箱发送找回密码验证码", username);
         } catch (Exception e) {
             try {

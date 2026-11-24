@@ -33,6 +33,11 @@ case "${1:-}" in
     --stop)
         "$ROOT/MIMServer/run-server.sh" --stop >/dev/null 2>&1 || true
         "$MYSQL_BIN/mysqladmin" -h127.0.0.1 -P"$DB_PORT" -uroot shutdown 2>/dev/null || true
+        # 等它真的退出：mysqld 关闭要几秒，立刻启动会撞 ibdata1 锁（error 35）。
+        for _ in $(seq 1 30); do
+            port_open "$DB_PORT" || break
+            sleep 1
+        done
         echo "已停止服务端与 MySQL（Redis 用 brew services stop redis 停）"
         exit 0
         ;;
