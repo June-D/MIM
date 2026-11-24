@@ -281,11 +281,12 @@ private struct MessageBubble: View {
 }
 
 
-/// 图片气泡：先显示占位，解密后替换成图片。
+/// 图片气泡：先显示占位，解密后替换成图片；点一下全屏看。
 private struct ImageBubble: View {
     @EnvironmentObject private var model: AppModel
     let mediaId: String
     let message: MessageVault.StoredMessage
+    @State private var showFullScreen = false
 
     var body: some View {
         Group {
@@ -295,6 +296,10 @@ private struct ImageBubble: View {
                     .scaledToFit()
                     .frame(maxWidth: 220, maxHeight: 260)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .onTapGesture { showFullScreen = true }
+                    .sheet(isPresented: $showFullScreen) {
+                        ImagePreview(image: image)
+                    }
             } else {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(uiColor: .tertiarySystemBackground))
@@ -307,24 +312,65 @@ private struct ImageBubble: View {
 }
 
 
-/// 文件气泡：名字 + 大小，点一下用系统面板导出/打开。
+/// 文件气泡：名字 + 大小，点一下解密导出，再交给系统分享面板。
 private struct FileBubble: View {
+    @EnvironmentObject private var model: AppModel
     let message: MessageVault.StoredMessage
+    /// `.sheet(item:)` 要求 Identifiable，URL 不是，包一层。
+    struct Exported: Identifiable {
+        let id: String
+        let url: URL
+    }
+
+    @State private var exported: Exported?
+    @State private var busy = false
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "doc.fill").font(.title3)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(message.mediaName ?? "文件").lineLimit(1)
-                Text(Self.sizeText(message.mediaSize ?? 0))
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+        Button {
+            guard !busy else { return }
+            busy = true
+            Task {
+                if let url = await model.exportAttachment(message) {
+                    exported = Exported(id: url.absoluteString, url: url)
+                }
+                busy = false
             }
+        } label: {
+            HStack(spacing: 10) {
+                if busy {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: exported == nil ? "doc.fill" : "doc.badge.arrow.up")
+                        .font(.title3)
+                }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(message.mediaName ?? "文件").lineLimit(1)
+                    Text(Self.sizeText(message.mediaSize ?? 0))
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(Color(uiColor: .secondarySystemBackground),
+                        in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color(uiColor: .secondarySystemBackground),
-                    in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .buttonStyle(.plain)
+        .sheet(item: $exported) { item in
+            let url = item.url
+            VStack(spacing: 20) {
+                Image(systemName: "doc.badge.arrow.up")
+                    .font(.system(size: 44))
+                    .foregroundStyle(.tint)
+                Text(url.lastPathComponent).font(.headline)
+                ShareLink(item: url) {
+                    Label("导出到「文件」或其它 App", systemImage: "square.and.arrow.up")
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            .padding(28)
+            .presentationDetents([.height(280)])
+        }
     }
 
     static func sizeText(_ bytes: Int) -> String {
@@ -361,5 +407,47 @@ private struct VoiceBubble: View {
         let ms = message.mediaDurationMs ?? 0
         let seconds = ms > 0 ? Int(ms / 1000) : max(1, (message.mediaSize ?? 0) / 4000)
         return String(format: "%d:%02d", seconds / 60, seconds % 60)
+    }
+}
+
+
+/// 全屏看图：黑色背景、可缩放，底部给一个系统分享按钮。
+private struct ImagePreview: View {
+    let image: UIImage
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Color.black.ignoresSafeArea()
+            Image(uiImage: image)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            VStack(spacing: 16) {
+                Button {
+                    dismiss()
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.white.opacity(0.85))
+                }
+                if let data = image.pngData(),
+                   let url = Self.writeTemp(data, name: "image.png") {
+                    ShareLink(item: url) {
+                        Image(systemName: "square.and.arrow.up.circle.fill")
+                            .font(.title2)
+                            .foregroundStyle(.white.opacity(0.85))
+                    }
+                }
+            }
+            .padding(20)
+        }
+    }
+
+    /// 分享要一个文件 URL；写完交给系统，临时目录会自行清理。
+    private static func writeTemp(_ data: Data, name: String) -> URL? {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        return (try? data.write(to: url)) != nil ? url : nil
     }
 }

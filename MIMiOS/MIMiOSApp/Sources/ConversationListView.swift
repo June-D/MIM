@@ -5,9 +5,21 @@ struct ConversationListView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showNewChat = false
     @State private var showDevices = false
+    /// 待确认清除的会话（列表长按 → 清除）。
+    @State private var pendingClear: String?
 
     var body: some View {
         List {
+            if !model.pushConnected {
+                // 长连接断开时给个明确提示：否则用户会以为「对方没回」。
+                HStack(spacing: 6) {
+                    Image(systemName: "wifi.exclamationmark")
+                    Text("连接已断开，正在重连…")
+                    Spacer()
+                }
+                .font(.footnote)
+                .foregroundStyle(.orange)
+            }
             if model.conversations.isEmpty {
                 Section {
                     VStack(alignment: .leading, spacing: 8) {
@@ -59,6 +71,18 @@ struct ConversationListView: View {
                         .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
+                    .contextMenu {
+                        Button {
+                            model.openChat(conversation.id)
+                        } label: {
+                            Label("打开", systemImage: "bubble.left")
+                        }
+                        Button(role: .destructive) {
+                            pendingClear = conversation.id
+                        } label: {
+                            Label("清除会话", systemImage: "trash")
+                        }
+                    }
                 }
             }
 
@@ -89,6 +113,19 @@ struct ConversationListView: View {
             }
         }
         .navigationTitle("MiM")
+        .refreshable { await model.refreshInbox() }
+        .confirmationDialog("清除后本机将看不到这段对话", isPresented: Binding(
+            get: { pendingClear != nil },
+            set: { if !$0 { pendingClear = nil } }
+        ), titleVisibility: .visible) {
+            Button("清除会话", role: .destructive) {
+                if let peer = pendingClear {
+                    Task { await model.clearConversation(peer) }
+                }
+                pendingClear = nil
+            }
+            Button("取消", role: .cancel) { pendingClear = nil }
+        }
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Button {

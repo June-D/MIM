@@ -2,6 +2,7 @@ import Foundation
 import SwiftUI
 import CryptoKit
 import UIKit
+import UserNotifications
 import AVFoundation
 import MIMKit
 
@@ -206,6 +207,11 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 所有会话的未读总数（用于应用图标角标与列表标题）。
+    var totalUnread: Int {
+        conversations.reduce(0) { $0 + $1.unread }
+    }
+
     /// 清掉错误提示（界面上有可点的关闭按钮）。
     func dismissError() {
         error = nil
@@ -315,6 +321,12 @@ final class AppModel: ObservableObject {
     }
 
     /// 设备列表（「我的设备」页用）。
+    /// 手动刷新（下拉刷新用）：拉一次未投递 + 更新未读。
+    func refreshInbox() async {
+        await receiveOnce(silent: true)
+        await loadDevices()
+    }
+
     func loadDevices() async {
         guard let client else { return }
         do {
@@ -528,6 +540,33 @@ final class AppModel: ObservableObject {
         }
     }
 
+    // MARK: - 设备与本地数据
+
+    /// 注销一台设备（不是本机时用）。
+    func revokeDevice(_ id: String) async {
+        guard let client, id != deviceId else { return }
+        do {
+            try await client.revokeDevice(id)
+            await loadDevices()
+            notice = "已注销设备 \(id.prefix(8))…"
+        } catch {
+            self.error = "注销失败：\(error)"
+        }
+    }
+
+    /// 只清本地聊天记录（身份与登录态保留）。
+    ///
+    /// 刻意不删 Keychain 里的身份私钥：删了就等于换了一台「新设备」，
+    /// 对方的历史同步、已发出的消息归属都会对不上。
+    func wipeLocalMessages() {
+        snapshot = MessageVault.Snapshot()
+        session = nil
+        messages = []
+        conversations = []
+        persist()
+        notice = "本地聊天记录已清空"
+    }
+
     // MARK: - 撤回与清除
 
     /// 撤回自己发出的一条消息。
@@ -563,7 +602,14 @@ final class AppModel: ObservableObject {
     /// 只做单方：双向清除需要按会话标签抹掉服务端密文，而 iOS 没有标签。
     /// 服务端仍会记一个「清除点」，对端之后发来的消息不受影响。
     func clearCurrentConversation() async {
-        guard let peer = activePeer, let client else { return }
+        guard let peer = activePeer else { return }
+        await clearConversation(peer)
+        closeChat()
+    }
+
+    /// 清除与某个联系人的会话（单方）。列表长按与聊天页菜单共用。
+    func clearConversation(_ peer: String) async {
+        guard let client else { return }
         do {
             try await client.clearConversation(
                 peer: peer, tags: session?.tags(for: peer) ?? []
@@ -572,13 +618,43 @@ final class AppModel: ObservableObject {
             var readUpTo = snapshot.readUpTo ?? [:]
             readUpTo.removeValue(forKey: peer)
             snapshot.readUpTo = readUpTo
-            messages = []
+            // 只有正在看这段会话时才需要清空消息列表并退出，
+            // 从列表页清除别的会话不该把当前聊天页也清掉。
+            if activePeer == peer {
+                messages = []
+                closeChat()
+            }
             refreshConversations()
             persist()
-            closeChat()
             notice = "已清除与 \(peer) 的会话"
         } catch {
             self.error = "清除会话失败：\(error)"
+        }
+    }
+
+    /// 把附件解密到一个临时文件，供系统分享面板导出。
+    ///
+    /// 明文只在临时目录里短暂存在，分享完由系统清理；不写进沙盒的持久目录。
+    func exportAttachment(_ message: MessageVault.StoredMessage) async -> URL? {
+        guard let id = message.mediaId, let key = message.mediaKey, let vault else { return nil }
+        var blob = vault.loadMedia(id)
+        if blob == nil, let client {
+            blob = try? await client.downloadMedia(id)
+            if let blob { vault.saveMedia(id, blob: blob) }
+        }
+        guard let blob,
+              let plain = try? MediaCrypto.decrypt(blob: blob, keyBase64: key) else {
+            error = "附件已过期或被清理"
+            return nil
+        }
+        let name = message.mediaName ?? "附件-\(id.prefix(8))"
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try plain.write(to: url)
+            return url
+        } catch {
+            self.error = "导出失败：\(error)"
+            return nil
         }
     }
 
@@ -685,9 +761,20 @@ final class AppModel: ObservableObject {
     }
 
     private func handle(_ event: PushEvent) async {
-        pushConnected = true
+        switch event {
+        case .connected:
+            pushConnected = true
+            return
+        case .disconnected:
+            pushConnected = false
+            return
+        default:
+            pushConnected = true
+        }
         lastPush = "\(event)"
         switch event {
+        case .connected, .disconnected:
+            return
         case .newData:
             await receiveOnce(silent: true)
         case .readReceipt(let peer):
@@ -772,6 +859,24 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// 列表预览文案。媒体消息正文为空，必须给个占位——
+    /// 否则会话列表第二行是空白，看起来像坏了。
+    static func previewText(_ message: MessageVault.StoredMessage) -> String {
+        if !message.text.isEmpty { return message.text }
+        switch message.kind {
+        case "image": return "[图片]"
+        case "voice": return "[语音]"
+        case "file": return "[文件] \(message.mediaName ?? "")"
+        default: return ""
+        }
+    }
+
+    /// 应用图标角标：没有未读就清掉。
+    private func updateBadge() {
+        let unread = totalUnread
+        UNUserNotificationCenter.current().setBadgeCount(unread)
+    }
+
     private func refreshConversations() {
         var latest: [String: Conversation] = [:]
         let readUpTo = snapshot.readUpTo ?? [:]
@@ -781,7 +886,7 @@ final class AppModel: ObservableObject {
             if current == nil || message.epochMs >= current!.lastEpochMs {
                 latest[message.peer] = Conversation(
                     id: message.peer,
-                    lastText: message.recalled ? "已撤回" : message.text,
+                    lastText: message.recalled ? "已撤回" : Self.previewText(message),
                     lastEpochMs: message.epochMs,
                     unread: (current?.unread ?? 0) + delta
                 )
@@ -790,6 +895,7 @@ final class AppModel: ObservableObject {
             }
         }
         conversations = latest.values.sorted { $0.lastEpochMs > $1.lastEpochMs }
+        updateBadge()
         for peer in conversations.prefix(30).map(\.id) where avatars[peer] == nil {
             Task { await loadAvatar(peer) }
         }

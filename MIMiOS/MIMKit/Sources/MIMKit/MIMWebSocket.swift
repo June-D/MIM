@@ -2,6 +2,11 @@ import Foundation
 
 /// 下行推送（服务端只用来「叫醒」HTTP 同步，不承载业务判断）。
 public enum PushEvent: Sendable, Equatable {
+    /// 连接已建立。`URLSessionWebSocketTask` 没有「连上了」的回调，
+    /// 这里在 resume 之后乐观上报；真死了靠 25 秒心跳与重连纠正。
+    case connected
+    /// 连接断开，正在退避重试（界面据此显示「正在重连」）。
+    case disconnected
     /// 新消息 / 已读回执 / 撤回：都表现为「去拉一次」。
     case newData
     /// 对方读了我的消息；payload 带 peer（读的人）。
@@ -88,6 +93,7 @@ public final class MIMWebSocket: @unchecked Sendable {
         let socket = session.webSocketTask(with: request)
         task = socket
         socket.resume()
+        onEvent(.connected)
 
         // 心跳与读循环并行；任一结束就整体退出，交给外层重连。
         let heartbeat = Task { [weak self] in
@@ -117,9 +123,12 @@ public final class MIMWebSocket: @unchecked Sendable {
                     break
                 }
             } catch {
+                // 断开：先告诉上层（界面显示「正在重连」），再交给外层退避重连。
+                onEvent(.disconnected)
                 return
             }
         }
+        onEvent(.disconnected)
     }
 
     private func send(_ socket: URLSessionWebSocketTask, _ text: String) {
