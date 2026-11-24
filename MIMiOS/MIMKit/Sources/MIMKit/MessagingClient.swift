@@ -185,6 +185,29 @@ extension MIMClient {
         }
     }
 
+    /// 请本账号的其它设备把历史转发过来（新设备登录后调用一次）。
+    ///
+    /// 服务端只是给其它设备推 100022（带上本机 deviceId），真正的加密转发由
+    /// 那台设备完成——服务端始终碰不到明文。
+    public func requestHistorySync() async throws {
+        let envelope: MIMEnvelope<Bool> = try await send(
+            method: "POST", path: "/message/sync/request"
+        )
+        guard envelope.status == 200 else {
+            throw MIMApiError.failed(envelope.status, envelope.message ?? "请求历史同步失败")
+        }
+    }
+
+    /// 提交同步副本（`POST /message/sync`）：服务端只保存新密文，不接触原文。
+    public func sendSyncReplicas(_ copies: [OutgoingCopy]) async throws {
+        let envelope: MIMEnvelope<IgnoredPayload> = try await send(
+            method: "POST", path: "/message/sync", body: copies
+        )
+        guard envelope.status == 200 else {
+            throw MIMApiError.failed(envelope.status, envelope.message ?? "同步失败")
+        }
+    }
+
     /// 标记已读（账号级语义：同一逻辑消息在本人各设备上一起置已读）。
     ///
     /// 必须带 `clientMsgIds`——各设备副本的会话标签不同，只按 tags 只能命中自己那份。

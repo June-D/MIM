@@ -65,6 +65,8 @@ final class AppModel: ObservableObject {
     private let keychain = Keychain()
     private var client: MIMClient?
     private var session: MessagingSession?
+    /// 本机身份密钥包（导出历史时要用身份私钥给副本签名）。
+    private var bundle: KeyBundle?
     private var vault: MessageVault?
     private var snapshot = MessageVault.Snapshot()
     private var pollTask: Task<Void, Never>?
@@ -266,6 +268,7 @@ final class AppModel: ObservableObject {
     /// 登录成功后的统一初始化（登录与恢复登录态共用）。
     private func startSession(client: MIMClient) async throws {
         let bundle = try ensureIdentityBundle()
+        self.bundle = bundle
         try await publishIfNeeded(client: client, bundle: bundle)
 
         vault = MessageVault(root: Self.vaultRoot(), account: username)
@@ -277,6 +280,12 @@ final class AppModel: ObservableObject {
         )
         refreshConversations()
         await loadAvatar(username)
+        // 新设备本地没有历史：请其它设备转发最近的消息。
+        // 只在「完全空库」时请求一次，避免每次启动都打扰另一台设备。
+        if snapshot.messages.isEmpty {
+            try? await client.requestHistorySync()
+            notice = "已请求其它设备同步历史，收到后会直接出现在列表里"
+        }
         #if DEBUG
         await runDemoHooks()
         #endif
@@ -362,7 +371,8 @@ final class AppModel: ObservableObject {
                 peer: peer, text: text,
                 epochMs: Int64(Date().timeIntervalSince1970 * 1000),
                 fromMe: true,
-                recallToken: sent.recallToken
+                recallToken: sent.recallToken,
+                conversationTag: sent.tag
             ))
             persist()
         } catch {
@@ -434,7 +444,8 @@ final class AppModel: ObservableObject {
                 mediaName: name,
                 mediaSize: data.count,
                 mediaKey: encrypted.keyBase64,
-                mediaDurationMs: durationMs
+                mediaDurationMs: durationMs,
+                conversationTag: sent.tag
             ))
             persist()
         } catch {
@@ -604,11 +615,12 @@ final class AppModel: ObservableObject {
                 let peer = item.peer.isEmpty ? (activePeer ?? "") : item.peer
                 guard !peer.isEmpty else { continue }
                 // 媒体消息的正文是一段 JSON 载荷：逐字对应桌面端的 MediaPayload。
+                let epoch = item.epochMs ?? Int64(Date().timeIntervalSince1970 * 1000)
                 if let payload = Self.parseMediaPayload(item.text) {
                     append(MessageVault.StoredMessage(
                         id: item.clientMsgId.isEmpty ? UUID().uuidString.lowercased() : item.clientMsgId,
                         peer: peer, text: payload.text,
-                        epochMs: Int64(Date().timeIntervalSince1970 * 1000),
+                        epochMs: epoch,
                         fromMe: false,
                         kind: payload.kind,
                         mediaId: payload.media.id,
@@ -616,7 +628,9 @@ final class AppModel: ObservableObject {
                         mediaName: payload.media.name,
                         mediaSize: payload.media.size,
                         mediaKey: payload.media.key,
-                        mediaDurationMs: payload.media.durationMs
+                        mediaDurationMs: payload.media.durationMs,
+                        conversationTag: item.tag,
+                        syncedFrom: item.syncedFrom
                     ))
                     continue
                 }
@@ -633,10 +647,13 @@ final class AppModel: ObservableObject {
                 append(MessageVault.StoredMessage(
                     id: item.clientMsgId.isEmpty ? UUID().uuidString.lowercased() : item.clientMsgId,
                     peer: peer, text: item.text,
-                    // 用本机收到的时刻：服务端的时间戳是发送方的时钟，可能偏。
-                    epochMs: Int64(Date().timeIntervalSince1970 * 1000),
+                    // 实时消息用收到时刻（服务端时间是发送方时钟，可能偏）；
+                    // 同步副本带的是**原始发送时间**，直接用它，历史顺序才对。
+                    epochMs: epoch,
                     fromMe: false,
-                    recalled: item.recalled
+                    recalled: item.recalled,
+                    conversationTag: item.tag,
+                    syncedFrom: item.syncedFrom
                 ))
             }
             persist()
@@ -688,9 +705,8 @@ final class AppModel: ObservableObject {
                 refreshConversations()
                 persist()
             }
-        case .syncRequested:
-            // iOS 侧暂不参与历史同步转发（需要用户确认 + 指纹比对，见设计稿）。
-            break
+        case .syncRequested(let deviceId):
+            await exportHistory(to: deviceId)
         }
     }
 
@@ -786,6 +802,60 @@ final class AppModel: ObservableObject {
     func isReadByPeer(_ message: MessageVault.StoredMessage) -> Bool {
         guard message.fromMe, let readAt = peerReadAt[message.peer] else { return false }
         return readAt >= message.epochMs
+    }
+
+    /// 响应另一台设备的历史同步请求：把最近 30 天 / 50 条加密转发过去。
+    ///
+    /// 与桌面端口径一致：只发文本与附件引用（不搬密文），媒体由对方按 id 自取。
+    private func exportHistory(to deviceId: String) async {
+        guard let session, let bundle else { return }
+        let cutoff = Int64(Date().timeIntervalSince1970 * 1000) - 30 * 24 * 3600 * 1000
+        let candidates = snapshot.messages
+            .filter { $0.epochMs >= cutoff && !$0.recalled && !$0.peer.isEmpty }
+            .sorted { $0.epochMs < $1.epochMs }
+            .suffix(50)
+            .map { message in
+                (id: message.id, peer: message.peer, fromMe: message.fromMe,
+                 text: message.text, epochMs: message.epochMs,
+                 payload: Self.payloadJSON(for: message),
+                 tag: message.conversationTag)
+            }
+        guard !candidates.isEmpty else { return }
+        do {
+            let count = try await session.exportHistory(
+                to: deviceId,
+                messages: Array(candidates),
+                identityPrivateHex: bundle.identity.privateKey,
+                identityPublicHex: bundle.identity.publicKey
+            )
+            if count > 0 {
+                snapshot.store = session.store
+                snapshot.sessions = session.sessions
+                persist()
+                notice = "已把 \(count) 条历史转发给另一台设备"
+            }
+        } catch {
+            self.error = "转发历史失败：\(error)"
+        }
+    }
+
+    /// 把本地消息还原成媒体载荷 JSON（同步时原样带过去，对方按 id 自取密文）。
+    static func payloadJSON(for message: MessageVault.StoredMessage) -> String? {
+        guard let mediaId = message.mediaId, let key = message.mediaKey else { return nil }
+        let payload = MediaPayload(
+            kind: message.kind,
+            text: message.text,
+            media: MediaRef(
+                id: mediaId, key: key,
+                size: message.mediaSize ?? 0,
+                mime: message.mediaMime ?? "application/octet-stream",
+                name: message.mediaName,
+                width: nil, height: nil,
+                durationMs: message.mediaDurationMs
+            )
+        )
+        guard let data = try? JSONEncoder().encode(payload) else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     /// 落盘：会话状态、会话索引、消息三样一起加密写。

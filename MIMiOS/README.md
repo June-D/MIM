@@ -118,6 +118,36 @@ composebob  19:39       干净环境下的第一条  19:38   ← 对方发来（
   不确认的话同一密文每轮都会再下发，界面上表现为消息重复、时间戳不断刷新
   （我第一版就是这样，加了 ack 才干净）。
 
+## 多设备历史同步（两台设备实测）
+
+新设备登录时若本地库为空，会 `POST /message/sync/request`；同一账号的其它设备收到
+100022 后把**最近 30 天 / 50 条**加密转发过去：
+
+```
+源设备 e9b7f04b ──100022──▶ 收到请求，逐条封成 SyncPayload
+   ↓ 用身份私钥对 clientMsgId|tag|from|to|device 签名
+   ↓ 用与目标设备之间的会话加密（没有会话就先走 X3DH 首条消息）
+POST /message/sync ──▶ 服务端按 client_msg_id + 标签找原消息、校验后复制成新副本
+   ↓
+新设备 7845a5c2 ──/message/undelivered──▶ 解密 + 验签 → 入库（带「来自另一台设备」）
+```
+
+实测（两个模拟器，同一账号）：
+
+```
+id  1836  target=7845a5c2  sync_from=e9b7f04b  client_time=11:24  server_time=11:27
+id  1837  target=7845a5c2  sync_from=e9b7f04b  client_time=11:24  server_time=11:27
+```
+
+新设备列表里直接出现「composebob / 同步验证二 / 11:24」，未读 2 条——时间是原始时间，
+不是同步时间。
+
+> 踩过的坑：**同步副本必须带原消息自己的会话标签**。服务端按
+> `client_msg_id + conversation_tag` 找原消息，而一条逻辑消息在不同接收设备上的标签
+> 各不相同（实测同一条消息三台设备的标签是 `egIVwWq9kX` / `c7BKfdCZCp` / `TiFaHoO3aS`）。
+> 用错标签就得到 `40001 没有可同步的原消息`。另外「首条消息」分支里我原来写的是
+> `break`，导致只导出一条就结束——必须是 `continue`。
+
 ## 真机上的体验细节
 
 - **登录态持久化**：令牌、账号、服务端地址存 Keychain，冷启动先拿 `GET /device`

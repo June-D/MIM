@@ -49,6 +49,8 @@ public final class MIMClient: @unchecked Sendable {
     /// 证书锁定器（只在自签环境下存在）；握手失败时它记着原因。
     private let pinner: PinnedSession?
     private(set) var token: String?
+    /// 当前登录账号（登录成功后才有）。同步副本要靠它判断「这条是我发的还是对方发的」。
+    public private(set) var username: String?
 
     /// 当前令牌（供 WebSocket 等复用；调用方不必自己再存一份）。
     public var currentToken: String? { token }
@@ -106,6 +108,7 @@ public final class MIMClient: @unchecked Sendable {
                 throw MIMApiError.failed(200, "登录未返回令牌")
             }
             self.token = token
+            self.username = username
             return token
         case Self.twoFactorRequired:
             throw MIMApiError.twoFactorRequired(envelope.message ?? "请输入二次验证码或恢复码")

@@ -165,6 +165,8 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
 | | `POST /cert/sender` | 为本设备签发发送者证书（`/cert` 是 404） |
 | | `POST /message/read` | 已读（带 `clientMsgIds` 才能跨设备副本） |
 | | `POST /message/recall/{clientMsgId}` | 撤回；body `{recallToken, tags}`——**缺 tags 会 400** |
+| M2 同步 | `POST /message/sync/request` | 请其它设备转发历史（服务端推 100022） |
+| | `POST /message/sync` | 提交同步副本；服务端按 `client_msg_id + 标签`找原消息 |
 | | `POST /message/clear` | 清除会话；`{peer, forBoth, tags}`，iOS 只做单方 |
 | | `GET /message/clear` | 清除点对账 |
 | | `WS /websocket/{deviceId}` | 推送（见第 4 节） |

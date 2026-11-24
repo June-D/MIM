@@ -30,6 +30,11 @@ public final class MessageVault {
         public var mediaDurationMs: Int64?
         /// 撤回凭证（仅自己发出的消息有）。
         public var recallToken: String?
+        /// 这条消息所属会话的标签。
+        ///
+        /// 多设备同步必须带上它：服务端按 `client_msg_id + 标签` 找原消息，
+        /// 标签写错就得到「没有可同步的原消息」。
+        public var conversationTag: String?
         public var syncedFrom: String?
 
         public init(
@@ -38,7 +43,8 @@ public final class MessageVault {
             mediaId: String? = nil, mediaMime: String? = nil,
             mediaName: String? = nil, mediaSize: Int? = nil,
             mediaKey: String? = nil, mediaDurationMs: Int64? = nil,
-            recallToken: String? = nil, syncedFrom: String? = nil
+            recallToken: String? = nil, conversationTag: String? = nil,
+            syncedFrom: String? = nil
         ) {
             self.id = id
             self.peer = peer
@@ -54,6 +60,7 @@ public final class MessageVault {
             self.mediaKey = mediaKey
             self.mediaDurationMs = mediaDurationMs
             self.recallToken = recallToken
+            self.conversationTag = conversationTag
             self.syncedFrom = syncedFrom
         }
     }
