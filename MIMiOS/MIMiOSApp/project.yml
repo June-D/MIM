@@ -12,6 +12,13 @@ options:
 packages:
   MIMKit:
     path: ../MIMKit
+  # 极光推送：JPush 依赖 JCore，两个都要加（SDK 6.x 用 SwiftPM 分发，不需要 CocoaPods）
+  JPush:
+    url: https://github.com/jpush/jpush-sdk
+    exactVersion: 6.3.0
+  JCore:
+    url: https://github.com/jpush/jcore-sdk
+    exactVersion: 5.6.0
 
 targets:
   MIMiOSApp:
@@ -20,9 +27,15 @@ targets:
     sources:
       - Sources
       - Resources
+      - path: Sources/MIMiOS-Bridging-Header.h
+        buildPhase: none
     dependencies:
       - package: MIMKit
         product: MIMKit
+      - package: JPush
+        product: JPush
+      - package: JCore
+        product: JCore
     info:
       path: Sources/Info.plist
       properties:
@@ -33,12 +46,24 @@ targets:
         # 覆盖 Sources/Info.plist，手工改后者会在下次 generate 时被冲掉；
         # 而缺这条 key 时，一请求麦克风权限系统就直接杀掉进程（表现为「点一下秒退」）。
         NSMicrophoneUsageDescription: 录制语音消息。录音只在本机加密后上传，服务端只能看到密文。
+        # 极光 AppKey（控制台 → 应用设置）。留空时 App 跳过推送初始化，
+        # 不影响其它功能——这样没配推送的环境也能正常编译运行。
+        JPushAppKey: ""
         # 模拟器要连本机服务端（http://127.0.0.1:8080）；
         # 真机请改用 https，客户端会拒绝非回环的明文地址。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     settings:
       base:
+        # 推送权限在拿到付费开发者账号后再打开（免费 Personal Team 不支持该能力，
+        # 声明了会直接签名失败）：
+        # CODE_SIGN_ENTITLEMENTS: MIMiOSApp.push.entitlements
+        #
+        # JPush 是静态库，需要 -ObjC 才能把 Objective-C 分类链进来
+        # （缺了它会在运行时报 unrecognized selector）。
+        OTHER_LDFLAGS: -ObjC
+        # JPush 的 SPM 包没有导出 Swift 模块，用桥接头引入 JPUSHService.h。
+        SWIFT_OBJC_BRIDGING_HEADER: Sources/MIMiOS-Bridging-Header.h
         # 装真机时 Bundle Identifier 必须全局唯一；若 Xcode 报「identifier 不可用」，
         # 把它改成 ai.mim.app.<你的名字> 即可（免费账号也能签）。
         PRODUCT_BUNDLE_IDENTIFIER: ai.mim.app

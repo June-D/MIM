@@ -163,7 +163,7 @@ class MessageRecallTest {
         };
         service = new MessageServiceImpl(messageMapper, clearMapper,
             (UserMapper) null, (UserKeyMapper) null, (DeviceMapper) null,
-            (com.junesoon.mim.service.PushService) null);
+            (com.junesoon.mim.service.PushService) null, (JPushService) null);
         setField(service, "recallWindowSeconds", 120L);
     }
 

@@ -253,6 +253,20 @@ final class AppModel: ObservableObject {
         conversations.reduce(0) { $0 + $1.unread }
     }
 
+    /// 把极光的 registrationID 交给服务端（每台设备一份）。
+    ///
+    /// registrationID 可能在登录之后才到达，所以既要「现在取一次」，
+    /// 也要注册回调「到了再报一次」——两步都做才不会漏。
+    private func registerForPush(client: MIMClient) {
+        AppDelegate.onRegistration = { [weak self] registrationId in
+            Task { try? await self?.client?.reportPushRegistration(registrationId) }
+        }
+        // 模拟器上 registrationID 为空（resCode 1011），真机才会拿到。
+        let existing = JPUSHService.registrationID()
+        guard !existing.isEmpty else { return }
+        Task { try? await client.reportPushRegistration(existing) }
+    }
+
     #if DEBUG
     /// 联调：强制退出登录态（验证「换账号」这条路径时用，界面上点退出太慢）。
     func debugLogout() {
@@ -363,6 +377,7 @@ final class AppModel: ObservableObject {
             try? await client.requestHistorySync()
             notice = "已请求其它设备同步历史，收到后会直接出现在列表里"
         }
+        registerForPush(client: client)
         #if DEBUG
         await runDemoHooks()
         #endif

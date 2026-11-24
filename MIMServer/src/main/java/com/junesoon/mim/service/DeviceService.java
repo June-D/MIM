@@ -31,4 +31,9 @@ public interface DeviceService {
      * 刷新活跃时间，用于设备列表排序与「陈旧设备」识别。
      */
     void touch(String username, String deviceId);
+
+    /**
+     * 记录本设备的极光 registrationId（传空串即清除，例如关闭通知时）。
+     */
+    void updatePushRegistration(String username, String deviceId, String registrationId);
 }

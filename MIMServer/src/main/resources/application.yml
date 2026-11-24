@@ -63,6 +63,14 @@ mim:
     trust-forwarded-headers: ${MIM_TRUST_FORWARDED_HEADERS:false}
   # 邮件服务（仅用于找回密码验证码，不发送其它通知）。
   # host 为空时找回密码接口会提示“邮件服务未配置”。
+  # 极光推送（App 在后台/被杀死时叫醒客户端；正文只有「你有新消息」，内容仍是密文）
+  push:
+    jpush:
+      enabled: ${MIM_JPUSH_ENABLED:true}
+      app-key: ${MIM_JPUSH_APP_KEY:}
+      master-secret: ${MIM_JPUSH_MASTER_SECRET:}
+      # 开发期用 APNs sandbox，上架后改成 true
+      apns-production: ${MIM_JPUSH_APNS_PRODUCTION:false}
   mail:
     host: ${MIM_SMTP_HOST:}
     port: ${MIM_SMTP_PORT:465}

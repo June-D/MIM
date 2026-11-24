@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS `t_device` (
     `last_seen`     bigint       NOT NULL COMMENT '最近活跃时间（毫秒）',
     `revoked`       tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否已注销（注销后不再接收消息）',
     `token_version` int          NOT NULL DEFAULT 0 COMMENT '令牌版本，登出/注销时自增使旧 JWT 失效',
+    `push_registration` varchar(64) DEFAULT NULL COMMENT '极光推送 registrationId',
     PRIMARY KEY (`username`, `device_id`) USING BTREE,
     INDEX `idx_username` (`username`, `revoked`) USING BTREE
 ) ENGINE = InnoDB

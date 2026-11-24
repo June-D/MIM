@@ -13,6 +13,7 @@ import com.junesoon.mim.mapper.DeviceMapper;
 import com.junesoon.mim.mapper.MessageMapper;
 import com.junesoon.mim.mapper.UserKeyMapper;
 import com.junesoon.mim.mapper.UserMapper;
+import com.junesoon.mim.service.JPushService;
 import com.junesoon.mim.service.PushService;
 import com.junesoon.mim.service.impl.MessageServiceImpl;
 import java.util.ArrayList;
@@ -118,7 +119,7 @@ class MessageSyncTest {
             public void pushToUserExcept(String target, String excludedDeviceId, Object notify) {
                 pushes.add(target + "|" + excludedDeviceId);
             }
-        });
+        }, (JPushService) null);
         ReflectionTestUtils.setField(service, "maxCiphertextBytes", 262144);
         messages.rows.add(original());
     }

@@ -46,6 +46,22 @@ extension MIMClient {
     ///
     /// 单独抽出来是因为它和「发布公钥」是两件事：换了账号但公钥已发布过时，
     /// 设备登记仍然必须做——否则服务端会回「设备未注册或已注销」。
+    /// 上报极光推送的 registrationId（App 重装会变，所以每次启动都报一次）。
+    ///
+    /// 服务端只记在这台设备名下：推送的目标是「设备」，不是「人」。
+    public func reportPushRegistration(_ registrationId: String) async throws {
+        struct Request: Encodable {
+            let registrationId: String
+        }
+        let envelope: MIMEnvelope<IgnoredPayload> = try await send(
+            method: "POST", path: "/device/push",
+            body: Request(registrationId: registrationId)
+        )
+        guard envelope.status == 200 else {
+            throw MIMApiError.failed(envelope.status, envelope.message ?? "上报推送标识失败")
+        }
+    }
+
     public func registerDevice(deviceName: String) async throws {
         try await postVoid(
             path: "/device",

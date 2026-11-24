@@ -361,7 +361,7 @@ class MessageSendValidationTest {
             public int advance(String username, String peer, long clearedBeforeId, long updatedAt) {
                 return 1;
             }
-        }, new InMemoryUserMapper(), keyMapper, deviceMapper, new NoopPushService());
+        }, new InMemoryUserMapper(), keyMapper, deviceMapper, new NoopPushService(), (JPushService) null);
         setField(service, "maxCiphertextBytes", 262144);
         setField(service, "recallWindowSeconds", 120L);
 

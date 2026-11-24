@@ -15,6 +15,7 @@ import com.junesoon.mim.mapper.UserMapper;
 import com.junesoon.mim.responses.ClearPoint;
 import com.junesoon.mim.responses.ClearResult;
 import com.junesoon.mim.service.MessageService;
+import com.junesoon.mim.service.JPushService;
 import com.junesoon.mim.service.PushService;
 import com.junesoon.mim.service.SenderTokenService;
 import com.junesoon.mim.utils.RecallToken;
@@ -71,6 +72,7 @@ public class MessageServiceImpl implements MessageService {
     private final UserKeyMapper userKeyMapper;
     private final DeviceMapper deviceMapper;
     private final PushService pushService;
+    private final JPushService jPushService;
 
     /**
      * 可选注入：OPK 使用后需要删除预留记录。单元测试直接构造本类时可以为空。
@@ -97,13 +99,15 @@ public class MessageServiceImpl implements MessageService {
 
     public MessageServiceImpl(MessageMapper messageMapper,
         ConversationClearMapper conversationClearMapper, UserMapper userMapper,
-        UserKeyMapper userKeyMapper, DeviceMapper deviceMapper, PushService pushService) {
+        UserKeyMapper userKeyMapper, DeviceMapper deviceMapper, PushService pushService,
+        JPushService jPushService) {
         this.messageMapper = messageMapper;
         this.conversationClearMapper = conversationClearMapper;
         this.userMapper = userMapper;
         this.userKeyMapper = userKeyMapper;
         this.deviceMapper = deviceMapper;
         this.pushService = pushService;
+        this.jPushService = jPushService;
     }
 
     @Override
@@ -366,6 +370,15 @@ public class MessageServiceImpl implements MessageService {
                 BaseNotify<CipherMessage> notify =
                     BaseNotify.of(CommonConstants.NOTIFY_TYPE_NEW_MESSAGE, record);
                 pushService.pushToDevice(record.getToUsername(), record.getTargetDeviceId(), notify);
+                // 设备不在线（App 在后台/被杀死）时补一条系统通知。
+                // 正文只有「你有新消息」，内容仍要客户端连上后自己拉取解密。
+                if (jPushService != null && !pushService.isDeviceOnline(record.getToUsername(),
+                    record.getTargetDeviceId())) {
+                    // 服务端没有 from 列：发送者被写在密文里，这里拿不到。
+                    // 所以推送只带「有新消息」，客户端打开后自己解密就知道是谁。
+                    jPushService.notifyNewMessage(
+                        record.getToUsername(), record.getTargetDeviceId(), null, 1);
+                }
             } catch (Exception e) {
                 // 推送失败不影响已落库的事实，客户端通过 /undelivered 补齐
                 log.warn("推送消息 id={} 失败：{}", record.getId(), e.getMessage());

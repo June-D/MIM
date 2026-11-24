@@ -71,6 +71,26 @@ public class DeviceController {
     }
 
     /**
+     * 上报极光推送的 registrationId。
+     *
+     * <p>只登记「当前令牌绑定的这台设备」——与注册接口同理，避免拿着一个有效 JWT
+     * 把推送劫持到别的设备上。
+     */
+    @Data
+    public static class PushRegistrationRequest {
+        private String registrationId;
+    }
+
+    @PostMapping("/push")
+    @RateLimit(limit = 30, windowSeconds = 60, dimension = RateLimit.Dimension.USER)
+    public ObjectRestResponse<Boolean> updatePushRegistration(@CurrentUser String username,
+        @CurrentDevice String currentDevice, @RequestBody PushRegistrationRequest request) {
+        deviceService.updatePushRegistration(username, currentDevice,
+            request == null ? null : request.getRegistrationId());
+        return new ObjectRestResponse<Boolean>().data(Boolean.TRUE).rel(true);
+    }
+
+    /**
      * 列出当前用户的全部有效设备，用于「设备管理」界面。
      */
     @GetMapping

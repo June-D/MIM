@@ -39,4 +39,7 @@ public class Device implements Serializable {
      * 设备令牌版本。登出或注销时自增，所有旧 JWT 立即失效。
      */
     private Integer tokenVersion;
+
+    /** 极光推送的 registrationId（iOS 每台设备不同，重装会变）。 */
+    private String pushRegistration;
 }

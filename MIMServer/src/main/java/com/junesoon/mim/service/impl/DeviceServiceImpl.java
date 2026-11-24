@@ -8,6 +8,7 @@ import com.junesoon.mim.utils.ValidationUtil;
 import java.util.Collections;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -24,9 +25,11 @@ public class DeviceServiceImpl implements DeviceService {
     private static final int MAX_DEVICE_NAME_LENGTH = 64;
 
     private final DeviceMapper deviceMapper;
+    private final JdbcTemplate jdbcTemplate;
 
-    public DeviceServiceImpl(DeviceMapper deviceMapper) {
+    public DeviceServiceImpl(DeviceMapper deviceMapper, JdbcTemplate jdbcTemplate) {
         this.deviceMapper = deviceMapper;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Override
@@ -92,6 +95,20 @@ public class DeviceServiceImpl implements DeviceService {
         if (affected == 0) {
             log.debug("设备 {} 不存在，无需失效令牌", deviceId);
         }
+    }
+
+    @Override
+    public void updatePushRegistration(String username, String deviceId, String registrationId) {
+        // registrationId 由极光下发，长度有限；超长直接拒，避免脏数据写进库里。
+        String value = registrationId == null ? "" : registrationId.trim();
+        if (value.length() > 64) {
+            throw new UserInvalidException("registrationId 不合法");
+        }
+        // 走 JdbcTemplate 而不是加 Mapper 方法：这条语句只影响一列，
+        // 为它改动 DeviceMapper 接口会让所有测试桩都得跟着实现一遍。
+        jdbcTemplate.update(
+            "update t_device set push_registration = ? where username = ? and device_id = ?",
+            value, username, deviceId);
     }
 
     @Override

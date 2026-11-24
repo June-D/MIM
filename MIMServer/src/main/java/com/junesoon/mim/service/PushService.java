@@ -54,6 +54,16 @@ public class PushService implements MessageListener {
     }
 
     /**
+     * 该设备当前是否连在本实例上。
+     *
+     * <p>只查本机：多实例部署下别的实例还可能连着——真要做全，需要 Redis 维护在线表。
+     * 现阶段单实例，够用；不确定时宁可多发一次推送（客户端会去重）。
+     */
+    public boolean isDeviceOnline(String username, String deviceId) {
+        return sessionRegistry.hasLocalSession(username, deviceId);
+    }
+
+    /**
      * 推送给指定用户的<b>指定设备</b>。
      */
     public void pushToDevice(String target, String deviceId, Object notify) {

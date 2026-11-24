@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  推送权限（APNs）。
+
+	  默认**不启用**：免费 Apple ID（Personal Team）不支持 Push Notifications
+	  能力，一旦在工程里声明这个 entitlements，签名会直接失败，
+	  App 连装都装不上。
+
+	  等拿到付费开发者账号（$99/年）后，在 project.yml 里打开：
+	      settings:
+	        base:
+	          CODE_SIGN_ENTITLEMENTS: MIMiOSApp.push.entitlements
+	  并在极光控制台上传 APNs 证书 / .p8。
+	-->
+	<key>aps-environment</key>
+	<string>development</string>
+</dict>
+</plist>

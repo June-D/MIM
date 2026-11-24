@@ -3,6 +3,8 @@ import SwiftUI
 /// 应用入口。
 @main
 struct MIMiOSApp: App {
+    /// 极光 SDK 需要 AppDelegate 的回调，SwiftUI 里用这个挂上去。
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
     var body: some Scene {

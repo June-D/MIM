@@ -144,7 +144,7 @@ class MessageClearTest {
             @Override
             public void pushToUser(String target, Object notify) {
             }
-        });
+        }, (JPushService) null);
     }
 
     @Test

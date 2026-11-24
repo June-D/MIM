@@ -521,6 +521,13 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- 极光推送（JPush）接入：服务端在目标设备没有长连接时调 `POST /v3/push` 叫醒
+  （正文只有「你有新消息」，内容仍是密文，服务端不知道发送者）；设备表新增
+  `push_registration`，新增 `POST /device/push` 由客户端上报 registrationId。
+  iOS 侧用 SwiftPM 引入 jpush-sdk 6.3.0 + jcore-sdk 5.6.0，AppKey 从 Info.plist 读、
+  留空则跳过初始化。踩到两个坑：SPM 包不导出 Swift 模块（必须用桥接头）、
+  `JPUSHRegisterDelegate` 的签名在 Swift 下对不上（delegate 传 nil，前台靠 WS）。
+
 - 找回密码邮件改为 HTML 模板（`MailTemplates`）：卡片式布局、40px 等宽验证码、
   10 分钟/单次提示、防钓鱼说明、页脚；同时发送 `multipart/alternative`
   的纯文本版本——只发 HTML 容易被反垃圾网关判成营销邮件。

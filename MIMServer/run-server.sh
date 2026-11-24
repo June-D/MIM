@@ -67,13 +67,14 @@ export MIM_ANONYMOUS_SEND_ENABLED="${MIM_ANONYMOUS_SEND_ENABLED:-false}"
 # 而 RSA 私钥一旦重新生成（例如 t_rsa_key 被清），所有已加密的 TOTP / 邮箱
 # 数据都会变成解不开的密文——症状是登录时永远报「二次验证码错误」。
 # 邮件通道凭据（阿里云邮件推送等）：放 ~/.mim/smtp.env，权限 600，不入库。
-SMTP_ENV="${MIM_SMTP_ENV:-$HOME/.mim/smtp.env}"
-if [[ -f "$SMTP_ENV" ]]; then
-    set -a
-    # shellcheck disable=SC1090
-    . "$SMTP_ENV"
-    set +a
-fi
+for env_file in "${MIM_SMTP_ENV:-$HOME/.mim/smtp.env}" "${MIM_PUSH_ENV:-$HOME/.mim/push.env}"; do
+    if [[ -f "$env_file" ]]; then
+        set -a
+        # shellcheck disable=SC1090
+        . "$env_file"
+        set +a
+    fi
+done
 
 KEY_DIR="${MIM_KEY_DIR:-$HOME/.mim/keys}"
 if [[ -z "${MIM_EMAIL_KEY_FILE:-}" && -f "$KEY_DIR/email.key" ]]; then

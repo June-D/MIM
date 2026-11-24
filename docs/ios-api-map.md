@@ -151,6 +151,7 @@ cd MIMiOS/MIMKit && swift run MIMKitSmoke --login http://127.0.0.1:8080 composea
 | 阶段 | 接口 | 说明 |
 |---|---|---|
 | M1 登录 | `POST /login/token` | 账号密码 + 设备名 + 可选二次验证码；返回 JWT |
+| 推送 | `POST /device/push` | 上报极光 registrationId（只登记当前令牌绑定的设备） |
 | M1 发钥 | `POST /device` | 登记设备（`{deviceId, deviceName}`），响应 data 是对象 |
 | | `POST /key` | 身份公钥（**Base64 SPKI**）+ `password` + 能力位 |
 | | `POST /prekey/signed` | `{preKeyId, publicKey, signature}` |

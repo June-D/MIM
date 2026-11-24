@@ -120,6 +120,44 @@ composebob  19:39       干净环境下的第一条  19:38   ← 对方发来（
   不确认的话同一密文每轮都会再下发，界面上表现为消息重复、时间戳不断刷新
   （我第一版就是这样，加了 ack 才干净）。
 
+## 推送（极光 JPush）
+
+服务端只是「叫醒」：推送正文固定为「你有新消息」，`extras` 带 `type/peer`，
+客户端被唤醒后仍然走 `/message/undelivered` 拉取并解密——**服务端没有 from 列，
+发送者被写在密文里，它连谁发的都不知道**。
+
+链路：
+
+```
+消息落库 → 目标设备没有 WS 连接 → 服务端调 POST https://api.jpush.cn/v3/push
+        → 极光 → APNs → 手机通知栏
+App 启动 → JPUSHService 拿 registrationID → POST /device/push 存到该设备名下
+```
+
+配置（都不入库）：
+
+```bash
+# ~/.mim/push.env
+MIM_JPUSH_APP_KEY=...
+MIM_JPUSH_MASTER_SECRET=...
+MIM_JPUSH_APNS_PRODUCTION=false
+```
+
+iOS 侧：SwiftPM 引入 `jpush-sdk 6.3.0` + `jcore-sdk 5.6.0`，`AppKey` 从 Info.plist
+的 `JPushAppKey` 读，**留空则整体跳过**（没配推送的环境照样能编译运行）。
+
+> 两个坑：
+> ① JPush 的 SPM 包**不导出 Swift 模块**，`import JPush` 会报
+>    「Unable to resolve module dependency」，必须用桥接头
+>    （`Sources/MIMiOS-Bridging-Header.h`）引入 `JPUSHService.h`；
+> ② `JPUSHRegisterDelegate` 的方法在 Swift 里签名对不上（NSInteger →
+>    UNAuthorizationOptions 的隐式转换），强类型声明会「不满足协议一致性」，
+>    所以 delegate 传 nil——前台靠 WebSocket 实时收，推送只负责后台。
+>
+> **前置条件**：APNs 证书/密钥只能由**付费** Apple 开发者账号创建。
+> 免费 Personal Team 无法开启 Push Notifications 能力，
+> entitlements 已备好（`MIMiOSApp.push.entitlements`）但默认不启用。
+
 ## 找回邮箱与邮箱找回密码
 
 - **绑定邮箱**：我 → 账号安全 → 找回邮箱（需要当前密码，服务端加密存储，只有本人看得到明文）；

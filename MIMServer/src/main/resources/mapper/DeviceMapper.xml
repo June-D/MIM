@@ -10,10 +10,12 @@
         <result column="last_seen" jdbcType="BIGINT" property="lastSeen"/>
         <result column="revoked" jdbcType="TINYINT" property="revoked"/>
         <result column="token_version" jdbcType="INTEGER" property="tokenVersion"/>
+        <result column="push_registration" jdbcType="VARCHAR" property="pushRegistration"/>
     </resultMap>
 
     <sql id="Base_Column_List">
-        username, device_id, device_name, crt_time, last_seen, revoked, token_version
+        username, device_id, device_name, crt_time, last_seen, revoked, token_version,
+        push_registration
     </sql>
 
     <insert id="upsert" parameterType="com.junesoon.mim.entity.Device">
@@ -51,6 +53,13 @@
     <update id="touch">
         update t_device
         set last_seen = #{lastSeen,jdbcType=BIGINT}
+        where username = #{username,jdbcType=VARCHAR}
+          and device_id = #{deviceId,jdbcType=VARCHAR}
+    </update>
+
+    <update id="updatePushRegistration">
+        update t_device
+        set push_registration = #{registrationId,jdbcType=VARCHAR}
         where username = #{username,jdbcType=VARCHAR}
           and device_id = #{deviceId,jdbcType=VARCHAR}
     </update>

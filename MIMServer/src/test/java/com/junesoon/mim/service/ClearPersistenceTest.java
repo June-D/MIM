@@ -59,7 +59,7 @@ class ClearPersistenceTest {
             MessageServiceImpl service = new MessageServiceImpl(
                 session.getMapper(MessageMapper.class),
                 session.getMapper(ConversationClearMapper.class),
-                null, null, null, null);
+                null, null, null, null, (JPushService) null);
             ClearResult result = service.clearConversation("probea", "probeb", true,
                 java.util.Collections.singletonList("tagAAAAAAAAAAAAAAAAAAAAAAAA1"));
             assertEquals(id, result.getClearedBeforeId());
