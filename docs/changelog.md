@@ -521,6 +521,11 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- 邮件通道实测接通（阿里云 DirectMail / smtpdm.aliyun.com:465）：新增可配的发件人显示名
+  `MIM_MAIL_FROM_NAME`（From 必须是已验证的发信地址，显示名单独传，原来硬编码成 "MIM"）。
+  实测：注册测试账号 → 绑定邮箱 → `/recover/email` → 服务端日志「已向用户 … 发送
+  找回密码验证码」，`/recover/reset` 对错码返回「验证码错误」。
+
 - 邮箱找回：iOS 增加「账号安全 → 找回邮箱」与登录页「忘记密码」（用户名 → 邮箱验证码 →
   新密码），接服务端 `/recover/email`、`/recover/reset`；邮件通道走 `~/.mim/smtp.env`
   （阿里云 DirectMail），`./start.sh` 自动加载。修掉 `EmailSender.isConfigured()`

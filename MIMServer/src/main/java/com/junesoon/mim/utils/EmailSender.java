@@ -38,6 +38,9 @@ public class EmailSender {
     @Value("${mim.mail.from:}")
     private String from;
 
+    @Value("${mim.mail.from-name:MIM 安全中心}")
+    private String fromName;
+
     @Value("${mim.mail.ssl:true}")
     private boolean ssl;
 
@@ -87,7 +90,8 @@ public class EmailSender {
             Session session = Session.getInstance(props, authenticator);
             MimeMessage message = new MimeMessage(session);
             String sender = StringUtils.hasText(from) ? from : username;
-            message.setFrom(new InternetAddress(sender, "MIM"));
+            // 显示名可配（阿里云要求 From 是已验证的发信地址，显示名单独给）。
+            message.setFrom(new InternetAddress(sender, fromName, "UTF-8"));
             message.setRecipients(Message.RecipientType.TO, InternetAddress.parse(to));
             message.setSubject(subject, "UTF-8");
             message.setText(body, "UTF-8");
