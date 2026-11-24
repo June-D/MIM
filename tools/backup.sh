@@ -5,9 +5,12 @@
 #   tools/backup.sh [输出目录]        # 默认 ./backups
 #
 # 环境变量（默认值对应文档里的本地部署）：
-#   MIM_DB_HOST=127.0.0.1  MIM_DB_PORT=3306  MIM_DB_NAME=mim_core
+#   MIM_DB_HOST=127.0.0.1  MIM_DB_PORT=13306  MIM_DB_NAME=mim_core
 #   MIM_DB_USERNAME=root   MIM_DB_PASSWORD=
-#   MIM_MEDIA_DIR=MIMServer/data/media
+#   MIM_MEDIA_DIR=~/MIM-data/media
+#
+# 默认值对齐 `./start.sh` 起的本地环境（数据在 ~/MIM-data），
+# 换机器/换端口时用环境变量覆盖即可。
 #
 # 说明：密钥（MIM_MASTER_KEY / MIM_EMAIL_KEY / TLS keystore）**不在**备份里，
 # 它们在环境变量或外部密钥管理服务中，必须单独保管；丢了这两把钥匙，
@@ -16,11 +19,11 @@ set -euo pipefail
 
 OUT_ROOT="${1:-./backups}"
 DB_HOST="${MIM_DB_HOST:-127.0.0.1}"
-DB_PORT="${MIM_DB_PORT:-3306}"
+DB_PORT="${MIM_DB_PORT:-13306}"
 DB_NAME="${MIM_DB_NAME:-mim_core}"
 DB_USER="${MIM_DB_USERNAME:-root}"
 DB_PASS="${MIM_DB_PASSWORD:-}"
-MEDIA_DIR="${MIM_MEDIA_DIR:-MIMServer/data/media}"
+MEDIA_DIR="${MIM_MEDIA_DIR:-$HOME/MIM-data/media}"
 
 command -v mysqldump >/dev/null || { echo "缺少 mysqldump（MySQL 客户端工具）" >&2; exit 1; }
 command -v tar >/dev/null || { echo "缺少 tar" >&2; exit 1; }
