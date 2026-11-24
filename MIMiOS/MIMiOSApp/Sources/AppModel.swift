@@ -217,7 +217,7 @@ final class AppModel: ObservableObject {
             )
             self.client = client
             self.token = token
-            try await startSession(client: client)
+            try await startSession(client: client, password: password)
             saveSession(token: token)
         } catch MIMApiError.twoFactorRequired(let message) {
             needsTwoFactor = true
@@ -310,13 +310,16 @@ final class AppModel: ObservableObject {
     #endif
 
     /// 登录成功后的统一初始化（登录与恢复登录态共用）。
-    private func startSession(client: MIMClient) async throws {
+    private func startSession(client: MIMClient, password: String? = nil) async throws {
         let bundle = try ensureIdentityBundle()
         self.bundle = bundle
         // 登记设备与发布公钥是两件事：换账号时设备 id 变了，必须重新登记，
         // 否则服务端回「设备未注册或已注销」。
         try await client.registerDevice(deviceName: UIDevice.current.name)
         try await publishIfNeeded(client: client, bundle: bundle)
+        if let password, !password.isEmpty {
+            try? await reconcilePublishedIdentity(client: client, bundle: bundle, password: password)
+        }
 
         vault = MessageVault(root: Self.vaultRoot(), account: username)
         snapshot = vault?.load() ?? MessageVault.Snapshot()
@@ -593,6 +596,25 @@ final class AppModel: ObservableObject {
         } catch {
             self.error = "注销失败：\(error)"
         }
+    }
+
+    /// 重置本机身份：删掉当前账号的密钥包、设备标识与本地库，然后退出登录。
+    ///
+    /// 用途只有一个但很关键：本机身份与服务端登记的对不上时（例如换账号后
+    /// 沿用了上一个账号的身份），对方会一直显示旧名字，只能重新生成身份。
+    func resetIdentity() {
+        guard !username.isEmpty else { return }
+        for base in [Self.identityAccount, Self.deviceIdAccount, Self.publishedAccount] {
+            keychain.delete(account: Self.account(base, username))
+        }
+        try? FileManager.default.removeItem(
+            at: MessageVault(root: Self.vaultRoot(), account: username).url
+        )
+        snapshot = MessageVault.Snapshot()
+        messages = []
+        conversations = []
+        logout()
+        notice = "已重置本机身份，请重新登录"
     }
 
     /// 只清本地聊天记录（身份与登录态保留）。
@@ -1119,6 +1141,29 @@ final class AppModel: ObservableObject {
             bundle: bundle
         )
         try? keychain.set(Data("1".utf8), account: Self.account(Self.publishedAccount, username))
+    }
+
+    /// 校准「本地身份」与「服务端登记的指纹」。
+    ///
+    /// 两者不一致时的现象很迷惑：**对方联系人列表里显示的是旧账号的名字**，
+    /// 因为对方是按身份公钥认人的。发现不一致就用当前密码重新发布公钥。
+    private func reconcilePublishedIdentity(
+        client: MIMClient, bundle: KeyBundle, password: String
+    ) async throws {
+        let keys = try await client.peerDevices(username)
+        guard let mine = keys.first(where: { $0.deviceId == client.deviceId }) else { return }
+        let local = Self.fullFingerprint(ofHex: bundle.identity.publicKey)
+        let remote = (mine.fingerprint ?? "").uppercased()
+        guard !remote.isEmpty, remote != local else { return }
+        try await client.publishKeys(
+            password: password, deviceName: UIDevice.current.name, bundle: bundle
+        )
+        notice = "本机身份与服务端不一致，已重新发布公钥"
+    }
+
+    /// SPKI DER 的 SHA-256（大写十六进制，无分隔）。
+    static func fullFingerprint(ofHex hex: String) -> String {
+        SHA256.hash(data: Data(hexString: hex)).map { String(format: "%02X", $0) }.joined()
     }
 
     /// 本机身份密钥包：首次登录生成并只写 Keychain。

@@ -85,6 +85,9 @@ public final class MessageVault {
     private static let keyAccount = "state-key"
 
     private let fileURL: URL
+
+    /// 库文件位置（删除整库时用）。
+    public var url: URL { fileURL }
     private let keychain: Keychain
     private let account: String
 

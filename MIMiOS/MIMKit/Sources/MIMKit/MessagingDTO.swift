@@ -6,6 +6,8 @@ public struct PeerKey: Decodable, Sendable {
     public let deviceId: String
     public let publicKey: String
     public let algorithm: String?
+    /// 服务端按 SPKI 算的指纹：用来判断「本机身份是否与服务端登记的一致」。
+    public let fingerprint: String?
 }
 
 public struct PreKeyBundle: Decodable, Sendable {

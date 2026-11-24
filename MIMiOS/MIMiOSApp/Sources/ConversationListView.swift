@@ -22,13 +22,20 @@ struct ConversationListView: View {
             }
             if model.conversations.isEmpty {
                 Section {
-                    VStack(alignment: .leading, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 10) {
                         Text("还没有会话").font(.headline)
-                        Text("点右上角「写消息」输入对方用户名开始聊天。消息端到端加密，服务端只转发密文。")
+                        Text("输入对方用户名即可开始。消息端到端加密，服务端只转发密文。")
                             .font(.footnote)
                             .foregroundStyle(.secondary)
+                        Button {
+                            showNewChat = true
+                        } label: {
+                            Label("开始新对话", systemImage: "person.badge.plus")
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 2)
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 8)
                 }
             }
 
@@ -96,7 +103,7 @@ struct ConversationListView: View {
                 Button {
                     showNewChat = true
                 } label: {
-                    Label("写消息", systemImage: "square.and.pencil")
+                    Label("新对话（输入用户名）", systemImage: "person.badge.plus")
                 }
                 Button {
                     showDevices = true
@@ -131,8 +138,9 @@ struct ConversationListView: View {
                 Button {
                     showNewChat = true
                 } label: {
-                    Image(systemName: "square.and.pencil")
+                    Image(systemName: "person.badge.plus")
                 }
+                .accessibilityLabel("新对话 / 加好友")
             }
         }
         .sheet(isPresented: $showNewChat) {
@@ -141,7 +149,6 @@ struct ConversationListView: View {
         .sheet(isPresented: $showDevices) {
             NavigationStack { DeviceListView().environmentObject(model) }
         }
-        .refreshable { await model.receiveOnce() }
     }
 
 }
@@ -169,7 +176,7 @@ private struct NewChatSheet: View {
                         .foregroundStyle(.secondary)
                 }
             }
-            .navigationTitle("写消息")
+            .navigationTitle("新对话")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("取消") { dismiss() }

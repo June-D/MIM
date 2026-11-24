@@ -7,6 +7,7 @@ import MIMKit
 struct DeviceListView: View {
     @EnvironmentObject private var model: AppModel
     @State private var showWipeConfirm = false
+    @State private var showResetConfirm = false
 
     var body: some View {
         List {
@@ -58,11 +59,23 @@ struct DeviceListView: View {
                 Button("清除本地聊天记录", role: .destructive) {
                     showWipeConfirm = true
                 }
+                // 身份与服务端对不上时（换账号后对方仍显示旧名字）只能重来。
+                Button("重置本机身份", role: .destructive) {
+                    showResetConfirm = true
+                }
                 Button("退出登录", role: .destructive) { model.logout() }
             }
         }
         .navigationTitle("我的设备")
         .refreshable { await model.loadDevices() }
+        .confirmationDialog(
+            "将删除本机的身份密钥与本地聊天记录，然后退出登录。"
+            + "对方会看到你重新成为「新设备」。",
+            isPresented: $showResetConfirm, titleVisibility: .visible
+        ) {
+            Button("重置身份", role: .destructive) { model.resetIdentity() }
+            Button("取消", role: .cancel) {}
+        }
         .confirmationDialog("只清本机的聊天记录，身份与登录态保留", isPresented: $showWipeConfirm,
                             titleVisibility: .visible) {
             Button("清除记录", role: .destructive) { model.wipeLocalMessages() }
