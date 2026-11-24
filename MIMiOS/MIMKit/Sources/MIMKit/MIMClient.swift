@@ -34,26 +34,53 @@ struct DeviceListPayload: Decodable {
 /// 令牌不加进 Keychain：由调用方决定存哪，客户端只持有内存副本。
 public final class MIMClient: @unchecked Sendable {
 
+    /// 调试/测试工具的默认锁定证书（命令行冒烟、集成脚本用）。
+    ///
+    /// 正式代码应显式传 `pinnedCertificate:`，别依赖这个全局值——
+    /// 它存在的唯一理由是「命令行工具不想在每个构造点都传一遍证书」。
+    public static var defaultPinnedCertificate: Data?
+
     private static let twoFactorRequired = 40102
     private static let invalidCredentials = 40001
 
     public let baseURL: URL
     public let deviceId: String
     private let session: URLSession
+    /// 证书锁定器（只在自签环境下存在）；握手失败时它记着原因。
+    private let pinner: PinnedSession?
     private(set) var token: String?
 
     /// 当前令牌（供 WebSocket 等复用；调用方不必自己再存一份）。
     public var currentToken: String? { token }
 
-    public init(baseURL: URL, deviceId: String, token: String? = nil) {
+    /// - Parameter pinnedCertificate: 自签证书 DER。给了就只信它（调试期用），
+    ///   不给则走系统默认校验（正式 CA 签发的证书）。
+    public init(baseURL: URL, deviceId: String, token: String? = nil,
+                pinnedCertificate: Data? = nil) {
         self.baseURL = baseURL
         self.deviceId = deviceId
         self.token = token
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 20
         configuration.timeoutIntervalForResource = 60
-        self.session = URLSession(configuration: configuration)
+        let pinData = pinnedCertificate ?? Self.defaultPinnedCertificate
+        if let pinData, let pinned = PinnedSession(certificateDER: pinData) {
+            self.pinner = pinned
+            self.session = pinned.makeSession(configuration: configuration)
+        } else {
+            self.pinner = nil
+            self.session = URLSession(configuration: configuration)
+        }
     }
+
+    /// 最近一次 TLS 握手失败的原因（证书指纹不匹配等）。
+    ///
+    /// URLSession 在委托取消认证挑战时只会报 `cancelled`，
+    /// 上层必须能拿到真正的原因，否则「登录失败」永远查不到点子上。
+    public var lastTrustFailure: String? { pinner?.lastFailure }
+
+    /// 传输层会话（WebSocket 复用同一个，避免两套证书校验逻辑）。
+    public var transportSession: URLSession { session }
 
     /// 登录：`POST /login/token`，响应 `data` 是 JWT 字符串。
     @discardableResult

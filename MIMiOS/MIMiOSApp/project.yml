@@ -19,6 +19,7 @@ targets:
     platform: iOS
     sources:
       - Sources
+      - Resources
     dependencies:
       - package: MIMKit
         product: MIMKit
@@ -28,12 +29,20 @@ targets:
         CFBundleDisplayName: MiM
         CFBundleShortVersionString: "0.1.0"
         UILaunchScreen: {}
+        # 录音权限文案。**必须写在这里**：XcodeGen 会用本文件的 properties
+        # 覆盖 Sources/Info.plist，手工改后者会在下次 generate 时被冲掉；
+        # 而缺这条 key 时，一请求麦克风权限系统就直接杀掉进程（表现为「点一下秒退」）。
+        NSMicrophoneUsageDescription: 录制语音消息。录音只在本机加密后上传，服务端只能看到密文。
         # 模拟器要连本机服务端（http://127.0.0.1:8080）；
         # 真机请改用 https，客户端会拒绝非回环的明文地址。
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
     settings:
       base:
+        # 装真机时 Bundle Identifier 必须全局唯一；若 Xcode 报「identifier 不可用」，
+        # 把它改成 ai.mim.app.<你的名字> 即可（免费账号也能签）。
         PRODUCT_BUNDLE_IDENTIFIER: ai.mim.app
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"
+        # 自动签名：免费 Apple ID（Personal Team）就能装到自己的手机，证书 7 天有效。
+        CODE_SIGN_STYLE: Automatic

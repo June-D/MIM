@@ -521,6 +521,12 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- 修复真机点麦克风「秒退」：`NSMicrophoneUsageDescription` 被我手工写进了
+  `Sources/Info.plist`，而 XcodeGen 每次 generate 都会用 `project.yml` 的
+  properties 覆盖它——于是包里没有这条 key，请求麦克风时系统直接终止进程。
+  改到 `project.yml` 的 `info.properties` 里，并在 README 写明「plist 属性
+  以 project.yml 为准」。
+
 - iOS 撤回与清除会话：长按气泡撤回（服务端按 clientMsgId 撤掉所有副本并抹密文）、
   右上角菜单单方清除会话；收到 100014 时按 clientMsgId **更新原消息**而不是追加。
   修掉两个问题：撤回接口强制要求 `tags`（`40001 缺少会话标签`），iOS 从会话索引里

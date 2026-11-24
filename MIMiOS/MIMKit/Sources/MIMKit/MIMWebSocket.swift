@@ -29,13 +29,15 @@ public final class MIMWebSocket: @unchecked Sendable {
     private var task: URLSessionWebSocketTask?
     private var running = false
 
-    public init(baseURL: URL, token: String, deviceId: String) {
+    /// - Parameter session: 复用 HTTP 客户端的会话（含证书锁定），
+    ///   否则 wss 会退回系统默认校验、在自签环境下连不上。
+    public init(baseURL: URL, token: String, deviceId: String, session: URLSession? = nil) {
         self.baseURL = baseURL
         self.token = token
         self.deviceId = deviceId
         let configuration = URLSessionConfiguration.ephemeral
         configuration.timeoutIntervalForRequest = 30
-        self.session = URLSession(configuration: configuration)
+        self.session = session ?? URLSession(configuration: configuration)
     }
 
     /// 事件流。调用方 `for await` 消费；取消消费任务即断开。

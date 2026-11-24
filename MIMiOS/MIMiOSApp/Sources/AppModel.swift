@@ -20,8 +20,11 @@ struct Conversation: Identifiable, Equatable {
 @MainActor
 final class AppModel: ObservableObject {
 
-    /// 模拟器连本机；真机改成 https 地址（客户端会拒绝非回环明文）。
-    @Published var serverURL = "http://127.0.0.1:8080"
+    /// 默认指向本机局域网地址（真机用这个）。
+    ///
+    /// 真机不能连 `127.0.0.1`，也**不能**用明文 http——客户端只放行回环地址的明文。
+    /// 所以服务端要开 TLS，并在手机上信任这张自签证书（见 MIMiOS/README）。
+    @Published var serverURL = "https://172.20.10.2:8443"
     @Published var username = ""
     @Published var password = ""
     @Published var twoFactorCode = ""
@@ -115,7 +118,10 @@ final class AppModel: ObservableObject {
         defer { busy = false }
 
         deviceId = loadDeviceId()
-        let client = MIMClient(baseURL: url, deviceId: deviceId)
+        let client = MIMClient(
+            baseURL: url, deviceId: deviceId,
+            pinnedCertificate: Self.pinnedCertificate()
+        )
         do {
             let token = try await client.login(
                 username: username, password: password,
@@ -566,7 +572,10 @@ final class AppModel: ObservableObject {
     private func startPush() {
         pushTask?.cancel()
         guard let url = URL(string: serverURL), let token else { return }
-        let socket = MIMWebSocket(baseURL: url, token: token, deviceId: deviceId)
+        let socket = MIMWebSocket(
+            baseURL: url, token: token, deviceId: deviceId,
+            session: client?.transportSession
+        )
         pushTask = Task { [weak self] in
             for await event in socket.events() {
                 guard let self else { return }
@@ -752,6 +761,17 @@ final class AppModel: ObservableObject {
         case "mp4", "mov": return "video/mp4"
         default: return "application/octet-stream"
         }
+    }
+
+    /// 随包分发的自签证书（调试期 SSL 锁定用）。
+    ///
+    /// 用锁定代替「在手机上装描述文件 + 打开完全信任」：少一步人工操作，
+    /// 也不会因为漏点那个开关而得到一句莫名其妙的「无法连接」。
+    static func pinnedCertificate() -> Data? {
+        guard let url = Bundle.main.url(forResource: "mim-local-ca", withExtension: "cer") else {
+            return nil
+        }
+        return try? Data(contentsOf: url)
     }
 
     static func vaultRoot() -> URL {

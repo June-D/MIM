@@ -27,6 +27,13 @@ func hex(_ value: String) -> Data {
 
 let tag = "gTq0Y2v5Qm9m8Zt0k3Wc2Xr7Lp4Nb1Hs6Jd9Ff2Ka5E"
 
+// 服务端开了 TLS（自签）时，命令行工具也要锁定同一张证书：
+//   MIM_CA_PATH=/tmp/xxx/mim.cer swift run MIMKitSmoke --send https://...
+if let caPath = ProcessInfo.processInfo.environment["MIM_CA_PATH"],
+   let caData = try? Data(contentsOf: URL(fileURLWithPath: caPath)) {
+    MIMClient.defaultPinnedCertificate = caData
+}
+
 /// `--login <url> <user> <password>`：对真服务端跑一遍 M1 的 HTTP 路径。
 /// 这是 iOS 侧与后端的第一条真实链路，比看文档可靠。
 func liveSmoke(_ arguments: [String]) async {

@@ -145,6 +145,11 @@ composebob  19:39       干净环境下的第一条  19:38   ← 对方发来（
 接收侧三种气泡都能显示（截图里：对方发来的「月度报表.xlsx 48 KB」与 1 秒语音，
 以及自己发出的「季度预算.xlsx 24 KB」）。
 
+> **权限文案必须写在 `project.yml` 的 `info.properties` 里**，不要直接改
+> `Sources/Info.plist`：XcodeGen 每次 `generate` 都会用 properties 覆盖那个文件。
+> 缺 `NSMicrophoneUsageDescription` 时，一点麦克风按钮系统就**直接杀掉进程**
+> （表现为「点一下秒退」，日志里是 TCC 的 privacy-sensitive data 崩溃）。
+>
 > 已知未自动化项：**录音**需要麦克风权限弹窗，无法脚本化验证；
 > 播放链路（解密 → AVAudioPlayer）已实测，播放结束后按钮会复位。
 
