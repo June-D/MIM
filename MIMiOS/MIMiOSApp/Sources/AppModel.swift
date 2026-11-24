@@ -53,6 +53,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var pushConnected = false
     /// 已解密并解码好的图片（key 是媒体 id）。只在内存里，不落盘明文。
     @Published private(set) var loadedImages: [String: UIImage] = [:]
+    /// 头像（key 是用户名）。头像是公开资料，服务端可读，不做 E2EE。
+    @Published private(set) var avatars: [String: UIImage] = [:]
     /// 正在播放的语音媒体 id（用于按钮状态）。
     @Published private(set) var playingVoiceId: String?
     /// 正在录音。
@@ -72,6 +74,12 @@ final class AppModel: ObservableObject {
     private var pushTask: Task<Void, Never>?
 
     private static let identityAccount = "identity-bundle"
+    /// 登录态（令牌 + 账号 + 服务端地址）存 Keychain：
+    /// 重开 App 不用重新登录；卸载重装后 Keychain 仍会保留，这也是我们想要的
+    /// （身份私钥本来就在 Keychain 里，两者生命周期一致）。
+    private static let sessionToken = "session-token"
+    private static let sessionUser = "session-user"
+    private static let sessionServer = "session-server"
     private static let deviceIdAccount = "device-id"
     private static let publishedAccount = "keys-published"
 
@@ -80,6 +88,53 @@ final class AppModel: ObservableObject {
     var shouldAutoLogin = false
     var autoOpenPeer: String?
     #endif
+
+    /// 启动时尝试恢复上次的登录态。
+    ///
+    /// 只信任 Keychain 里的令牌不够——它可能已过期或被服务端吊销，
+    /// 所以先拿一个轻量接口探一次（`GET /device`），通过了才真正进入登录态。
+    func restoreSession() async {
+        guard let tokenData = keychain.get(account: Self.sessionToken),
+              let token = String(data: tokenData, encoding: .utf8), !token.isEmpty,
+              let userData = keychain.get(account: Self.sessionUser),
+              let user = String(data: userData, encoding: .utf8), !user.isEmpty,
+              let serverData = keychain.get(account: Self.sessionServer),
+              let server = String(data: serverData, encoding: .utf8),
+              let url = URL(string: server) else {
+            return
+        }
+        let client = MIMClient(
+            baseURL: url, deviceId: loadDeviceId(),
+            token: token, pinnedCertificate: Self.pinnedCertificate()
+        )
+        busy = true
+        defer { busy = false }
+        do {
+            let devices = try await client.devices()
+            self.serverURL = server
+            self.username = user
+            self.client = client
+            self.token = token
+            self.deviceId = client.deviceId
+            self.devices = devices
+            try await startSession(client: client)
+        } catch {
+            // 令牌失效（服务端重启、过期、被吊销）就静默回到登录页，不打扰用户。
+            clearSavedSession()
+        }
+    }
+
+    private func saveSession(token: String) {
+        try? keychain.set(Data(token.utf8), account: Self.sessionToken)
+        try? keychain.set(Data(username.utf8), account: Self.sessionUser)
+        try? keychain.set(Data(serverURL.utf8), account: Self.sessionServer)
+    }
+
+    private func clearSavedSession() {
+        keychain.delete(account: Self.sessionToken)
+        keychain.delete(account: Self.sessionUser)
+        keychain.delete(account: Self.sessionServer)
+    }
 
     // MARK: - 设备标识
 
@@ -129,76 +184,104 @@ final class AppModel: ObservableObject {
             )
             self.client = client
             self.token = token
-
-            let bundle = try ensureIdentityBundle()
-            try await publishIfNeeded(client: client, bundle: bundle)
-
-            vault = MessageVault(root: Self.vaultRoot(), account: username)
-            snapshot = vault?.load() ?? MessageVault.Snapshot()
-            migrateLegacyMediaMessages()
-            session = MessagingSession(
-                client: client, bundle: bundle,
-                store: snapshot.store, sessions: snapshot.sessions
-            )
-            refreshConversations()
-
-            #if DEBUG
-            if let peer = autoOpenPeer {
-                autoOpenPeer = nil
-                openChat(peer)
-            }
-            // 联调：应用内生成一张图片发出去，验证「App 加密 → 上传 → 发消息」整条路径。
-            if ProcessInfo.processInfo.environment["MIM_DEMO_SEND_IMAGE"] == "1",
-               activePeer != nil {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                await sendImage(Self.demoImage(), name: "demo.png")
-            }
-            // 联调：应用内发一个文件，验证 sendFile 路径（文档选择器无法自动化）。
-            if ProcessInfo.processInfo.environment["MIM_DEMO_SEND_FILE"] == "1",
-               activePeer != nil {
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                let bytes = Data((0..<24_000).map { UInt8($0 % 251) })
-                await sendFile(data: bytes, name: "季度预算.xlsx")
-            }
-            // 联调：自动播放最后一条语音，验证解密与 AVAudioPlayer 初始化。
-            if ProcessInfo.processInfo.environment["MIM_DEMO_PLAY_VOICE"] == "1" {
-                try? await Task.sleep(nanoseconds: 4_000_000_000)
-                if let voice = snapshot.messages.last(where: { $0.kind == "voice" }) {
-                    await toggleVoice(voice)
-                }
-            }
-            // 截图/联调时用环境变量触发一次发送，验证「App → 服务端」这条路径。
-            if let text = ProcessInfo.processInfo.environment["MIM_DEMO_SEND_TEXT"],
-               !text.isEmpty, activePeer != nil {
-                // 等长连接就绪再发：否则对方的「已读回执」可能在 WS 连上之前就被推掉，
-                // 截图上就看不到「已读」——这是验证脚本的时序问题，不是功能问题。
-                try? await Task.sleep(nanoseconds: 3_000_000_000)
-                draft = text
-                await sendDraft()
-            }
-            // 联调：发完立刻撤回，验证「撤回」这条链路（弹窗无法自动化）。
-            if ProcessInfo.processInfo.environment["MIM_DEMO_RECALL"] == "1" {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                if let last = snapshot.messages.last(where: { $0.fromMe && !$0.recalled }) {
-                    await recall(last)
-                }
-            }
-            // 联调：发完立刻清除会话。
-            if ProcessInfo.processInfo.environment["MIM_DEMO_CLEAR"] == "1" {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
-                await clearCurrentConversation()
-            }
-            #endif
-            startPush()
-            startPolling()
+            try await startSession(client: client)
+            saveSession(token: token)
         } catch MIMApiError.twoFactorRequired(let message) {
             needsTwoFactor = true
             error = message
         } catch MIMApiError.invalidCredentials(let message) {
             error = message
         } catch {
-            self.error = "\(error)"
+            // `cancelled` 基本只有一种来源：TLS 握手被证书锁定拒绝了。
+            // 把真实原因翻出来，否则用户只看到一句「登录失败」。
+            if case MIMApiError.transport(let message) = error,
+               message.lowercased().contains("cancel") {
+                self.error = client.lastTrustFailure
+                    ?? "连接被中断：可能是网络不通，或服务器证书未被信任"
+            } else {
+                self.error = "\(error)"
+            }
         }
+    }
+
+    /// 清掉错误提示（界面上有可点的关闭按钮）。
+    func dismissError() {
+        error = nil
+    }
+
+    #if DEBUG
+    /// 联调钩子：环境变量驱动的自动化动作（截图、冒烟用）。
+    ///
+    /// 全部包在 `#if DEBUG` 里——发布版不存在这些路径，也就没有「凭据能从环境变量注入」
+    /// 这种奇怪的攻击面。
+    private func runDemoHooks() async {
+    if let peer = autoOpenPeer {
+        autoOpenPeer = nil
+        openChat(peer)
+    }
+    // 联调：应用内生成一张图片发出去，验证「App 加密 → 上传 → 发消息」整条路径。
+    if ProcessInfo.processInfo.environment["MIM_DEMO_SEND_IMAGE"] == "1",
+       activePeer != nil {
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        await sendImage(Self.demoImage(), name: "demo.png")
+    }
+    // 联调：应用内发一个文件，验证 sendFile 路径（文档选择器无法自动化）。
+    if ProcessInfo.processInfo.environment["MIM_DEMO_SEND_FILE"] == "1",
+       activePeer != nil {
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        let bytes = Data((0..<24_000).map { UInt8($0 % 251) })
+        await sendFile(data: bytes, name: "季度预算.xlsx")
+    }
+    // 联调：自动播放最后一条语音，验证解密与 AVAudioPlayer 初始化。
+    if ProcessInfo.processInfo.environment["MIM_DEMO_PLAY_VOICE"] == "1" {
+        try? await Task.sleep(nanoseconds: 4_000_000_000)
+        if let voice = snapshot.messages.last(where: { $0.kind == "voice" }) {
+            await toggleVoice(voice)
+        }
+    }
+    // 截图/联调时用环境变量触发一次发送，验证「App → 服务端」这条路径。
+    if let text = ProcessInfo.processInfo.environment["MIM_DEMO_SEND_TEXT"],
+       !text.isEmpty, activePeer != nil {
+        // 等长连接就绪再发：否则对方的「已读回执」可能在 WS 连上之前就被推掉，
+        // 截图上就看不到「已读」——这是验证脚本的时序问题，不是功能问题。
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        draft = text
+        await sendDraft()
+    }
+    // 联调：发完立刻撤回，验证「撤回」这条链路（弹窗无法自动化）。
+    if ProcessInfo.processInfo.environment["MIM_DEMO_RECALL"] == "1" {
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        if let last = snapshot.messages.last(where: { $0.fromMe && !$0.recalled }) {
+            await recall(last)
+        }
+    }
+    // 联调：发完立刻清除会话。
+    if ProcessInfo.processInfo.environment["MIM_DEMO_CLEAR"] == "1" {
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        await clearCurrentConversation()
+    }
+    }
+    #endif
+
+    /// 登录成功后的统一初始化（登录与恢复登录态共用）。
+    private func startSession(client: MIMClient) async throws {
+        let bundle = try ensureIdentityBundle()
+        try await publishIfNeeded(client: client, bundle: bundle)
+
+        vault = MessageVault(root: Self.vaultRoot(), account: username)
+        snapshot = vault?.load() ?? MessageVault.Snapshot()
+        migrateLegacyMediaMessages()
+        session = MessagingSession(
+            client: client, bundle: bundle,
+            store: snapshot.store, sessions: snapshot.sessions
+        )
+        refreshConversations()
+        await loadAvatar(username)
+        #if DEBUG
+        await runDemoHooks()
+        #endif
+        startPush()
+        startPolling()
     }
 
     func logout() {
@@ -650,6 +733,29 @@ final class AppModel: ObservableObject {
             .sorted { $0.epochMs < $1.epochMs }
     }
 
+    /// 按需加载头像：已加载过就跳过，失败保持首字母，不影响列表。
+    func loadAvatar(_ name: String) async {
+        guard !name.isEmpty, avatars[name] == nil, let client else { return }
+        guard let data = try? await client.avatar(name), let image = UIImage(data: data) else {
+            return
+        }
+        avatars[name] = image
+    }
+
+    /// 上传自己的头像（PNG 字节）。调用方负责重编码与丢 EXIF。
+    func uploadAvatar(_ png: Data) async {
+        guard let client, let selfName = token == nil ? nil : username as String? else { return }
+        do {
+            try await client.uploadAvatar(png)
+            if let image = UIImage(data: png) {
+                avatars[selfName] = image
+            }
+            notice = "头像已更新"
+        } catch {
+            self.error = "头像上传失败：\(error)"
+        }
+    }
+
     private func refreshConversations() {
         var latest: [String: Conversation] = [:]
         let readUpTo = snapshot.readUpTo ?? [:]
@@ -668,6 +774,9 @@ final class AppModel: ObservableObject {
             }
         }
         conversations = latest.values.sorted { $0.lastEpochMs > $1.lastEpochMs }
+        for peer in conversations.prefix(30).map(\.id) where avatars[peer] == nil {
+            Task { await loadAvatar(peer) }
+        }
     }
 
     /// 我发出的这条，对方是否已读。

@@ -27,5 +27,10 @@ struct RootView: View {
                 ConversationListView()
             }
         }
+        .task {
+            // 冷启动先尝试恢复上次登录态：令牌有效就直接进会话列表，
+            // 无效则静默回到登录页（不弹错误，用户会当成正常启动）。
+            await model.restoreSession()
+        }
     }
 }

@@ -25,28 +25,38 @@ struct ConversationListView: View {
                     Button {
                         model.openChat(conversation.id)
                     } label: {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack {
-                                Text(conversation.id).font(.headline)
-                                if conversation.unread > 0 {
-                                    Text("\(conversation.unread)")
-                                        .font(.caption2.weight(.semibold))
-                                        .foregroundStyle(.white)
-                                        .padding(.horizontal, 7)
-                                        .padding(.vertical, 2)
-                                        .background(Color.accentColor, in: Capsule())
+                        HStack(spacing: 12) {
+                            AvatarView(
+                                name: conversation.id,
+                                image: model.avatars[conversation.id],
+                                size: 44
+                            )
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack {
+                                    Text(conversation.id).font(.headline)
+                                    Spacer()
+                                    Text(ChatTime.list(conversation.lastEpochMs))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                                Spacer()
-                                Text(Self.timeText(conversation.lastEpochMs))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                HStack(spacing: 6) {
+                                    Text(conversation.lastText)
+                                        .font(.subheadline)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                    Spacer()
+                                    if conversation.unread > 0 {
+                                        Text("\(conversation.unread)")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(.white)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 2)
+                                            .background(Color.accentColor, in: Capsule())
+                                    }
+                                }
                             }
-                            Text(conversation.lastText)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
                         }
-                        .padding(.vertical, 2)
+                        .padding(.vertical, 4)
                     }
                     .buttonStyle(.plain)
                 }
@@ -97,12 +107,6 @@ struct ConversationListView: View {
         .refreshable { await model.receiveOnce() }
     }
 
-    private static func timeText(_ epochMs: Int64) -> String {
-        let date = Date(timeIntervalSince1970: Double(epochMs) / 1000)
-        let formatter = DateFormatter()
-        formatter.dateFormat = Calendar.current.isDateInToday(date) ? "HH:mm" : "M/d"
-        return formatter.string(from: date)
-    }
 }
 
 /// 开始新会话：输入对方用户名。

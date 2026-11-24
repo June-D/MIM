@@ -18,13 +18,21 @@ struct ChatView: View {
             // 错误必须显示在聊天页：发送/撤回失败时用户在气泡上等反馈，
             // 只写到列表页的错误条等于没提示。
             if let error = model.error {
-                Text(error)
-                    .font(.footnote)
-                    .foregroundStyle(.red)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Color.red.opacity(0.08))
+                HStack(alignment: .top, spacing: 8) {
+                    Text(error)
+                        .font(.footnote)
+                        .foregroundStyle(.red)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    Button {
+                        model.dismissError()
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.vertical, 6)
+                .background(Color.red.opacity(0.08))
             }
         }
         .fileImporter(isPresented: $showFileImporter, allowedContentTypes: [.item]) { result in
@@ -56,6 +64,11 @@ struct ChatView: View {
                 Image(systemName: "chevron.left")
                     .font(.body.weight(.semibold))
             }
+            AvatarView(
+                name: model.activePeer ?? "",
+                image: model.avatars[model.activePeer ?? ""],
+                size: 32
+            )
             VStack(alignment: .leading, spacing: 2) {
                 Text(model.activePeer ?? "").font(.headline)
                 Text("端到端加密")
@@ -96,7 +109,16 @@ struct ChatView: View {
                             .foregroundStyle(.secondary)
                             .padding(.top, 24)
                     }
-                    ForEach(model.messages, id: \.id) { message in
+                    ForEach(Array(model.messages.enumerated()), id: \.element.id) { index, message in
+                        // 跨天插一条分隔：不然长会话里根本分不清哪天说的。
+                        let previous = index > 0 ? model.messages[index - 1].epochMs : nil
+                        if ChatTime.isNewDay(message.epochMs, previous: previous) {
+                            Text(ChatTime.dayDivider(message.epochMs))
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 6)
+                        }
                         MessageBubble(
                             message: message,
                             readByThem: model.isReadByPeer(message)
@@ -254,9 +276,7 @@ private struct MessageBubble: View {
     }
 
     private static func timeText(_ epochMs: Int64) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: Date(timeIntervalSince1970: Double(epochMs) / 1000))
+        ChatTime.clock(epochMs)
     }
 }
 

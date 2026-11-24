@@ -521,6 +521,10 @@
   WS 100022「另一台设备请求历史」。转发、确认弹窗与接收端归属还原待下一提交，
   设计见 `docs/device-sync-design.md`。
 
+- iOS 体验完善：登录态持久化（令牌存 Keychain，冷启动静默恢复，重开 App 不用重新登录）；
+  会话列表与聊天头部加头像（无头像回落首字母 + 哈希配色）；时间按「今天/昨天/日期」
+  格式化并在聊天页插日期分隔；错误横幅可手动关闭。
+
 - 修复真机点麦克风「秒退」：`NSMicrophoneUsageDescription` 被我手工写进了
   `Sources/Info.plist`，而 XcodeGen 每次 generate 都会用 `project.yml` 的
   properties 覆盖它——于是包里没有这条 key，请求麦克风时系统直接终止进程。
