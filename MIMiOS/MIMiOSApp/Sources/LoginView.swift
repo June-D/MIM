@@ -3,6 +3,7 @@ import SwiftUI
 /// 登录页。M1 的最小闭环：地址 + 账号 + 密码（+ 需要时的二次验证码）。
 struct LoginView: View {
     @EnvironmentObject private var model: AppModel
+    @State private var showForgot = false
 
     var body: some View {
         Form {
@@ -52,6 +53,15 @@ struct LoginView: View {
             }
         }
         .navigationTitle("MiM")
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button("忘记密码") { showForgot = true }
+                    .font(.footnote)
+            }
+        }
+        .sheet(isPresented: $showForgot) {
+            ForgotPasswordView()
+        }
         .onAppear {
             #if DEBUG
             model.applyDemoPrefill()

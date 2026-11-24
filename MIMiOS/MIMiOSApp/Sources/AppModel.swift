@@ -37,6 +37,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var deviceId: String = ""
     @Published private(set) var identityFingerprint = ""
     @Published private(set) var devices: [DeviceInfo] = []
+    /// 已绑定的找回邮箱（未绑定为 nil）。
+    @Published private(set) var boundEmail: String?
     /// 好友（通讯录）。会话能不能发消息由它决定：桌面端同样只允许和好友对话。
     @Published private(set) var contacts: [ChatUser] = []
     /// 好友申请（我收到与我发出的）。
@@ -353,6 +355,7 @@ final class AppModel: ObservableObject {
         )
         refreshConversations()
         await loadAvatar(username)
+        await loadProfile()
         await loadContacts()
         // 新设备本地没有历史：请其它设备转发最近的消息。
         // 只在「完全空库」时请求一次，避免每次启动都打扰另一台设备。
@@ -626,6 +629,44 @@ final class AppModel: ObservableObject {
         } catch {
             self.error = "无法播放：\(error)"
         }
+    }
+
+    // MARK: - 找回邮箱
+
+    /// 读取账号资料（拿当前绑定的邮箱）。
+    func loadProfile() async {
+        guard let client else { return }
+        boundEmail = try? await client.profile().email
+    }
+
+    /// 绑定 / 修改找回邮箱（需要当前密码）。
+    func bindEmail(password: String, email: String) async throws {
+        guard let client else { throw MIMApiError.transport("未登录") }
+        try await client.bindEmail(password: password, email: email)
+        boundEmail = email
+        showNotice("找回邮箱已更新为 \(email)")
+    }
+
+    /// 发送找回验证码。未登录也要能用，所以现造一个不带令牌的客户端。
+    func requestRecoveryCode(username: String) async throws {
+        let client = recoveryClient()
+        try await client.requestRecoveryCode(username: username)
+    }
+
+    func resetPassword(username: String, code: String, newPassword: String) async throws {
+        let client = recoveryClient()
+        try await client.resetPassword(
+            username: username, code: code, newPassword: newPassword
+        )
+    }
+
+    /// 找回流程用的临时客户端：同一服务端、同一张锁定证书，但不带登录态。
+    private func recoveryClient() -> MIMClient {
+        let url = URL(string: serverURL) ?? URL(string: "https://127.0.0.1:8443")!
+        return MIMClient(
+            baseURL: url, deviceId: loadDeviceId(),
+            pinnedCertificate: Self.pinnedCertificate()
+        )
     }
 
     // MARK: - 好友

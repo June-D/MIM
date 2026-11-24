@@ -41,8 +41,17 @@ public class EmailSender {
     @Value("${mim.mail.ssl:true}")
     private boolean ssl;
 
+    /**
+     * 是否真正可发信。
+     *
+     * <p>只看 host 是不够的：只填了服务器地址、没填发信地址与 SMTP 密码时，
+     * 连接会成功、认证会失败，用户拿到的错误是含糊的「邮件发送失败」。
+     * 这里要求三项齐全，缺哪项在启动日志里就能看出来。
+     */
     public boolean isConfigured() {
-        return StringUtils.hasText(host);
+        return StringUtils.hasText(host)
+            && StringUtils.hasText(username)
+            && StringUtils.hasText(password);
     }
 
     public void send(String to, String subject, String body) {

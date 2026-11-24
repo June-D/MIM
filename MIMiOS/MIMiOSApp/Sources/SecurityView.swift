@@ -25,6 +25,10 @@ struct SecurityView: View {
     @State private var disablePassword = ""
     @State private var disableCode = ""
 
+    // 找回邮箱
+    @State private var emailPassword = ""
+    @State private var emailInput = ""
+
     @State private var busy = false
 
     var body: some View {
@@ -94,6 +98,27 @@ struct SecurityView: View {
                 }
             }
 
+            Section {
+                LabeledContent("找回邮箱") {
+                    Text(model.boundEmail ?? "未绑定")
+                        .foregroundStyle(model.boundEmail == nil ? .secondary : .primary)
+                }
+                SecureField("当前密码", text: $emailPassword)
+                TextField("邮箱地址", text: $emailInput)
+                    .keyboardType(.emailAddress)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                Button(model.boundEmail == nil ? "绑定邮箱" : "更换邮箱") {
+                    Task { await bindEmail() }
+                }
+                .disabled(busy || emailPassword.isEmpty || !emailInput.contains("@"))
+            } header: {
+                Text("找回邮箱")
+            } footer: {
+                Text("绑定后忘记密码可用邮箱验证码重置。邮箱在服务端是加密存储的，"
+                     + "只有你本人能看到明文。")
+            }
+
             Section("修改密码") {
                 SecureField("当前密码", text: $oldPassword)
                 SecureField("新密码（≥8 位）", text: $newPassword)
@@ -111,7 +136,20 @@ struct SecurityView: View {
         .task { await refreshStatus() }
     }
 
+    private func bindEmail() async {
+        busy = true
+        defer { busy = false }
+        do {
+            try await model.bindEmail(password: emailPassword, email: emailInput)
+            emailPassword = ""
+            emailInput = ""
+        } catch {
+            model.report(error, prefix: "绑定邮箱失败")
+        }
+    }
+
     private func refreshStatus() async {
+        await model.loadProfile()
         loading = true
         defer { loading = false }
         twoFactorEnabled = (try? await model.twoFactorStatus()) ?? false

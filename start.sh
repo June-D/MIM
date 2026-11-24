@@ -69,7 +69,16 @@ if ! port_open 6379; then
     for _ in $(seq 1 15); do port_open 6379 && break; sleep 1; done
 fi
 
-# 3) 服务端：TLS + 数据目录 + 稳定密钥
+# 3) 邮件通道（阿里云邮件推送等）：凭据放 ~/.mim/smtp.env，不进仓库
+SMTP_ENV="${MIM_SMTP_ENV:-$HOME/.mim/smtp.env}"
+if [[ -f "$SMTP_ENV" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "$SMTP_ENV"
+    set +a
+fi
+
+# 4) 服务端：TLS + 数据目录 + 稳定密钥
 if ! port_open "$TLS_PORT"; then
     if [[ ! -f "$KEYSTORE" ]]; then
         echo "缺少 TLS 证书：${KEYSTORE}" >&2

@@ -90,6 +90,9 @@ public class RecoveryServiceImpl implements RecoveryService {
         }
         String email = emailCryptoService.decrypt(username, user.getEmailCipher());
         if (!StringUtils.hasText(email)) {
+            // 对外不区分「没这个账号」和「没绑邮箱」，避免账号枚举；
+            // 但日志要写清楚，否则运维只能看到「用户说收不到邮件」。
+            log.info("用户 {} 没有可用的找回邮箱（未绑定或密钥已更换），跳过发送", username);
             return;
         }
         try {
