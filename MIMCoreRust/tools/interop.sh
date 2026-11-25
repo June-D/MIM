@@ -14,12 +14,19 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CORE_DIR="$ROOT_DIR/MIMCore"
 RUST_DIR="$ROOT_DIR/MIMCoreRust"
 WORK_DIR="${1:-/tmp/mim-interop}"
-# 只需要 JDK 17：MIMCore 以 source/target 1.8 编译，可运行在 17 上。
-if [ -x "${CLIENT_JAVA_HOME:-}/bin/javac" ]; then
+# 选 JDK：CLIENT_JAVA_HOME 优先，其次沿用现成的 JAVA_HOME。
+#
+# 注意 `set -u` 下不能写成 `[ -x "${CLIENT_JAVA_HOME:-}/bin/javac" ]`：
+# 变量为空时它测的是 `/bin/javac`（Linux 上 /bin → /usr/bin，常常真的有 javac），
+# 于是走进「用 CLIENT_JAVA_HOME」的分支，再引用未定义变量就崩了。
+if [ -n "${CLIENT_JAVA_HOME:-}" ] && [ -x "$CLIENT_JAVA_HOME/bin/javac" ]; then
   export JAVA_HOME="$CLIENT_JAVA_HOME"
+elif [ -n "${JAVA_HOME:-}" ] && [ -x "$JAVA_HOME/bin/javac" ]; then
+  : # 现成的 JAVA_HOME 可用
 else
-  export JAVA_HOME="${JAVA_HOME:-$(/usr/libexec/java_home -v 17 2>/dev/null || true)}"
+  export JAVA_HOME="$(/usr/libexec/java_home -v 17 2>/dev/null || true)"
 fi
+: "${JAVA_HOME:?找不到 JDK：请设置 JAVA_HOME 或 CLIENT_JAVA_HOME}"
 export PATH="$JAVA_HOME/bin:$PATH"
 
 if ! command -v cargo >/dev/null 2>&1; then
